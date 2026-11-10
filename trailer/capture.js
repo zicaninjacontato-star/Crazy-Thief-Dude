@@ -25,7 +25,17 @@ const W = 1280, H = 576, FPS = 24, DT = 1000 / FPS;
     if (done) break;
   }
   console.log('carregado');
+  await page.waitForTimeout(800);
+  await page.click('#mnew');
+  for (let i = 0; i < 30; i++) {
+    await page.waitForTimeout(400);
+    const hid = await page.evaluate(() => getComputedStyle(document.getElementById('menu')).display === 'none');
+    if (hid) break;
+  }
+  console.log('jogo iniciado');
+  for (let i = 0; i < 20; i++) await page.evaluate(ms => window.__adv(ms), 41);
   await page.evaluate(() => { document.getElementById('hud').style.display = 'none'; });
+  await page.screenshot({ path: 'frames_check.jpg', type: 'jpeg' });
   let n = 0;
   const step = async (shot = true) => {
     await page.evaluate(ms => window.__adv(ms), DT);
