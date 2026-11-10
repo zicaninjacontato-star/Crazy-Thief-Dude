@@ -45,20 +45,29 @@ const W = 1280, H = 576, FPS = 24, DT = 1000 / FPS;
   const run = async (frames) => { await dbg('start'); for (let f = 0; f < frames; f++) { if (f % 30 == 29) await dbg('f' + f); await page.evaluate(([f, fr]) => window.__sc && window.__sc(f, fr), [f, frames]); await step(); } };
   const setup = async code => { await page.evaluate(code); for (let i = 0; i < 6; i++) await step(false); };
   const t0 = Date.now();
+  // piloto automático: segue a faixa e mantém o jogador/veículo inteiros
+  await page.evaluate(() => {
+    window.__ap = (v, lx, amp, f) => {
+      P.hp = 100; if (v) v.hp = Math.max(v.hp, 500);
+      const want = Math.atan2(lx - v.x, 22), err = want - v.yaw;
+      J.y = 1; J.x = Math.max(-1, Math.min(1, -err * 2.2)) + Math.sin(f / 16) * (amp || 0);
+    };
+  });
+  const REV = `P.dead=0;P.hp=100;P.rag=null;P.g.visible=true;J.x=0;J.y=0;`;
   // ---- S1: a pé, câmera orbitando
-  await setup(`PAUSED=false;P.veh=null;J.x=0;J.y=0;place(L[3]+3.5,-120,0);P.g.visible=true;window.__sc=(f)=>{ca+=.035}`);
+  await setup(`PAUSED=false;P.veh=null;${REV}place(L[3]+3.5,-120,0);window.__sc=(f)=>{ca+=.035}`);
   await run(72);
   // ---- S2: carro
-  await setup(`J.x=0;J.y=0;place(L[2]+3.5,-195,0);const c=spawnV('car',P.x,P.z+4,0,0xe02020,0);c.ai=0;c.tr=0;P.veh=c;window.__sc=(f)=>{J.y=1;J.x=Math.sin(f/18)*.12}`);
+  await setup(`${REV}place(L[2]+3.5,-195,0);const c=spawnV('car',P.x,P.z+4,0,0xe02020,0);c.ai=0;c.tr=0;P.veh=c;window.__sc=(f)=>{__ap(P.veh,L[2]+3.5,.05,f)}`);
   await run(120);
   // ---- S3: caos
-  await setup(`J.x=0;J.y=0;place(L[6]+3.5,-195,0);const c2=spawnV('car',P.x,P.z+4,0,0xf0c020,0);c2.ai=0;c2.tr=0;P.veh=c2;crime(3,P.x,P.z);window.__sc=(f)=>{J.y=1;J.x=Math.sin(f/14)*.1;const v=P.veh;if(v&&(f==24||f==62||f==98||f==125)){boom(v.x+Math.sin(v.yaw)*(26+f/6),v.z+Math.cos(v.yaw)*(26+f/6)+(f%2?4:-4))}}`);
+  await setup(`${REV}place(L[6]+3.5,-195,0);const c2=spawnV('car',P.x,P.z+4,0,0xf0c020,0);c2.ai=0;c2.tr=0;P.veh=c2;crime(3,P.x,P.z);window.__sc=(f)=>{__ap(P.veh,L[6]+3.5,.04,f);const v=P.veh;if(v&&(f==24||f==62||f==98||f==125)){boom(v.x+Math.sin(v.yaw)*(26+f/6),v.z+Math.cos(v.yaw)*(26+f/6)+(f%2?4:-4))}}`);
   await run(144);
   // ---- S4: moto
-  await setup(`J.x=0;J.y=0;place(L[1]+3.5,-195,0);const m=spawnV('moto',P.x,P.z+3,0,0x2255dd,0);m.ai=0;m.tr=0;P.veh=m;window.__sc=(f)=>{J.y=1;J.x=Math.sin(f/10)*.15}`);
+  await setup(`${REV}place(L[1]+3.5,-195,0);const m=spawnV('moto',P.x,P.z+3,0,0x2255dd,0);m.ai=0;m.tr=0;P.veh=m;window.__sc=(f)=>{__ap(P.veh,L[1]+3.5,.08,f)}`);
   await run(96);
-  // ---- S5: final, a pé em perseguição
-  await setup(`J.x=0;J.y=0;P.veh=null;place(L[4]+3.5,40,PI);H.h=4.6;crime(2,P.x,P.z);window.__sc=(f)=>{ca-=.03}`);
+  // ---- S5: final, a pé
+  await setup(`P.veh=null;${REV}place(L[4]+3.5,40,PI);H.h=4.6;crime(2,P.x,P.z);window.__sc=(f)=>{P.hp=100;ca-=.03}`);
   await run(60);
   console.log('frames', n, 'seg', (Date.now() - t0) / 1000);
   await browser.close();
