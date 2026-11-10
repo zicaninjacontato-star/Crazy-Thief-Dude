@@ -34,7 +34,7 @@ const ONLY = (process.env.ONLY || '').split(',').filter(Boolean);
       let err = Math.atan2(tx - v.x, tz - v.z) - v.yaw; err = Math.atan2(Math.sin(err), Math.cos(err));
       J.y = 1; J.x = Math.max(-1, Math.min(1, -err * 2.2)) + Math.sin(f / 16) * (amp || 0);
     };
-    window.__REV = () => { P.dead = 0; P.hp = 100; P.rag = null; P.g.visible = true; J.x = 0; J.y = 0; K.Space = false; K.KeyF = false; FZ.mode = 'gnd'; FZ.chute = 0; P.y = P.y > 1 ? .9 : P.y };
+    window.__REV = () => { P.dead = 0; P.hp = 100; P.rag = null; P.g.visible = true; J.x = 0; J.y = 0; K.Space = false; K.KeyF = false; TRAINDBG.FZ.mode = 'gnd'; TRAINDBG.FZ.chute = 0; P.y = P.y > 1 ? .9 : P.y };
     const r0 = rd.render.bind(rd); rd.render = (s, c) => { if (window.__cin) window.__cin(c); r0(s, c); };
   });
   let n = 0, dir = 'x';
@@ -199,9 +199,9 @@ const ONLY = (process.env.ONLY || '').split(',').filter(Boolean);
 
   await scene('ow_chute', async () => {
     clip('ow_chute');
-    await setup(`${REV}P.veh=null;place(0,0,0);own.para=1;P.y=160;FZ.mode='air';FZ.vy=0;window.__sc=(f)=>{P.hp=100;ca+=.012;if(f==36){document.getElementById('bPa').onpointerdown({preventDefault(){}})}}`);
+    await setup(`${REV}P.veh=null;place(0,0,0);own.para=1;P.y=160;TRAINDBG.FZ.mode='air';TRAINDBG.FZ.vy=0;window.__sc=(f)=>{P.hp=100;ca+=.012;if(f==36){document.getElementById('bPa').onpointerdown({preventDefault(){}})}}`);
     await run(120);
-    await page.evaluate(() => __log('chute', { y: P.y, mode: FZ.mode, ch: FZ.chute }));
+    await page.evaluate(() => __log('chute', { y: P.y, mode: TRAINDBG.FZ.mode, ch: TRAINDBG.FZ.chute }));
   });
 
   // ===== FINAL cinematográfico
