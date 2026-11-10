@@ -1,0 +1,25 @@
+name: Build APK
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Organizar pastas
+        run: |
+          mkdir -p app/src/main/java/com/crazythiefdude/game app/src/main/assets app/src/main/res/values app/src/main/res/drawable app/src/main/res/mipmap-anydpi-v26 app/src/main/res/mipmap-anydpi
+          mv game.html app/src/main/assets/game.html
+          mv MainActivity.java app/src/main/java/com/crazythiefdude/game/MainActivity.java
+          mv AndroidManifest.xml app/src/main/AndroidManifest.xml
+          mv styles.xml app/src/main/res/values/styles.xml
+          mv ic_fg.xml app/src/main/res/drawable/ic_fg.xml
+          cp ic_launcher.xml app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+          mv ic_launcher.xml app/src/main/res/mipmap-anydpi/ic_launcher.xml
+          mv app-build.gradle app/build.gradle
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: 8.9 }
+      - run: gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with: { name: CrazyThiefDude-apk, path: app/build/outputs/apk/debug/app-debug.apk }
