@@ -15,7 +15,10 @@ jobs:
           npm init -y >/dev/null && npm i playwright >/dev/null && npx playwright install --with-deps chromium >/dev/null
       - run: node trailer/capture.js
       - name: Encode
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
+          sudo apt-get install -y -qq ffmpeg >/dev/null
           mkdir -p out
           cp frames/f00000.jpg out/sample0.jpg; cp frames/f00100.jpg out/sample1.jpg; cp frames/f00250.jpg out/sample2.jpg
           ffmpeg -y -framerate 24 -i frames/f%05d.jpg -c:v libx264 -crf 20 -preset veryfast -pix_fmt yuv420p out/footage.mp4
