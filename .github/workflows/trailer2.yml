@@ -1,0 +1,33 @@
+name: Capture trailer v2
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "cenas (separadas por virgula)"
+        required: false
+        default: ""
+permissions:
+  contents: write
+jobs:
+  cap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: |
+          curl -fL --retry 3 https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js -o three.min.js
+          npm init -y >/dev/null && npm i playwright >/dev/null && npx playwright install --with-deps chromium >/dev/null
+          sudo apt-get install -y -qq ffmpeg >/dev/null
+      - run: ONLY="${{ inputs.only }}" node trailer/capture2.js 2>&1 | tee cap.log
+      - name: Encode
+        run: |
+          mkdir -p out
+          cp cap.log out/
+          for d in frames/*/; do n=$(basename $d); ffmpeg -y -v error -framerate 24 -i $d/f%05d.jpg -c:v libx264 -crf 20 -preset veryfast -pix_fmt yuv420p out/$n.mp4; done
+      - name: Push footage2 branch
+        run: |
+          cd out && git init -q && git checkout -q -b footage2 && git add -A
+          git -c user.name=ci -c user.email=ci@x commit -qm footage2
+          git push -f https://x-access-token:${{ github.token }}@github.com/${{ github.repository }} footage2
