@@ -1,0 +1,38 @@
+jogo iniciado
+PAGE: CLIPLOG race {"veh":"sup","me":0}
+OK race frames 150 46.17
+FAIL soccer locator.click: Timeout 4000ms exceeded.
+Call log:
+  - waiting for getByText('JOGAR', { exact: true }).first()
+
+FAIL deathmatch locator.click: Timeout 4000ms exceeded.
+Call log:
+  - waiting for getByText('JOGAR', { exact: true }).first()
+
+OK ow_sup frames 60 10.289
+OK ow_moto frames 48 7.94
+PAGE: CLIPLOG ramp {"y":0,"z":206.5809019664455}
+OK ow_ramp frames 120 19.073
+PAGE: CLIPLOG police {"st":0}
+OK ow_police frames 96 16.266
+OK ow_shop_gun frames 76 13.743
+PAGE: CLIPLOG clothes ui {"html":"✕\nJogo\n📂\nCarregar\nEscolher um slot\n💾\nSalvar\nEscolher um slot\n🏠\nMenu principal\nSair da partida\nLEGENDA\n🏠Sua casa\n🔫Lo"}
+OK ow_shop_clothes frames 66 17.749
+PAGE: CLIPLOG garage {"st":"shop","ui":"✕\nJogo\n📂\nCarregar\nEscolher um slot\n💾\nSalvar\nEscolher um slot\n🏠\nMenu principal\nSair da partida\nLEG"}
+OK ow_garage frames 110 30.032
+OK ow_house frames 60 17.356
+FAIL ow_boat page.evaluate: TypeError: Cannot read properties of undefined (reading 'x')
+    at eval (eval at evaluate (:370:30), <anonymous>:1:117)
+    at eval (<anonymous>)
+    at UtilityScript.evaluate (<anonymous>:370:30)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+FAIL ow_jet page.evaluate: TypeError: Cannot read properties of undefined (reading 'x')
+    at eval (eval at evaluate (:370:30), <anonymous>:1:117)
+    at eval (<anonymous>)
+    at UtilityScript.evaluate (<anonymous>:370:30)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+PAGE: CLIPLOG plane {"y":0}
+OK ow_plane frames 80 24.739
+PAGE: CLIPLOG chute {"y":159.95659722222223,"mode":"gnd","ch":0}
+OK ow_chute frames 120 35.507
+OK finale frames 192 50.279
