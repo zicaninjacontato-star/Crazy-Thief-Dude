@@ -41,7 +41,8 @@ const W = 1280, H = 576, FPS = 24, DT = 1000 / FPS;
     await page.evaluate(ms => window.__adv(ms), DT);
     if (shot) { await page.screenshot({ path: `frames/f${String(n++).padStart(5, '0')}.jpg`, type: 'jpeg', quality: 90 }); }
   };
-  const run = async (frames, fn) => { for (let f = 0; f < frames; f++) { if (fn) await page.evaluate(([f, fr]) => window.__sc && window.__sc(f, fr), [f, frames]); await step(); } };
+  const dbg = async tag => console.log('DBG', tag, JSON.stringify(await page.evaluate(() => ({ paused: PAUSED, veh: P.veh && [P.veh.t, +P.veh.x.toFixed(1), +P.veh.z.toFixed(1), +P.veh.sp.toFixed(1)], I: [I.ax, I.ay], J: [J.x, J.y], xgar: window.XGAR, mg: window.MGACT, dead: P.dead, st: stars(), P: [+P.x.toFixed(1), +P.z.toFixed(1)] }))));
+  const run = async (frames) => { await dbg('start'); for (let f = 0; f < frames; f++) { if (f % 30 == 29) await dbg('f' + f); await page.evaluate(([f, fr]) => window.__sc && window.__sc(f, fr), [f, frames]); await step(); } };
   const setup = async code => { await page.evaluate(code); for (let i = 0; i < 6; i++) await step(false); };
   const t0 = Date.now();
   // ---- S1: a pé, câmera orbitando
