@@ -1,0 +1,45 @@
+name: Build APK (Remaster)
+on: [push, workflow_dispatch]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Organizar pastas
+        run: |
+          mkdir -p app/src/main/java/com/crazythiefdude/game app/src/main/assets app/src/main/res/values app/src/main/res/drawable app/src/main/res/mipmap-anydpi-v26
+          mv game.html app/src/main/assets/game.html
+          mv MainActivity.java app/src/main/java/com/crazythiefdude/game/MainActivity.java
+          mv AndroidManifest.xml app/src/main/AndroidManifest.xml
+          mv styles.xml app/src/main/res/values/styles.xml
+          mv ic_fg.xml app/src/main/res/drawable/ic_fg.xml
+          mv ic_launcher.xml app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+          mv app-build.gradle app/build.gradle
+      - name: Transformar em Remaster (nome e pacote próprios, instala ao lado do original)
+        run: |
+          sed -i 's/android:label="Crazy Thief Dude"/android:label="Crazy Thief Dude (Remaster)"/' app/src/main/AndroidManifest.xml
+          sed -i "s/applicationId 'com.crazythiefdude.game'/applicationId 'com.crazythiefdude.remaster'/" app/build.gradle
+          sed -i "s#<title>Crazy Thief Dude</title>#<title>Crazy Thief Dude (Remaster)</title>#; s#>CRAZY THIEF DUDE</div>#>CRAZY THIEF DUDE<br><span style='font-size:18px;color:\#ffd23a;letter-spacing:4px'>REMASTER</span></div>#" app/src/main/assets/game.html
+          grep -q 'Crazy Thief Dude (Remaster)' app/src/main/AndroidManifest.xml
+          grep -q "com.crazythiefdude.remaster" app/build.gradle
+          grep -q 'REMASTER</span>' app/src/main/assets/game.html
+      - name: Baixar three.js para funcionar offline
+        run: |
+          curl -fL --retry 3 https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js -o app/src/main/assets/three.min.js
+          test $(stat -c%s app/src/main/assets/three.min.js) -gt 400000
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: 8.9 }
+      - run: gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with: { name: CrazyThiefDude-Remaster-apk, path: app/build/outputs/apk/debug/app-debug.apk }
+      - name: Publicar APK na aba Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk CrazyThiefDude-Remaster.apk
+          gh release delete apk-remaster --yes --cleanup-tag || true
+          gh release create apk-remaster CrazyThiefDude-Remaster.apk --target "$GITHUB_SHA" --title "Crazy Thief Dude (Remaster) (APK)" --notes "Versão Remaster com gráficos realistas. Instala ao lado do Crazy Thief Dude original. Baixe o CrazyThiefDude-Remaster.apk e instale."
