@@ -3412,8 +3412,14 @@ function place1(p){const bw=p.k=='apto'||p.k=='aptoL'?13:p.k=='mansao'?(p.id=='m
   if(!ptsOk(x,z)||(window.XVAN&&Math.hypot(x-XVAN.x,z-XVAN.z)<30))continue;
   try{if(inLK(x,z,16))continue}catch(e){}if(z>104&&z<146)continue;
   const hw=f.x?sd:sw,hd=f.x?sw:sd;if(!free(x,z,hw+m,hd+m))continue;
+  if(lotOnRoad(x,z,f,bw,bd,sides))continue; // v31: lote (casa + garagens + gramado) não pode invadir a rua
   {const rr={x:f.z,z:-f.x};let bad=false;for(const sd2 of sides){const gw=sd2.k*3.9+.6,uc=sd2.s*(bw/2+5+gw/2),cxg=x+rr.x*uc+f.x*-3.8,czg=z+rr.z*uc+f.z*-3.8,hwg=Math.abs(rr.x)*(gw/2+1)+Math.abs(f.x)*5,hdg=Math.abs(rr.z)*(gw/2+1)+Math.abs(f.z)*5;if(!free(cxg,czg,hwg+m,hdg+m)){bad=true;break}}if(bad)continue}
   return{x,z,f}}return null}
+// v31: retângulos das ruas da grade (avenida, ruas a cada 50 m) — o lote inteiro precisa ficar fora delas
+const ROADR=(()=>{const a=[];L.forEach(v=>{a.push([v-6.5,v+6.5,-207,207]);a.push([-207,207,v-6.5,v+6.5])});a.push([-207,207,-9.5,9.5]);return a})();
+function lotOnRoad(x,z,f,bw,bd,sides){const r={x:f.z,z:-f.x};let up=bw/2+4,un=bw/2+4;for(const s2 of sides){const e=bw/2+5+s2.k*3.9+.6+1.5;if(s2.s>0)up=Math.max(up,e);else un=Math.max(un,e)}
+ let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9;for(const u of[-un,up])for(const w of[-bd-6,8]){const px=x+r.x*u+f.x*w,pz=z+r.z*u+f.z*w;x0=Math.min(x0,px);x1=Math.max(x1,px);z0=Math.min(z0,pz);z1=Math.max(z1,pz)}
+ return ROADR.some(q=>x1>q[0]&&x0<q[1]&&z1>q[2]&&z0<q[3])}
 const gSides=(p,bw)=>{const n=p.slots;return n>3?[{s:1,k:Math.ceil(n/2)},{s:-1,k:Math.floor(n/2)}]:[{s:1,k:n}]};
 function buildExt(p,sp){const O={x:sp.x,z:sp.z},f=sp.f,r={x:f.z,z:-f.x},ay=Math.atan2(f.x,f.z);
  const W=(u,w)=>({x:O.x+r.x*u+f.x*w,z:O.z+r.z*u+f.z*w});
@@ -4163,6 +4169,91 @@ document.head.insertAdjacentHTML('beforeend',"<style>#bRd,#bMg,#svB,#bSp,#bPr,#b
 })();
 
 </script><script type='text/game' class='gb'>
+// ===== v31: polimento do mapa — camadas do chão sem "flick", nada de árvore no asfalto, carros fora dos prédios =====
+(function(){
+const LOG=window.XPOL_LOG=[];const lg=(...a)=>{LOG.push(a.join(' '))};
+// precisão de profundidade: plano próximo 0,1 → 0,25 (2,5x menos tremido ao longe)
+try{cam.near=.25;cam.updateProjectionMatrix()}catch(e){}
+const m4=new T.Matrix4(),pv=new T.Vector3(),qv=new T.Quaternion(),sv=new T.Vector3(),col=new T.Color(),hsl={};
+// ---------- coleta das superfícies planas (meshes soltos + instâncias) ----------
+const flat=[];
+const decOf=new Map();(window.XINST||[]).forEach(c=>decOf.set(c.m,c.a));
+sc.children.forEach(o=>{
+ if(o.isInstancedMesh&&o.geometry&&o.geometry.attributes.position.count==24){const a=decOf.get(o);
+  for(let i=0;i<o.count;i++){o.getMatrixAt(i,m4);m4.decompose(pv,qv,sv);if(sv.y<=0||pv.y<-20)continue;if(Math.abs(qv.x)+Math.abs(qv.z)>1e-4)continue;
+   const sx=Math.abs(sv.x),sz=Math.abs(sv.z);let c;if(o.instanceColor){o.getColorAt(i,col);c=col.getHex()}else c=o.material.color?o.material.color.getHex():0xffffff;
+   const yaw=Math.abs(qv.y)>1e-4,top=pv.y+sv.y/2;if(sv.y>.35||top>.45||top<.02||Math.max(sx,sz)<.3||yaw)continue;
+   flat.push({k:'I',o,i,d:a?a[i]:null,c,x0:pv.x-sx/2,x1:pv.x+sx/2,z0:pz(pv)-sz/2,z1:pz(pv)+sz/2,top,bot:pv.y-sv.y/2})}}
+ else if(o.isMesh&&o.geometry&&o.geometry.type=='BoxGeometry'&&o.visible&&!o.children.some(c=>c.isMesh&&c.material!==OLM)){
+  if(Math.abs(o.rotation.x)+Math.abs(o.rotation.z)>1e-4||Math.abs(o.rotation.y)>1e-4)return;const s=o.scale,p=o.position,top=p.y+s.y/2;
+  if(s.y>.35||top>.45||top<.02||Math.max(s.x,s.z)<.3||Math.max(s.x,s.z)>800)return;
+  const mt=Array.isArray(o.material)?o.material[2]:o.material;if(!mt||!mt.color)return;
+  flat.push({k:'M',o,c:mt.color.getHex(),x0:p.x-s.x/2,x1:p.x+s.x/2,z0:p.z-s.z/2,z1:p.z+s.z/2,top,bot:p.y-s.y/2})}});
+function pz(v){return v.z}
+// classe de cada superfície: 1 chão (grama/terra/água), 2 asfalto de rua, 3 calçada/concreto, 4 faixa/sinalização
+const isAsph=c=>{col.setHex(c);col.getHSL(hsl);return hsl.s<.14&&hsl.l<.36};
+flat.forEach(f=>{const w=f.x1-f.x0,d=f.z1-f.z0,mn=Math.min(w,d),mx=Math.max(w,d);f.area=w*d;col.setHex(f.c);col.getHSL(hsl);
+ if(mn<.7&&(hsl.l>.6||hsl.s>.5))f.cl=4;                    // linhas e faixas
+ else if(hsl.s<.14&&hsl.l>=.36&&hsl.l<.86)f.cl=3;           // calçada / concreto
+ else if(hsl.s<.14&&hsl.l>=.86)f.cl=4;                      // faixa de pedestre / pintura
+ else if(isAsph(f.c)){const road=(mn>=2.5&&mn<=19&&mx>=mn*2.5)||f.c==0x3a3c42||(Math.abs(w-24)<.6&&Math.abs(d-24)<.6);f.cl=road?2:1.5} // rua x pátio
+ else f.cl=1});
+// ---------- 1) camadas: quem fica por cima ----------
+const G=new Map(),cell=20,key=(i,j)=>i*10007+j;
+flat.forEach((f,n)=>{for(let i=Math.floor(f.x0/cell);i<=Math.floor(f.x1/cell);i++)for(let j=Math.floor(f.z0/cell);j<=Math.floor(f.z1/cell);j++){const k=key(i,j);let a=G.get(k);if(!a)G.set(k,a=[]);a.push(n)}});
+const winner=(a,b)=>{if(a.cl!==b.cl){const ca=a.cl==1.5&&b.cl==1?1.4:a.cl,cb=b.cl==1.5&&a.cl==1?1.4:b.cl;if(ca!==cb)return ca>cb?a:b}return a.area<=b.area?a:b};
+const raise=new Map();let changed=0,sunk=0;
+// restrições "A fica acima de B" para todo par que se sobrepõe: mantém a ordem original e decide os empates
+const CON=[];{const seen=new Set();
+ for(const a of G.values())for(let x=0;x<a.length;x++)for(let y=x+1;y<a.length;y++){const i=a[x],j=a[y],k=i<j?i*65536+j:j*65536+i;if(seen.has(k))continue;seen.add(k);
+  const A=flat[i],B=flat[j],ox=Math.min(A.x1,B.x1)-Math.max(A.x0,B.x0),oz=Math.min(A.z1,B.z1)-Math.max(A.z0,B.z0);if(ox<=.02||oz<=.02)continue;
+  const dt=A.top-B.top;
+  if(Math.abs(dt)<.018){if(A.c===B.c)continue;const W=winner(A,B);CON.push([W,W===A?B:A]);continue}
+  let hi=dt>0?A:B,lo=dt>0?B:A;
+  // rua "afundada" debaixo da grama (sobreposição parcial): a rua passa por cima
+  if(lo.cl===2&&hi.cl===1&&hi.top-lo.top<=.12&&ox*oz<=hi.area*.6&&ox>.3&&oz>.3){[hi,lo]=[lo,hi];sunk++}
+  CON.push([hi,lo])}}
+for(let pass=0;pass<60;pass++){let n=0;for(const [h,l] of CON){const want=l.top+.02;if(h.top<want-1e-4&&want<.6){h.top=want;raise.set(h,1);n++}}changed+=n;if(!n)break}
+// aplica (mantém a base, aumenta a espessura)
+raise.forEach((_,f)=>{const h=f.top-f.bot,cy=(f.top+f.bot)/2;
+ if(f.k=='M'){f.o.scale.y=h;f.o.position.y=cy;f.o.updateMatrix()}
+ else{f.o.getMatrixAt(f.i,m4);m4.decompose(pv,qv,sv);pv.y=cy;sv.y=h;m4.compose(pv,qv,sv);f.o.setMatrixAt(f.i,m4);f.o.instanceMatrix.needsUpdate=true;if(f.d){f.d[1]=cy;f.d[4]=h}}});
+lg('camadas',flat.length,'ajustadas',raise.size,'pares',changed,'ruas afundadas',sunk);
+// ---------- 2) vegetação em cima do asfalto (árvores, arbustos e cercas-vivas) ----------
+const roads=flat.filter(f=>f.cl==2);
+const RG=new Map();roads.forEach((f,n)=>{for(let i=Math.floor(f.x0/cell);i<=Math.floor(f.x1/cell);i++)for(let j=Math.floor(f.z0/cell);j<=Math.floor(f.z1/cell);j++){const k=key(i,j);let a=RG.get(k);if(!a)RG.set(k,a=[]);a.push(n)}});
+const onAsph=(x0,x1,z0,z1,min)=>{const s=new Set();for(let i=Math.floor(x0/cell);i<=Math.floor(x1/cell);i++)for(let j=Math.floor(z0/cell);j<=Math.floor(z1/cell);j++)(RG.get(key(i,j))||[]).forEach(n=>s.add(n));
+ let A=0;for(const n of s){const r=roads[n],ox=Math.min(x1,r.x1)-Math.max(x0,r.x0),oz=Math.min(z1,r.z1)-Math.max(z0,r.z0);if(ox>0&&oz>0)A+=ox*oz}return A>min};
+const VEG=new Set([0x6b4a2a,0x2f8a3a,0x3b9a45,0x2a7a35,0x4aa648,0x5a3a22,0x2f7a3a]);
+// ilhas dos retornos (canteiro com meio-fio) ficam
+const isl=[];sc.children.forEach(o=>{if(o.isMesh&&o.material&&o.material.color&&o.material.color.getHex()==0xd8d8d8&&Math.abs(o.scale.x-7.4)<.05&&Math.abs(o.scale.z-7.4)<.05)isl.push([o.position.x,o.position.z])});
+const nearIsl=(x,z)=>isl.some(p=>Math.abs(p[0]-x)<4.5&&Math.abs(p[1]-z)<4.5);
+const hide=new Set();let vk=0;
+(window.XINST||[]).forEach(c=>{const o=c.m;for(let i=0;i<c.a.length;i++){const d=c.a[i];if(d.dead||!VEG.has(d[6]))continue;if(d[1]-d[4]/2>3)continue;
+ const hw=Math.min(d[3],1.2)/2,hd=Math.min(d[5],1.2)/2; // pelo tronco/base
+ if(nearIsl(d[0],d[2]))continue;if(!onAsph(d[0]-hw,d[0]+hw,d[2]-hd,d[2]+hd,.15))continue;
+ hide.add(Math.round(d[0]*2)+'_'+Math.round(d[2]*2))}});
+(window.XINST||[]).forEach(c=>{const o=c.m;for(let i=0;i<c.a.length;i++){const d=c.a[i];if(d.dead||!VEG.has(d[6]))continue;if(!hide.has(Math.round(d[0]*2)+'_'+Math.round(d[2]*2)))continue;
+ d.dead=1;m4.makeScale(0,0,0);m4.setPosition(0,-50,0);o.setMatrixAt(i,m4);o.instanceMatrix.needsUpdate=true;vk++}});
+for(let i=sc.children.length-1;i>=0;i--){const o=sc.children[i];if(!o.isMesh||!o.material||Array.isArray(o.material)||!o.material.color)continue;const c=o.material.color.getHex();if(!VEG.has(c))continue;
+ const p=o.position,s=o.scale;if(p.y-s.y/2>3||s.x>6)continue;if(nearIsl(p.x,p.z))continue;
+ if(onAsph(p.x-Math.min(s.x,1.2)/2,p.x+Math.min(s.x,1.2)/2,p.z-Math.min(s.z,1.2)/2,p.z+Math.min(s.z,1.2)/2,.15)){sc.remove(o);vk++}}
+// troncos sólidos de árvores removidas
+for(let i=solids.length-1;i>=0;i--){const b=solids[i];if(b.ms||b.h!=4||b.x1-b.x0>1.05||b.z1-b.z0>1.05)continue;const cx=(b.x0+b.x1)/2,cz=(b.z0+b.z1)/2;if(hide.has(Math.round(cx*2)+'_'+Math.round(cz*2))&&!nearIsl(cx,cz))solids.splice(i,1)}
+lg('vegetacao no asfalto removida',vk);
+// ---------- 3) veículos estacionados dentro de prédios ----------
+const big=b=>b.h>1.2&&(b.x1-b.x0)<300&&(b.z1-b.z0)<300&&(b.x1-b.x0)>1.2&&(b.z1-b.z0)>1.2;
+const inSolid=(x,z,r)=>solids.some(b=>big(b)&&x+r>b.x0&&x-r<b.x1&&z+r>b.z0&&z-r<b.z1);
+const wet=(x,z)=>{try{return waterAt(x,z)}catch(e){return false}};
+function unstick(v){if(['plane','boat','heli'].includes(v.t)||v===P.veh||v.dead||v.tr||v.ai||Math.abs(v.sp||0)>.5)return 0;
+ const b=solids.find(b=>big(b)&&v.x>b.x0+.25&&v.x<b.x1-.25&&v.z>b.z0+.25&&v.z<b.z1-.25);if(!b)return 0;
+ const r=(S[v.t]?S[v.t].r:2)+.8,c=[[b.x0-r,v.z,v.x-b.x0],[b.x1+r,v.z,b.x1-v.x],[v.x,b.z0-r,v.z-b.z0],[v.x,b.z1+r,b.z1-v.z]].sort((a,b)=>a[2]-b[2]);
+ for(const [x,z] of c){if(!inSolid(x,z,1.2)&&!wet(x,z)&&!vehs.some(o=>o!==v&&Math.hypot(o.x-x,o.z-z)<4)){v.x=x;v.z=z;v.g.position.x=x;v.g.position.z=z;return 1}}return 0}
+let vm=0;vehs.forEach(v=>{vm+=unstick(v)});lg('veiculos tirados de dentro de predios',vm);
+const _u=update;let ut=0;update=function(dt){_u(dt);if(PAUSED)return;if((ut-=dt)<=0){ut=3;try{vehs.forEach(unstick)}catch(e){}}};
+try{console.log('v31',LOG.join(' | '))}catch(e){}
+})();
+</script><script type='text/game' class='gb'>
 // ===== v30: gráficos realistas — luz de fim de tarde, céu com nuvens, água animada, texturas de mundo, carros com pintura brilhante, sombras =====
 (function(){if(!window.GFX)return;
 try{OLM.visible=false}catch(e){}
@@ -4329,7 +4420,7 @@ let sct=0;const _u=update;update=function(dt){_u(dt);U.uT.value+=dt;
  try{if(sc.fog&&!sc.fog.color.equals(FOGC))sc.fog.color.copy(FOGC);if(sc.background)sc.background=null}catch(e){}
  if((sct-=dt)<=0){sct=.5;scan()}
  try{vehs.forEach(v=>{const s=v.g&&v.g.userData.shd;if(s)s.visible=!v.dead&&!v.snk&&(v.y||0)<2.2&&v.g.visible});
-  psi=0;const px=cam.position.x,pz=cam.position.z,one=(p,o)=>{const g=p.g;if(!g||!g.visible||!g.parent||p.dead>0)return;if(Math.abs(p.x-px)>70||Math.abs(p.z-pz)>70)return;const y=p.rag?.1:Math.max(.1,(p.y||.9)-.78);pshd(p.x,y,p.z,p.rag?1.6:1.15)};
+  psi=0;const px=cam.position.x,pz=cam.position.z,one=(p,o)=>{const g=p.g;if(!g||!g.visible||!g.parent||p.dead>0)return;if(Math.abs(p.x-px)>70||Math.abs(p.z-pz)>70)return;const y=p.rag?.18:Math.max(.18,(p.y||.9)-.72);pshd(p.x,y,p.z,p.rag?1.6:1.15)};
   peds.forEach(p=>one(p));if(!P.veh)one(P);for(let i=psi;i<PS.length;i++)PS[i].visible=false}catch(e){}};
 })();
 </script><script type='text/game' class='gb'>
