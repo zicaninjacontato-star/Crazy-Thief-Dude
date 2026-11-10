@@ -35,6 +35,7 @@ const ONLY = (process.env.ONLY || '').split(',').filter(Boolean);
       J.y = 1; J.x = Math.max(-1, Math.min(1, -err * 2.2)) + Math.sin(f / 16) * (amp || 0);
     };
     window.__REV = () => { P.dead = 0; P.hp = 100; P.rag = null; P.g.visible = true; J.x = 0; J.y = 0; K.Space = false; K.KeyF = false; TRAINDBG.FZ.mode = 'gnd'; TRAINDBG.FZ.chute = 0; P.y = P.y > 1 ? .9 : P.y };
+    window.__closeUI = () => { ['menu', 'mapv', 'rcE'].forEach(id => { const e = document.getElementById(id); if (e) e.style.display = 'none'; }); PAUSED = false; };
     const r0 = rd.render.bind(rd); rd.render = (s, c) => { if (window.__cin) window.__cin(c); r0(s, c); };
   });
   let n = 0, dir = 'x';
@@ -50,6 +51,7 @@ const ONLY = (process.env.ONLY || '').split(',').filter(Boolean);
   const scene = async (name, fn) => {
     if (ONLY.length && !ONLY.includes(name)) return;
     const t0 = Date.now();
+    await page.evaluate(() => window.__closeUI()).catch(() => {});
     try { await fn(); console.log('OK', name, 'frames', n, (Date.now() - t0) / 1000); }
     catch (e) { console.log('FAIL', name, e.message.slice(0, 300)); }
     await page.evaluate(() => { window.__sc = null; window.__cin = null; J.x = J.y = 0; K.Space = false; K.KeyF = false; }).catch(() => {});
@@ -70,8 +72,9 @@ const ONLY = (process.env.ONLY || '').split(',').filter(Boolean);
     for (const [dx, dy] of pts) { await page.mouse.click(W / 2 + dx, H / 2 + dy); await page.waitForTimeout(120); await uiStep(7); }
     await uiStep(10);
     clip('race_b');
-    await page.evaluate(() => { document.getElementById('ed3').click(); });
+    await page.evaluate(() => { document.getElementById('ed3').click(); window.__closeUI(); });
     await page.waitForTimeout(400);
+    await page.evaluate(() => window.__closeUI());
     await page.evaluate(() => { window.__sc = (f) => { const R = MG.RC, v = P.veh; if (!R || !R.cp || !v || !R.me) return; const t = R.cp[(R.me.k + 1) % R.cp.length]; window.__goto(v, t[0], t[1], 0, f); } });
     await warm(120);
     await run(150);
@@ -137,22 +140,22 @@ const ONLY = (process.env.ONLY || '').split(',').filter(Boolean);
 
   await scene('ow_ramp', async () => {
     clip('ow_ramp');
-    await setup(`${REV}place(150,-200,PI/2);const c=spawnV('sup',P.x+3,P.z,PI/2,0x2255dd,0);c.ai=0;c.tr=0;P.veh=c;window.__sc=(f)=>{__goto(P.veh,P.veh.x+40,-200,0,f)}`);
-    await run(110);
-    await page.evaluate(() => __log('ramp', { y: P.veh && P.veh.y, x: P.veh && P.veh.x }));
+    await setup(`${REV}place(200,160,0);const c=spawnV('sup',200,164,0,0x2255dd,0);c.ai=0;c.tr=0;P.veh=c;window.__sc=(f)=>{__goto(P.veh,200,P.veh.z+40,0,f)}`);
+    await run(120);
+    await page.evaluate(() => __log('ramp', { y: P.veh && P.veh.y, z: P.veh && P.veh.z }));
   });
 
   await scene('ow_police', async () => {
     clip('ow_police');
-    await setup(`${REV}place(L[6]+3.5,-195,0);const c=spawnV('sup',P.x,P.z+4,0,0x111111,0);c.ai=0;c.tr=0;P.veh=c;crime(6,P.x,P.z);window.__sc=(f)=>{__goto(P.veh,L[6]+3.5,P.veh.z+40,.04,f);const v=P.veh;if(v&&(f==30||f==70)){boom(v.x+Math.sin(v.yaw)*28,v.z+Math.cos(v.yaw)*28)}}`);
+    await setup(`${REV}place(L[6]+3.5,-195,0);const c=spawnV('sup',P.x,P.z+4,0,0x111111,0);c.ai=0;c.tr=0;P.veh=c;H.h=4.6;window.__sc=(f)=>{H.h=Math.max(H.h,4.6);H.q=0;__goto(P.veh,L[6]+3.5,P.veh.z+40,.04,f);const v=P.veh;if(v&&(f==30||f==70)){boom(v.x+Math.sin(v.yaw)*28,v.z+Math.cos(v.yaw)*28)}}`);
     await run(96);
     await page.evaluate(() => __log('police', { st: stars() }));
   });
 
   await scene('ow_shop_gun', async () => {
     clip('ow_shop_gun');
-    await setup(`${REV}H.h=0;const m=XSHOP_API.MK.find(x=>x.id=='ar');place(m.x,m.z+1.5,0);window.__m=m`);
-    await page.evaluate(() => { PAUSED = false; money = 99999; XSHOP_API.openShop(window.__m); });
+    await setup(`${REV}H.h=0;const m=XSHOP_API.MK.find(x=>x.id=='ar');place(m.x,m.z+1.5,0)`);
+    await page.evaluate(() => { PAUSED = false; money = 99999; XSHOP_API.openShop(XSHOP_API.WS); });
     await uiStep(20);
     for (let i = 0; i < 3; i++) { await page.evaluate(() => { const e = document.getElementById('sr'); e && e.onpointerdown && e.onpointerdown({}) }); await uiStep(14); }
     await page.evaluate(() => { const e = document.getElementById('sbuy'); e && e.onpointerdown && e.onpointerdown({}) }); await uiStep(14);
@@ -160,8 +163,8 @@ const ONLY = (process.env.ONLY || '').split(',').filter(Boolean);
 
   await scene('ow_shop_clothes', async () => {
     clip('ow_shop_clothes');
-    await setup(`${REV}H.h=0;const m=XSHOP_API.MK.find(x=>x.id=='cl');place(m.x,m.z,0);window.__m=m`);
-    await page.evaluate(() => { PAUSED = false; money = 99999; XSHOP_API.openShop(window.__m); });
+    await setup(`${REV}H.h=0;const m=XSHOP_API.MK.find(x=>x.id=='cl');place(m.x,m.z,0)`);
+    await page.evaluate(() => { PAUSED = false; money = 99999; XSHOP_API.openShop(XSHOP_API.CS); });
     await uiStep(30);
     await page.evaluate(() => __log('clothes ui', { html: document.body.innerText.slice(0, 120) }));
     for (let i = 0; i < 3; i++) { await page.evaluate(() => { const b = [...document.querySelectorAll('#hud *,body *')].filter(e => e.onpointerdown && /›|>|▶|→/.test(e.textContent)).slice(0, 1); b.forEach(e => e.onpointerdown({ preventDefault() {} })) }); await uiStep(12); }
@@ -183,9 +186,9 @@ const ONLY = (process.env.ONLY || '').split(',').filter(Boolean);
 
   const boat = (name, kind) => scene(name, async () => {
     clip(name);
-    await setup(`${REV}place(-285,-10,0);const c=XVEH.spawnK('${kind}',-290,-10,0)||vehs[vehs.length-1];window.__b=c;P.veh=c;c.ai=0;c.tr=0;window.__sc=(f)=>{P.hp=100;J.y=1;J.x=Math.sin(f/14)*.5}`);
-    await page.evaluate(() => __log('boat', { t: P.veh && P.veh.t, y: P.veh && P.veh.y }));
-    await run(60);
+    await setup(`${REV}const c=vehs.find(v=>v.t=='boat'&&v.kd=='${kind}')||vehs.find(v=>v.t=='boat');P.x=c.x;P.z=c.z;place(c.x,c.z,c.yaw);P.veh=c;c.ai=0;c.tr=0;window.__bt=c;window.__sc=(f)=>{P.hp=100;c.hp=500;J.y=1;J.x=Math.sin(f/14)*.5}`);
+    await page.evaluate(() => __log('boat', { t: P.veh && P.veh.t, kd: P.veh && P.veh.kd, x: P.veh && P.veh.x, z: P.veh && P.veh.z }));
+    await run(66);
   });
   await boat('ow_boat', 'lancha');
   await boat('ow_jet', 'jetski');
