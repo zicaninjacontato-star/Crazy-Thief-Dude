@@ -2206,15 +2206,34 @@ document.head.insertAdjacentHTML('beforeend',`<style>
 </style>`);
 document.body.insertAdjacentHTML('beforeend',`<div id='cf'><div class='bgi2'></div><div class='svt'>Configurações</div><div class='svs'>Ajuste o gráfico e o desempenho do jogo</div><div class='cfl' id='cfl'></div><div id='cfh'>Pouco FPS? Use “Baixo” em Resolução, Renderização e Densidade.</div><div class='vlt red' id='cfv'>⬅ Voltar</div></div>`);
 const LV=['Baixo','Médio','Alto'];
-const ROWS=[['tex','Qualidade de Textura','Nitidez das texturas',LV],['res','Resolução','Quantidade de pixels da tela',LV],['ren','Renderização','Distância de visão e detalhes',LV],['blood','Sangue','Efeitos de sangue',['Desligado','Ativo']],['pop','Densidade Populacional','Pedestres e trânsito',LV],['gfx','Estilo Gráfico','Muda ao reiniciar o jogo',['Cartoon','Realista']]];
+const ROWS=[['tex','Qualidade de Textura','Nitidez das texturas',LV],['res','Resolução','Quantidade de pixels da tela',LV],['ren','Renderização','Distância de visão e detalhes',LV],['blood','Sangue','Efeitos de sangue',['Desligado','Ativo']],['pop','Densidade Populacional','Pedestres e trânsito',LV],['gfx','Estilo Gráfico','Muda ao reiniciar o jogo',['Cartoon','Realista']],['cheat','Cheats','Digite um código secreto',['⌨️ Digitar código']]];
 function draw(){g('cfl').innerHTML=ROWS.map(([k,n,s,o])=>{
-  const opts=k=='blood'||k=='gfx'?[0,1]:[0,1,2];
+  const opts=k=='cheat'?[0]:k=='blood'||k=='gfx'?[0,1]:[0,1,2];
   return "<div class='cfr'><div class='cfn'>"+n+"<small>"+s+"</small></div><div class='cfo'>"+opts.map(i=>"<div data-k='"+k+"' data-i='"+i+"' class='"+(CFG[k]==i?(k=='blood'&&i==0?'on off':'on'):'')+"'>"+o[i]+"</div>").join('')+"</div></div>"}).join('');
- g('cfl').querySelectorAll('.cfo div').forEach(e=>e.onclick=()=>{const k=e.dataset.k,i=+e.dataset.i;if(CFG[k]===i)return;CFG[k]=i;save();
+ g('cfl').querySelectorAll('.cfo div').forEach(e=>e.onclick=()=>{const k=e.dataset.k,i=+e.dataset.i;if(k=='cheat'){openCheat();return}if(CFG[k]===i)return;CFG[k]=i;save();
   if(k=='res')applyRes();else if(k=='ren')applyRen();else if(k=='tex')applyTex();else if(k=='pop')applyPop();else if(k=='gfx')try{msg('Estilo gráfico aplicado ao reiniciar o jogo',3000)}catch(x){}draw()})}
 function open(){draw();g('cf').style.display='block'}
+// ---------- cheats ----------
+document.head.insertAdjacentHTML('beforeend',`<style>
+#cht{position:fixed;inset:0;z-index:95;display:none;background:#000c;align-items:center;justify-content:center;font-family:system-ui,sans-serif}
+#chb{width:min(86vw,520px);background:#14161c;border:.6vh solid #07080a;border-radius:2vh;padding:3vh 3vh 2.4vh;text-align:center;box-shadow:0 1vh 0 #0008}
+#chb h3{margin:0 0 1.6vh;font:900 4.4vh system-ui;color:#fff}
+#chi{width:100%;box-sizing:border-box;padding:1.6vh 2vh;font:800 4vh system-ui;text-align:center;border-radius:1.4vh;border:.5vh solid #0a0a0a;background:#f4f4f4;color:#111;outline:none;user-select:text;-webkit-user-select:text;touch-action:manipulation}
+#chm{min-height:3.4vh;margin:1.4vh 0 .6vh;font:700 2.8vh system-ui;color:#ffd23a}
+#chr{display:flex;gap:1.6vh}#chr div{flex:1;padding:1.6vh;border-radius:1.4vh;border:.5vh solid #0a0a0a;font:900 3.6vh system-ui;cursor:pointer;-webkit-tap-highlight-color:transparent}
+#chok{background:linear-gradient(#58e41a,#2c9a06)}#chx{background:linear-gradient(#ff4141,#b80d0d)}
+</style>`);
+document.body.insertAdjacentHTML('beforeend',"<div id='cht'><div id='chb'><h3>Cheats</h3><input id='chi' type='text' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' maxlength='24' placeholder='Digite o código'><div id='chm'></div><div id='chr'><div id='chx'>Fechar</div><div id='chok'>Ativar</div></div></div></div>");
+const CHEATS={money:()=>{money+=999999;try{snd('cash')}catch(e){}return '💰 +$999.999 adicionados!'}};
+const chi=g('chi'),chm=g('chm');
+['keydown','keyup','keypress'].forEach(t=>chi.addEventListener(t,e=>{e.stopPropagation();if(t=='keydown'&&(e.key=='Enter'||e.keyCode==13)){e.preventDefault();runCheat()}if(t=='keydown'&&e.key=='Escape')closeCheat()}));
+function runCheat(){const c=(chi.value||'').trim().toLowerCase(),f=CHEATS[c];chm.style.color=f?'#58e41a':'#ff6060';chm.textContent=f?f():'Código inválido';chi.value='';if(f){try{chi.blur()}catch(e){}}}
+function openCheat(){chm.textContent='';chi.value='';g('cht').style.display='flex';try{chi.focus()}catch(e){}setTimeout(()=>{try{if(document.activeElement!==chi)chi.focus()}catch(e){}},60)}
+function closeCheat(){try{chi.blur()}catch(e){}g('cht').style.display='none'}
+g('chok').onclick=runCheat;g('chx').onclick=closeCheat;
+window.CHEATS=CHEATS;
 g('cfv').onclick=()=>{g('cf').style.display='none'};
-addEventListener('keydown',e=>{if(e.code=='Escape'&&g('cf').style.display=='block'){g('cf').style.display='none';e.stopImmediatePropagation()}},true);
+addEventListener('keydown',e=>{if(e.code=='Escape'&&g('cf').style.display=='block'&&g('cht').style.display!='flex'){g('cf').style.display='none';e.stopImmediatePropagation()}},true);
 window.CFGUI={open,applyAll};
 // ---------- update ----------
 let init=0,pt=0;const _u=update;update=function(dt){_u(dt);
@@ -3402,7 +3421,7 @@ const intAt=(x,z)=>{if(x>-460&&x<-335&&z>-150&&z<450){for(let i=0;i<PR.length;i+
 const _pl=place;place=function(x,z,yw){const i=intAt(x,z);if(i>=0){try{buildInt(PR[i])}catch(e){console.log('int',e)}IN.prop=i}else IN.prop=-1;_pl(x,z,yw)};
 // ---------- exteriores ----------
 const free=(x,z,hw,hd)=>!solids.some(b=>b.h>.3&&x+hw>b.x0&&x-hw<b.x1&&z+hd>b.z0&&z-hd<b.z1);
-const used=[];const inPond=(x,z,m)=>(window.PONDS||[]).some(q=>x>q[0]-m&&x<q[1]+m&&z>q[2]-m&&z<q[3]+m);const ptsOk=(x,z)=>!inPond(x,z,22)&&used.every(u=>Math.hypot(u.x-x,u.z-z)>40)&&MK.every(m=>m.near||Math.hypot(m.x-x,m.z-z)>26)&&Math.hypot(x+125,z+67)>70&&Math.hypot(x-230,z+138)>95&&!(x>-310&&x<-185&&z>-170&&z<170);
+const used=[];const inPond=(x,z,m)=>(window.PONDS||[]).some(q=>x>q[0]-m&&x<q[1]+m&&z>q[2]-m&&z<q[3]+m);const ptsOk=(x,z)=>!inPond(x,z,22)&&used.every(u=>Math.hypot(u.x-x,u.z-z)>40)&&MK.every(m=>m.near||Math.hypot(m.x-x,m.z-z)>26)&&Math.hypot(x+125,z+67)>70&&Math.hypot(x-230,z+138)>95&&Math.hypot(x-216,z-14)>40&&!(x>-310&&x<-185&&z>-170&&z<170);
 function place1(p){const bw=p.k=='apto'||p.k=='aptoL'?13:p.k=='mansao'?(p.id=='m2'?24:20):p.k=='luxo'?(p.pool?17:14):12,bd=p.k=='apto'||p.k=='aptoL'?10:p.k=='mansao'?13:10;
  p.BW=bw;p.BD=bd;const sw=bw/2+4,sd=(bd+13)/2+1;const pts=[];const sides=gSides(p,bw);
  for(let x=-290;x<=290;x+=8)for(let z=-290;z<=290;z+=8)pts.push([x,z]);for(let i=pts.length-1;i>0;i--){const j=R()*(i+1)|0;[pts[i],pts[j]]=[pts[j],pts[i]]}
@@ -4020,10 +4039,13 @@ if(TERR||F.mts.length||F.hills.length||F.pits.length||F.river||RAMPS.length){
  const rest=[];const sv=(o,k)=>{rest.push(o,k,o[k])};
  const on=rd.render.bind(rd);
  rd.render=function(s,c){rest.length=0;try{
-   const pv=P.veh,f=pv||P;const hc=Hg(f.x,f.z);if(hc!==0){sv(c.position,'y');c.position.y+=hc}
-   if(!pv&&P.g&&P.g.visible){const h=Hg(P.x,P.z);if(h!==0){sv(P.g.position,'y');P.g.position.y+=h}}
+   const pv=P.veh,f=pv||P;
+   // v31: na água a superfície é plana — nadador e barco não afundam junto com o leito do rio/buraco
+   const swim=!pv&&P.g&&Math.abs(P.g.rotation.x-1.2)<.05&&!P.rag,flt=swim||(pv&&pv.t=='boat');
+   let hc=Hg(f.x,f.z);if(flt&&hc<0)hc=0;if(hc!==0){sv(c.position,'y');c.position.y+=hc}
+   if(!pv&&P.g&&P.g.visible){let h=Hg(P.x,P.z);if(swim&&h<0)h=0;if(h!==0){sv(P.g.position,'y');P.g.position.y+=h}}
    const rider=pv&&P.g&&P.g.visible?P.g:null;
-   for(const v of vehs){const g=v.g;if(!g||v.dead&&v.snk==2)continue;const h=Hg(v.x,v.z);
+   for(const v of vehs){const g=v.g;if(!g||v.dead&&v.snk==2)continue;let h=Hg(v.x,v.z);if(v.t=='boat'&&h<0)h=0;
     if(h!==0){sv(g.position,'y');g.position.y+=h;if(rider&&v===pv){sv(rider.position,'y');rider.position.y+=h}}
     if(v.t=='boat'||(v.t=='plane'&&v.y>.5))continue;
     let pt=0;
@@ -4250,7 +4272,29 @@ function unstick(v){if(['plane','boat','heli'].includes(v.t)||v===P.veh||v.dead|
  const r=(S[v.t]?S[v.t].r:2)+.8,c=[[b.x0-r,v.z,v.x-b.x0],[b.x1+r,v.z,b.x1-v.x],[v.x,b.z0-r,v.z-b.z0],[v.x,b.z1+r,b.z1-v.z]].sort((a,b)=>a[2]-b[2]);
  for(const [x,z] of c){if(!inSolid(x,z,1.2)&&!wet(x,z)&&!vehs.some(o=>o!==v&&Math.hypot(o.x-x,o.z-z)<4)){v.x=x;v.z=z;v.g.position.x=x;v.g.position.z=z;return 1}}return 0}
 let vm=0;vehs.forEach(v=>{vm+=unstick(v)});lg('veiculos tirados de dentro de predios',vm);
-const _u=update;let ut=0;update=function(dt){_u(dt);if(PAUSED)return;if((ut-=dt)<=0){ut=3;try{vehs.forEach(unstick)}catch(e){}}};
+// ---------- 4) água: tudo que parece água é água, e quem nada fica na superfície certa ----------
+const PD=window.PONDS=window.PONDS||[];const WL=[];
+try{
+ // terreno abaixo do nível do mar (-0,35): rio inteiro (com margens) e buracos da floresta ficam alagados — vira água de verdade
+ const X=window.XTERR;let add=0,cells=0;
+ if(X&&X.HG){const{HG,NG,ST,OR}=X,SEA=-.38;
+  for(let j=0;j<NG-1;j++){let run=-1;for(let i=0;i<=NG-1;i++){const wet=i<NG-1&&HG[j*NG+i]<SEA&&HG[j*NG+i+1]<SEA&&HG[(j+1)*NG+i]<SEA&&HG[(j+1)*NG+i+1]<SEA;
+   if(wet){cells++;if(run<0)run=i}else if(run>=0){PD.push([OR+run*ST,OR+i*ST,OR+j*ST,OR+(j+1)*ST]);add++;run=-1}}}}
+ // buracos alagados: raio onde o fundo fica abaixo da superfície
+ if(X&&X.F&&X.F.pits)X.F.pits.forEach(p=>{let r=0;for(let t=0;t<p.R;t+=.1){if(p.D*Math.pow(.5+.5*Math.cos(Math.PI*t/p.R),1.2)>.38)r=t;else break}if(r>1){const h=r*.8;PD.push([p.x-h,p.x+h,p.z-h,p.z+h]);add++}});
+ // lagos/piscinas visíveis que tinham saído da lista da física
+ const inPD=(x,z)=>PD.some(r=>x>r[0]&&x<r[1]&&z>r[2]&&z<r[3]);let lk=0;
+ flat.forEach(f=>{col.setHex(f.c);col.getHSL(hsl);if(!(hsl.h>.5&&hsl.h<.62&&hsl.s>.4&&hsl.l>.3))return;if(f.x1-f.x0<3||f.z1-f.z0<3)return;
+  const cx=(f.x0+f.x1)/2,cz=(f.z0+f.z1)/2;if(!inPD(cx,cz)){PD.push([f.x0+.3,f.x1-.3,f.z0+.3,f.z1-.3]);lk++}WL.push([f.x0,f.x1,f.z0,f.z1,f.top])});
+ lg('agua: faixas alagadas',add,'celulas',cells,'lagos registrados',lk)}catch(e){lg('agua',e)}
+// nível da superfície visível: lago/piscina > terreno alagado/mar (-0,35)
+const WLV=window.WLV=(x,z)=>{let h=null;for(const w of WL)if(x>w[0]&&x<w[1]&&z>w[2]&&z<w[3]){h=h==null?w[4]:Math.max(h,w[4])}if(h!=null)return h;
+ if(Math.abs(x)>345||Math.abs(z)>345)return -.35;try{if(XTERR.H(x,z)<-.3)return -.35}catch(e){}return .1};
+const RING=sc.children.find(o=>o.isMesh&&o.geometry&&o.geometry.type=='RingGeometry'&&o.geometry.parameters.innerRadius==.7);
+const swimFix=()=>{
+ if(!P.veh&&!P.rag&&P.g.visible&&Math.abs(P.g.rotation.x-1.2)<.05){const l=WLV(P.x,P.z);P.g.position.y+=l-.1;if(RING&&RING.visible)RING.position.y=l+.03}
+ peds.forEach(p=>{if(p.swm&&!p.rag&&Math.abs(p.g.rotation.x-1.2)<.05)p.g.position.y+=WLV(p.x,p.z)-.1})};
+const _u=update;let ut=0;update=function(dt){_u(dt);try{swimFix()}catch(e){}if(PAUSED)return;if((ut-=dt)<=0){ut=3;try{vehs.forEach(unstick)}catch(e){}}};
 try{console.log('v31',LOG.join(' | '))}catch(e){}
 })();
 </script><script type='text/game' class='gb'>
@@ -4420,7 +4464,7 @@ let sct=0;const _u=update;update=function(dt){_u(dt);U.uT.value+=dt;
  try{if(sc.fog&&!sc.fog.color.equals(FOGC))sc.fog.color.copy(FOGC);if(sc.background)sc.background=null}catch(e){}
  if((sct-=dt)<=0){sct=.5;scan()}
  try{vehs.forEach(v=>{const s=v.g&&v.g.userData.shd;if(s)s.visible=!v.dead&&!v.snk&&(v.y||0)<2.2&&v.g.visible});
-  psi=0;const px=cam.position.x,pz=cam.position.z,one=(p,o)=>{const g=p.g;if(!g||!g.visible||!g.parent||p.dead>0)return;if(Math.abs(p.x-px)>70||Math.abs(p.z-pz)>70)return;const y=p.rag?.18:Math.max(.18,(p.y||.9)-.72);pshd(p.x,y,p.z,p.rag?1.6:1.15)};
+  psi=0;const px=cam.position.x,pz=cam.position.z,one=(p,o)=>{const g=p.g;if(!g||!g.visible||!g.parent||p.dead>0||Math.abs(g.rotation.x-1.2)<.05)return;if(Math.abs(p.x-px)>70||Math.abs(p.z-pz)>70)return;const y=p.rag?.18:Math.max(.18,(p.y||.9)-.72);pshd(p.x,y,p.z,p.rag?1.6:1.15)};
   peds.forEach(p=>one(p));if(!P.veh)one(P);for(let i=psi;i<PS.length;i++)PS[i].visible=false}catch(e){}};
 })();
 </script><script type='text/game' class='gb'>

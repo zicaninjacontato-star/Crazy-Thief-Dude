@@ -21,7 +21,9 @@ jobs:
         run: |
           sed -i 's/android:label="Crazy Thief Dude"/android:label="Crazy Thief Dude (Remaster)"/' app/src/main/AndroidManifest.xml
           sed -i "s/applicationId 'com.crazythiefdude.game'/applicationId 'com.crazythiefdude.remaster'/" app/build.gradle
-          sed -i "s#<title>Crazy Thief Dude</title>#<title>Crazy Thief Dude (Remaster)</title>#; s#>CRAZY THIEF DUDE</div>#>CRAZY THIEF DUDE<br><span style='font-size:18px;color:\#ffd23a;letter-spacing:4px'>REMASTER</span></div>#" app/src/main/assets/game.html
+          sed -i "s#<title>Crazy Thief Dude</title>#<title>Crazy Thief Dude (Remaster)</title>#; s#>CRAZY THIEF DUDE</div>#>CRAZY THIEF DUDE<br><span style='font-size:18px;color:\#ffd23a;letter-spacing:4px'>REMASTER</span><br><span style='font-size:12px;opacity:.7;letter-spacing:1px'>build ${GITHUB_RUN_NUMBER}</span></div>#" app/src/main/assets/game.html
+          sed -i "s/versionCode 1$/versionCode ${GITHUB_RUN_NUMBER}/; s/versionName '1.0'/versionName '1.${GITHUB_RUN_NUMBER}'/" app/build.gradle
+          grep -q "versionCode ${GITHUB_RUN_NUMBER}" app/build.gradle
           grep -q 'Crazy Thief Dude (Remaster)' app/src/main/AndroidManifest.xml
           grep -q "com.crazythiefdude.remaster" app/build.gradle
           grep -q 'REMASTER</span>' app/src/main/assets/game.html
@@ -42,4 +44,4 @@ jobs:
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk CrazyThiefDude-Remaster.apk
           gh release delete apk-remaster --yes --cleanup-tag || true
-          gh release create apk-remaster CrazyThiefDude-Remaster.apk --target "$GITHUB_SHA" --title "Crazy Thief Dude (Remaster) (APK)" --notes "Versão Remaster com gráficos realistas. Instala ao lado do Crazy Thief Dude original. Baixe o CrazyThiefDude-Remaster.apk e instale."
+          gh release create apk-remaster CrazyThiefDude-Remaster.apk --target "$GITHUB_SHA" --title "Crazy Thief Dude (Remaster) (APK)" --notes "Build ${GITHUB_RUN_NUMBER}. Versão Remaster com gráficos realistas. Instala ao lado do Crazy Thief Dude original. Baixe o CrazyThiefDude-Remaster.apk e instale."
