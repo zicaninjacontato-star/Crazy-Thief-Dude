@@ -6,6 +6,7 @@ import android.os.Bundle;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -35,7 +36,15 @@ public class MainActivity extends Activity {
         web.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         web.setWebViewClient(new WebViewClient());
         web.setWebChromeClient(new WebChromeClient());
+        web.addJavascriptInterface(new AppBridge(), "AndroidApp");
         web.loadUrl("file:///android_asset/game.html");
+    }
+
+    /** Ponte para o jogo: o botão "Sair" fecha o app de verdade e volta para a tela inicial do celular. */
+    private class AppBridge {
+        @JavascriptInterface public void exit() {
+            runOnUiThread(() -> { finishAndRemoveTask(); });
+        }
     }
 
     private void immersive() {
