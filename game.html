@@ -16,6 +16,19 @@ canvas{display:block}
 <div class="b" id="bC" style="right:calc(20px + env(safe-area-inset-right,0px));bottom:calc(140px + env(safe-area-inset-bottom,0px))">⬆️</div>
 <div class="b" id="bD" style="right:calc(100px + env(safe-area-inset-right,0px));bottom:calc(110px + env(safe-area-inset-bottom,0px))">🏃</div></div>
 <script>
+// ===== v40 (desempenho): o HUD reescrevia textos/estilos iguais a cada quadro, forçando o navegador a recalcular a tela.
+// Agora uma escrita idêntica ao valor atual é ignorada (o resultado visual é o mesmo).
+(function(){try{
+ const TD=Object.getOwnPropertyDescriptor(Node.prototype,'textContent');
+ Object.defineProperty(Node.prototype,'textContent',{configurable:true,enumerable:TD.enumerable,get:TD.get,set(v){v=v==null?'':String(v);if(this.nodeType===1){const f=this.firstChild;if(f&&f===this.lastChild&&f.nodeType===3&&f.data===v)return;if(v===''&&!f)return}TD.set.call(this,v)}});
+ const CD=Object.getOwnPropertyDescriptor(Element.prototype,'className');
+ Object.defineProperty(Element.prototype,'className',{configurable:true,enumerable:CD.enumerable,get:CD.get,set(v){if(CD.get.call(this)===String(v))return;CD.set.call(this,v)}});
+ for(const SP of[window.CSSStyleProperties&&CSSStyleProperties.prototype,CSSStyleDeclaration.prototype]){if(!SP)continue;
+ ['display','opacity','width','height','left','top','transform','background','backgroundColor','color','visibility','borderColor','fontSize'].forEach(k=>{const d=Object.getOwnPropertyDescriptor(SP,k);if(!d||!d.set)return;
+  Object.defineProperty(SP,k,{configurable:true,enumerable:d.enumerable,get:d.get,set(v){const s=v==null?'':String(v);if(d.get.call(this)===s)return;d.set.call(this,v)}})})}
+}catch(e){}})();
+</script>
+<script>
 // ===== v34: proteção do áudio — limite de vozes, limitador mestre, valores inválidos e retomada automática =====
 (function(){
 const AC0=window.AudioContext||window.webkitAudioContext;if(!AC0)return;
@@ -216,6 +229,12 @@ stk.onpointerup=stk.onpointercancel=()=>{sid=null;J.x=J.y=0;kn.style.transform='
 const bind=(id,d,u)=>{const e=$(id);e.onpointerdown=ev=>{ev.preventDefault();d()};if(u)e.onpointerup=e.onpointercancel=e.onpointerleave=u};
 let rn=0;bind('bA',()=>act());bind('bD',()=>rn=1,()=>rn=0);bind('bB',()=>tb=1,()=>tb=0);bind('bC',()=>tc=1,()=>tc=0);
 // ---------- LOOP ----------
+// v40: pares de veículos por vizinhança (células do tamanho do maior alcance de colisão); antes eram testados todos contra todos
+const VPM=new Map(),VPP=[];let VPC=0;
+function VPAIRS(cb){if(!VPC){let mr=3;for(const k in S)if(S[k]&&S[k].r>mr)mr=S[k].r;VPC=Math.max(12,Math.ceil(2*mr+4))}const cs=VPC;VPM.clear();let pi=0;
+ for(let i=0;i<vehs.length;i++){const v=vehs[i],k=(Math.floor(v.x/cs)+500)*4096+(Math.floor(v.z/cs)+500);let a=VPM.get(k);if(!a){a=VPP[pi]||(VPP[pi]=[]);pi++;a.length=0;VPM.set(k,a)}a.push(i)}
+ for(let i=0;i<vehs.length;i++){const v=vehs[i];if(!v)continue;const cx=Math.floor(v.x/cs)+500,cz=Math.floor(v.z/cs)+500;
+  for(let ox=-1;ox<=1;ox++)for(let oz=-1;oz<=1;oz++){const a=VPM.get((cx+ox)*4096+cz+oz);if(!a)continue;for(let q=0;q<a.length;q++){const j=a[q];if(j>i&&vehs[j])cb(v,vehs[j])}}}}
 function update(dt){
  I.ax=cl(J.x+((K.KeyD||K.ArrowRight)?1:0)-((K.KeyA||K.ArrowLeft)?1:0),-1,1);I.ay=cl(J.y+((K.KeyW||K.ArrowUp)?1:0)-((K.KeyS||K.ArrowDown)?1:0),-1,1);I.b=tb||K.KeyF;I.c=tc||K.Space;
  H.q+=dt;if(H.q>8)H.h=Math.max(0,H.h-.08*dt);
@@ -227,10 +246,10 @@ function update(dt){
  else{const v=P.veh;drive(v,I.ax,I.ay,I.c,dt);P.x=v.x;P.z=v.z;P.yaw=v.yaw;
   if(v.t!='plane'&&v.t!='boat'&&Math.abs(v.sp)>6)peds.forEach(p=>{if(!p.rag&&(window.VNEAR?VNEAR(v,p,.5):Math.hypot(p.x-v.x,p.z-v.z)<S[v.t].r+.6))hurt(p,99,v.x,v.z,v.sp*.8)})}
  vehs.forEach(v=>{if(v===P.veh)return;if(v.dead){v.T-=dt;return}if(v.ai)carAI(v,dt);else if(v.tr)trafAI(v,dt);else if(Math.abs(v.sp)>.3)drive(v,0,0,1,dt)});
- for(let i=0;i<vehs.length;i++)for(let j=i+1;j<vehs.length;j++){const a=vehs[i],b=vehs[j];if((a.t=='boat')!=(b.t=='boat')||Math.abs(a.y-b.y)>3)continue;
+ VPAIRS((a,b)=>{if((a.t=='boat')!=(b.t=='boat')||Math.abs(a.y-b.y)>3)return;
   let d=Math.hypot(a.x-b.x,a.z-b.z),rr=S[a.t].r+S[b.t].r,ob=null;if(window.VCOL&&d<rr+3){ob=VCOL(a,b);rr=ob?d+ob.k*2:0}
   if(d<rr&&d>.01){const nx=ob?ob.nx:(a.x-b.x)/d,nz=ob?ob.nz:(a.z-b.z)/d,k=ob?ob.k/2:(rr-d)/2;a.x+=nx*k;a.z+=nz*k;b.x-=nx*k;b.z-=nz*k;const rel=Math.abs(a.sp)+Math.abs(b.sp);
-   if(rel>9&&!a.dead&&!b.dead&&!(a.tr&&b.tr)){dmgV(a,rel*1.2);dmgV(b,rel*1.2);a.sp*=.4;b.sp*=.4}a.g.position.set(a.x,a.y,a.z);b.g.position.set(b.x,b.y,b.z)}}
+   if(rel>9&&!a.dead&&!b.dead&&!(a.tr&&b.tr)){dmgV(a,rel*1.2);dmgV(b,rel*1.2);a.sp*=.4;b.sp*=.4}a.g.position.set(a.x,a.y,a.z);b.g.position.set(b.x,b.y,b.z)}});
  copSpawn(dt);
  peds.forEach(p=>{if(p.rag){ragU(p,dt);return}const ox=p.x,oz=p.z;
   if(p.cop){copAI(p,dt);if(!stars()&&H.q>6)p.lv=1}
@@ -341,7 +360,7 @@ const _u=update;update=function(dt){
  gren.forEach(g=>{const gb=g.b||0,gw=g.y+gb;if(g.rk&&g.t>0&&(gw<(window.GRH?GRH(g.x,g.z):0)+.3||solids.some(b=>gw<b.h&&g.x>b.x0&&g.x<b.x1&&g.z>b.z0&&g.z<b.z1)||peds.some(p=>!p.rag&&Math.hypot(p.x-g.x,p.z-g.z)<1.5&&Math.abs(gw-((window.GRH?GRH(p.x,p.z):0)+1.2))<1.8)||vehs.some(v=>!v.dead&&v!==P.veh&&Math.hypot(v.x-g.x,v.z-g.z)<2.5&&Math.abs(gw-((window.GRH?GRH(v.x,v.z):0)+(v.y||0)+.8))<2.2)))g.t=-1});
  SH.m.forEach((m,i)=>m.rotation.y=SH.on&&i==SH.sel?performance.now()/500:PI/2);
  eng();vt-=dt;if(vt<0){vt=1.5+R()*3;const c=peds.filter(p=>!p.cop&&!p.rag&&Math.hypot(p.x-P.x,p.z-P.z)<25);if(c.length){const p=c[R()*c.length|0];snd('voice',p.x,p.z,.9)}}
- mini();const o=own[cur];$('mon').textContent='$'+money;$('amo').textContent=o?o.mag+'/'+o.res+(rl>0?' ⟳':''):'';WICON($('wbt'),cur,'92%');
+ if((window.__mf=(window.__mf||0)+1)%2==0||P.veh)mini();const o=own[cur];$('mon').textContent='$'+money;$('amo').textContent=o?o.mag+'/'+o.res+(rl>0?' ⟳':''):'';WICON($('wbt'),cur,'92%');
  if(!SH.on){WICON($('bB'),cur,'80%');$('rlb').style.display=o&&o.mag<W[cur].cl&&o.res>0&&rl<=0?'flex':'none';
   const nv=vehs.some(v=>!v.dead&&Math.hypot(v.x-P.x,v.z-P.z)<5);$('bA').textContent=nearShop()?'🛒':'🚗';$('bA').style.opacity=nearShop()||nv||P.veh?1:.4}};
 </script><script type='text/game' class='gb'>
@@ -660,7 +679,7 @@ const _bk=boom;boom=function(x,z,y){_bk(x,z,y);heads.forEach(h=>{if(!h.br&&Math.
 function redStop(v,a){const c=a?v.z:v.x,ln=v.dir>0?Math.ceil(c/50)*50:Math.floor(c/50)*50;if(Math.abs(ln)>200)return false;const ix=a?v.rl:ln,iz=a?ln:v.rl;if(inLK(ix,iz,8)||ix%100||iz%100)return false;const hd=HM[ix+'_'+iz+'_'+v.ax];if(hd&&hd.br)return false;const r=sg(v.ax,LT)[0];if(r=='g')return false;
  if(v.dl!==ln){v.dl=ln;v.dr=R()<.05}if(v.dr)return false;const ds=(ln-c)*v.dir-((a&&ln==0?9:6)+2.6),win=v.sp*.25+1.2;return ds>-1&&ds<win&&(r=='r'||ds>1.5)}
 trafAI=function(v,dt){let a=v.ax=='z';const fx=v.x+(a?0:v.dir*7),fz=v.z+(a?v.dir*7:0),nr=(o,r)=>Math.hypot(o.x-fx,o.z-fz)<r;
- const blk=nr(P,4)||peds.some(p=>!p.rag&&nr(p,3.2))||vehs.some(o=>o!==v&&!o.dead&&nr(o,5))||redStop(v,a);
+ const NQ=window.NBQ,blk=nr(P,4)||(NQ&&NQ.ok?NQ.anyPed(fx,fz,3.2,p=>!p.rag):peds.some(p=>!p.rag&&nr(p,3.2)))||(NQ&&NQ.ok?NQ.anyVeh(fx,fz,5,o=>o!==v&&!o.dead):vehs.some(o=>o!==v&&!o.dead&&nr(o,5)))||redStop(v,a);
  if(blk&&(v.hn=(v.hn||0)-dt)<0){v.hn=3;snd('horn',v.x,v.z,.8)}
  v.sp+=((blk?0:11)-v.sp)*Math.min(1,dt*(blk?4:1.5));
  const c=a?v.z:v.x;xing(v,c,c+v.dir*v.sp*dt,.4);a=v.ax=='z';
@@ -2061,8 +2080,8 @@ const _u=update;update=function(dt){
 (function(){
 const FZ=window.TRAINDBG.FZ;
 // ---------- tiros não atravessam paredes ----------
-function wallsOn(ax,az,bx,bz){const x0=Math.min(ax,bx)-1,x1=Math.max(ax,bx)+1,z0=Math.min(az,bz)-1,z1=Math.max(az,bz)+1,r=[];
- for(const s of solids)if(s.h>2.4&&s.x1>x0&&s.x0<x1&&s.z1>z0&&s.z0<z1)r.push(s);return r}
+const WOQ=[];function wallsOn(ax,az,bx,bz){const x0=Math.min(ax,bx)-1,x1=Math.max(ax,bx)+1,z0=Math.min(az,bz)-1,z1=Math.max(az,bz)+1,r=[];
+ for(const s of(window.SGQ?SGQ(x0,x1,z0,z1,WOQ):solids))if(s.h>2.4&&s.x1>x0&&s.x0<x1&&s.z1>z0&&s.z0<z1)r.push(s);return r}
 function hitPt(a,b,pad){const dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz);if(len<1.5)return null;const w=wallsOn(a.x,a.z,b.x,b.z);if(!w.length)return null;
  const n=Math.ceil(len/.7);for(let i=1;i<=n;i++){const t=i/n;if(len*(1-t)<pad)break;const x=a.x+dx*t,z=a.z+dz*t;for(const s of w)if(x>s.x0&&x<s.x1&&z>s.z0&&z<s.z1)return{x:a.x+dx*(i-1)/n,z:a.z+dz*(i-1)/n}}return null}
 const _shoot=shoot;shoot=function(w){
@@ -2215,16 +2234,17 @@ const _u=update;update=function(dt){
  try{evTick(dt)}catch(e){console.log('evt',e);evAbort()}
  lod();
  // escombros baixos não são parede invisível
- for(const b of solids){if(b.ms&&b.hh&&!b.fall&&b.k<=.09){const h=b.hh*b.k;b.h=h<.45?.01:h}}
+ if((window.__esc=(window.__esc||0)-dt)<0){window.__esc=.3;for(const b of solids){if(b.ms&&b.hh&&!b.fall&&b.k<=.09){const h=b.hh*b.k;b.h=h<.45?.01:h}}}
  // círculo de busca acompanha você quando a polícia está perto
  const st=stars();
  if(st>0&&AR.length){const cn=peds.some(p=>p.cop&&!p.rag&&Math.hypot(p.x-P.x,p.z-P.z)<30)||vehs.some(v=>v.ai&&!v.dead&&Math.hypot(v.x-P.x,v.z-P.z)<30);
   if(cn){AR.length=1;const c=AR[0];c.x=P.x;c.z=P.z;c.red=1;c.out=0}
   const r=[55,55,85,115][st];AR.forEach(c=>{c.r=r})}
  // pedestres: separação e sem teletransporte
- const n=peds.length;
+ const n=peds.length;for(let i=0;i<n;i++)peds[i].__i=i;const NQ=window.NBQ&&NBQ.ok?NBQ:null;// v40: só vizinhos próximos (antes todos contra todos)
  for(let i=0;i<n;i++){const p=peds[i];if(p.ov>0)p.ov=Math.max(0,p.ov-dt*.5);if(p.rag||p.sm||p.swm||p.bw!=null||p.bwb||p.evw)continue;
-  for(let j=i+1;j<n;j++){const q=peds[j];if(q.rag||q.sm||q.swm||q.bw!=null||q.bwb||q.evw)continue;
+  const cand=NQ?NQ.pedsNear(p.x,p.z,1.5):null,cn=cand?cand.length:n;
+  for(let jj=cand?0:i+1;jj<cn;jj++){const q=cand?cand[jj]:peds[jj];if(cand&&!(q.__i>i&&peds[q.__i]===q))continue;if(q.rag||q.sm||q.swm||q.bw!=null||q.bwb||q.evw)continue;
    const dx=q.x-p.x,dz=q.z-p.z;if(dx>.7||dx<-.7||dz>.7||dz<-.7)continue;const d=Math.hypot(dx,dz);
    if(d<.6){const pu=(.6-d)/2,nx=d>.01?dx/d:R()-.5,nz=d>.01?dz/d:R()-.5;p.x-=nx*pu;p.z-=nz*pu;q.x+=nx*pu;q.z+=nz*pu;
     p.ov=(p.ov||0)+dt;if(p.ov>2.5){p.ov=0;if(p.ax){p.dir*=-1}}}}}
@@ -5237,8 +5257,9 @@ Object.assign(DBG,{wound,headPop,limbOff,bodyMarks,crowd,ambulance,playerHit,dri
 (function(){
 const GH=(x,z)=>{try{return window.GRH?GRH(x,z):0}catch(e){return 0}},DBG=window.RAGDBG||{};window.V34=DBG;
 // ---------- linha de visão exata (segmento x caixa) — paredes finas não deixam mais tiros passarem ----------
-function segBlock(ax,az,ya,bx,bz,yb,minH){const dx=bx-ax,dz=bz-az,x0=Math.min(ax,bx),x1=Math.max(ax,bx),z0=Math.min(az,bz),z1=Math.max(az,bz);
- for(const s of solids){if(!(s.h>minH)||s.x1<x0||s.x0>x1||s.z1<z0||s.z0>z1)continue;let t0=0,t1=1;
+const SBQ=[];function segBlock(ax,az,ya,bx,bz,yb,minH){const dx=bx-ax,dz=bz-az,x0=Math.min(ax,bx),x1=Math.max(ax,bx),z0=Math.min(az,bz),z1=Math.max(az,bz);
+ const LST=window.SGQ?SGQ(x0,x1,z0,z1,SBQ):solids;// v40: só as paredes da grade espacial ao longo do segmento
+ for(const s of LST){if(!(s.h>minH)||s.x1<x0||s.x0>x1||s.z1<z0||s.z0>z1)continue;let t0=0,t1=1;
   if(Math.abs(dx)<1e-9){if(ax<=s.x0||ax>=s.x1)continue}else{let a=(s.x0-ax)/dx,b=(s.x1-ax)/dx;if(a>b){const q=a;a=b;b=q}t0=Math.max(t0,a);t1=Math.min(t1,b)}
   if(Math.abs(dz)<1e-9){if(az<=s.z0||az>=s.z1)continue}else{let a=(s.z0-az)/dz,b=(s.z1-az)/dz;if(a>b){const q=a;a=b;b=q}t0=Math.max(t0,a);t1=Math.min(t1,b)}
   if(t0<t1&&t1>.001&&t0<.999){const y0=ya+(yb-ya)*t0,y1=ya+(yb-ya)*t1;if(s.h>Math.min(y0,y1))return t0}}return -1}
@@ -5491,7 +5512,7 @@ const _pw=pedWalk;pedWalk=function(p,dt){const ox=p.x,oz=p.z;_pw(p,dt);if(p.rag|
  if(mv<.004&&!p.rx&&!p.sm&&p.bw==null&&SB(p.x,p.z,fx,fz)){p.yaw+=Math.PI+(RR()-.5)*1.4}};
 // ---------- trânsito: desvia de carro parado e segue ----------
 const _ta=trafAI;trafAI=function(v,dt){const az=v.ax=='z',hx=az?0:v.dir,hz=az?v.dir:0;
- if(!v._ov){let blk=null;for(const o of vehs){if(o===v||(o.dead&&o.snk==2))continue;const dx=o.x-v.x,dz=o.z-v.z,f=dx*hx+dz*hz,s=Math.abs(dx*hz-dz*hx);
+ if(!v._ov){let blk=null;const near=window.NBQ&&NBQ.ok?NBQ.vehsNear(v.x,v.z,14):vehs;for(const o of near){if(o===v||(o.dead&&o.snk==2))continue;const dx=o.x-v.x,dz=o.z-v.z,f=dx*hx+dz*hz,s=Math.abs(dx*hz-dz*hx);
    if(f>1.5&&f<13&&s<2.2){const still=Math.abs(o.sp||0)<.6&&!o.bd;o._still=still?(o._still||0)+dt:0;if(o._still>1.8||o.dead)blk=o;break}}
   if(blk){const c=az?nl(v.x):nl(v.z),cur=az?v.x:v.z;v._ov={b:blk,sg:Math.sign(c-cur)||1,o:0,st:1}}}
  const ov=v._ov;if(ov){if(az)v.x-=ov.o*ov.sg;else v.z-=ov.o*ov.sg}
@@ -5588,7 +5609,7 @@ const _u=update;update=function(dt){
  try{if(FZ.mode=='rag'&&P.rag&&!P.veh&&P.dead<=0){if(P.y>.5)flail(P.rag.t);else relax()}}catch(e){}
  try{const v=P.veh;if(v&&(v.t=='boat'||v.jet||/jet/i.test(v.t||''))&&SEAF()&&!SHK.on&&P.dead<=0)sharkStart()}catch(e){}
  try{if(window.MG&&MG.mode=='fb'){if(cur!='fist'){fbW=fbW||cur;cur='fist'}}else if(fbW){if(own[fbW])cur=fbW;fbW=null}}catch(e){}
- if((icT-=dt)<0){icT=1.5;try{hideIcons()}catch(e){}}
+ if((icT-=dt)<0){icT=1.5;const n=sc.children.length;if(n!==window.__icN){window.__icN=n;try{hideIcons()}catch(e){}}}
  };
 window.V35={HCR,killPilot,killGunner,sharkStart,SHK,ejectRider,nextStop};
 })();
@@ -5639,7 +5660,7 @@ function eligible(o){if(!o.isMesh||o.isInstancedMesh||o.isSkinnedMesh||o.isSprit
  return true}
 // ---------- acumuladores por setor ----------
 const V3=new T.Vector3(),N3=new T.Vector3(),NM=new T.Matrix3();
-function bucket(sx,sz,key,mat){const sk=sx+'_'+sz;let s=OPT.sectors.get(sk);if(!s){s={sx,sz,b:new Map(),meshes:[]};OPT.sectors.set(sk,s)}let b=s.b.get(key);if(!b){b={key,mat,pos:[],nor:[],uv:[],col:[],items:[],uvOn:!!(mat.map),mesh:null};s.b.set(key,b)}return b}
+let STAGE='';function bucket(sx,sz,key,mat){const ol=key==='OLM';key=STAGE+key;const sk=sx+'_'+sz;let s=OPT.sectors.get(sk);if(!s){s={sx,sz,b:new Map(),meshes:[]};OPT.sectors.set(sk,s)}let b=s.b.get(key);if(!b){b={key,mat,ol,pos:[],nor:[],uv:[],col:[],items:[],uvOn:!!(mat.map),mesh:null};s.b.set(key,b)}return b}
 // acrescenta os triângulos de (mesh, grupo/material) ao balde; guarda o intervalo de vértices para destacar depois
 function addPart(o,mat,start,count,b,rec,sharedOL){const g=o.geometry,pa=g.attributes.position,na=g.attributes.normal,ua=g.attributes.uv,ix=g.index;
  const mw=o.matrixWorld;NM.getNormalMatrix(mw);const t=mat.map,rx=t?t.repeat.x:1,ry=t?t.repeat.y:1,ox=t?t.offset.x:0,oy=t?t.offset.y:0;
@@ -5660,10 +5681,10 @@ function addMesh(o){const rec={o,parts:[],det:false,lv:true,ol:[]};const g=o.geo
  if(OLM.visible!==false)for(const c of o.children){c.updateMatrixWorld(true);const cg=c.geometry,cn=cg.index?cg.index.count:cg.attributes.position.count;const b=bucket(sx,sz,'OLM',OLM);addPart(c,OLM,0,cn,b,rec,true);rec.ol.push(c)}
  return rec}
 // ---------- construção dos setores ----------
-function buildMeshes(){for(const s of OPT.sectors.values()){for(const b of s.b.values()){if(!b.pos.length)continue;const g=new T.BufferGeometry();
+function buildMeshes(){for(const s of OPT.sectors.values()){for(const b of s.b.values()){if(b.mesh||!b.pos||!b.pos.length)continue;const g=new T.BufferGeometry();
   g.setAttribute('position',new T.Float32BufferAttribute(b.pos,3));g.setAttribute('normal',new T.Float32BufferAttribute(b.nor,3));if(b.uvOn)g.setAttribute('uv',new T.Float32BufferAttribute(b.uv,2));
-  if(b.key!=='OLM')g.setAttribute('color',new T.Float32BufferAttribute(b.col,3));g.computeBoundingSphere();g.computeBoundingBox();
-  const m=new T.Mesh(g,b.mat);m.matrixAutoUpdate=false;m.updateMatrix();m.updateMatrixWorld(true);m.userData.opt36=1;m.userData.sec=s;m.userData.ol=b.key==='OLM';m.name='opt36_'+s.sx+'_'+s.sz;sc.add(m);b.mesh=m;s.meshes.push(m);b.orig=new Float32Array(b.pos);b.pos=null;b.nor=null;b.uv=null;b.col=null}}}
+  if(!b.ol)g.setAttribute('color',new T.Float32BufferAttribute(b.col,3));g.computeBoundingSphere();g.computeBoundingBox();
+  const m=new T.Mesh(g,b.mat);m.matrixAutoUpdate=false;m.updateMatrix();m.updateMatrixWorld(true);m.userData.opt36=1;m.userData.sec=s;m.userData.ol=b.ol;m.name='opt36_'+s.sx+'_'+s.sz;sc.add(m);b.mesh=m;s.meshes.push(m);b.orig=new Float32Array(b.pos);b.pos=null;b.nor=null;b.uv=null;b.col=null}}}
 // some/volta com os triângulos de um objeto dentro do balde
 function setParts(rec,show){for(const it of rec.parts){const m=it.b.mesh;if(!m)continue;const a=m.geometry.attributes.position,arr=a.array,o=it.b.orig;
   for(let i=it.v0*3,e=(it.v0+it.n)*3;i<e;i++)arr[i]=show?o[i]:0;a.needsUpdate=true}}
@@ -5693,33 +5714,39 @@ const SNAP=new Map();const sig=m=>[hx(m.color),hx(m.emissive),m.visible,m.opacit
 function snapMats(){sc.children.forEach(o=>{if(!o.isMesh||o.isInstancedMesh)return;(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{if(m&&!SNAP.has(m))SNAP.set(m,sig(m))})})}
 const VOL=new Set();// materiais que mudam sozinhos (semáforos, luzes): não entram no agrupamento
 function vol(m){return VOL.has(m)||(SNAP.has(m)&&SNAP.get(m)!==sig(m))}
-function run(){for(const[m,s0]of SNAP)if(sig(m)!==s0)VOL.add(m);const t0=performance.now&&window.__pn?__pn():Date.now();DYN=dynSet();let n=0,skip=0;const list=[];
+// etapa 1 (na tela de carregamento): objetos estáticos soltos + compilação dos shaders
+function runStatic(){const t0=window.__pn?__pn():Date.now();DYN=dynSet();let n=0,skip=0;const list=[];
  for(const o of sc.children){if(DYN.has(o)){continue}if(!eligible(o)){if(o.isMesh)skip++;continue}if((Array.isArray(o.material)?o.material:[o.material]).some(m=>m&&vol(m))){skip++;continue}list.push(o)}
  for(const o of list){const rec=addMesh(o);if(!rec){skip++;continue}OPT.items.set(o,rec);n++}
- // grupos estáticos (criados depois do congelamento): só entram se não se moveram desde a primeira amostra
+ buildMeshes();
+ for(const[o,rec]of OPT.items){o.layers.set(HIDE);rec.ol.forEach(c=>c.layers.set(HIDE));guard(o,rec)}
+ watchMats();
+ let ic=0;for(const o of sc.children){if(!o.isInstancedMesh||o.frustumCulled||DYN.has(o))continue;try{instBounds(o);o.frustumCulled=true;ic++}catch(e){}}OPT.stats.instCulled=ic;
+ try{rd.compile(sc,cam)}catch(e){}
+ OPT.done=true;OPT.stats.merged=n;OPT.stats.skipped=skip;OPT.stats.sectorMeshes=[...OPT.sectors.values()].reduce((a,s)=>a+s.meshes.length,0);OPT.stats.ms=+((window.__pn?__pn():Date.now())-t0).toFixed(1);console.log('OPT36',JSON.stringify(OPT.stats))}
+// vigia: se um material agrupado mudar (cor/visibilidade), os objetos dele saem do grupo — verificado aos poucos, sem montar textos
+const msigN=m=>[m.color?m.color.r+m.color.g*7+m.color.b*49:0,m.emissive?m.emissive.r+m.emissive.g*7+m.emissive.b*49:0,m.visible?1:0,m.opacity,m.map?m.map.id:-1];
+function watchMats(){const seen=new Set(OPT.byMatArr.map(a=>a.m));for(const[o,rec]of OPT.items){(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{if(!m||seen.has(m))return;seen.add(m);OPT.byMatArr.push({m,s:msigN(m),o:[]})})}
+ const idx=new Map(OPT.byMatArr.map(a=>[a.m,a]));for(const[o,rec]of OPT.items){if(rec.wm)continue;rec.wm=1;(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{const a=m&&idx.get(m);if(a)a.o.push(o)})}}
+OPT.byMatArr=[];let wi=0;
+function watchTick(){const A=OPT.byMatArr;if(!A.length)return;for(let k=0;k<40&&k<A.length;k++){wi=(wi+1)%A.length;const a=A[wi],s=msigN(a.m);let ch=false;for(let i=0;i<5;i++)if(s[i]!==a.s[i]){ch=true;break}if(ch){a.s=s;a.o.forEach(x=>detach(x,'cor'));a.o=[]}}}
+// etapa 2 (já em jogo): grupos estáticos criados depois do congelamento, só se não se moveram desde a amostra
+function runGroups(){DYN=dynSet();let n=0;STAGE='g:';const newRecs=[];
  OPT.groups=[];for(const g of sc.children){if(DYN.has(g)||g.isMesh||!g.children.length||!GSNAP.has(g))continue;if(!stableG(g))continue;const its=[];
   g.traverse(o=>{if(o===g||!o.isMesh||!o.visible||!effVis(o))return;if(o.isInstancedMesh||o.isSkinnedMesh||o.renderOrder||o.frustumCulled===false||o.userData.opt36||o.userData.dmg||o.layers.mask!==1)return;
    if(o.children.some(c=>!(c.isMesh&&c.material===OLM&&!c.children.length)))return;if((Array.isArray(o.material)?o.material:[o.material]).some(m=>m&&vol(m)))return;
-   o.updateMatrixWorld(true);const rec=addMesh(o);if(!rec)return;rec.mw=o.matrixWorld.elements.slice();rec.ev=true;OPT.items.set(o,rec);its.push(rec);n++});
+   o.updateMatrixWorld(true);const rec=addMesh(o);if(!rec)return;rec.mw=o.matrixWorld.elements.slice();rec.ev=true;OPT.items.set(o,rec);its.push(rec);newRecs.push(rec);n++});
   if(its.length)OPT.groups.push({g,its})}
- buildMeshes();
- try{rd.compile(sc,cam)}catch(e){}// compila os shaders dos setores agora (evita travadinha quando aparecem)
- for(const[o,rec]of OPT.items){o.layers.set(HIDE);rec.ol.forEach(c=>c.layers.set(HIDE));guard(o,rec)}
- // vigia contínuo: se um material agrupado mudar de cor/visibilidade, os objetos dele saem do grupo
- OPT.byMat=new Map();for(const[o,rec]of OPT.items){(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{if(!m)return;let a=OPT.byMat.get(m);if(!a){a={s:sig(m),o:[]};OPT.byMat.set(m,a)}a.o.push(o)})}
- // decor instanciado: liga o recorte por setor (antes era desenhado sempre)
- let ic=0;for(const o of sc.children){if(!o.isInstancedMesh||o.frustumCulled||DYN.has(o))continue;try{instBounds(o);o.frustumCulled=true;ic++}catch(e){}}OPT.stats.instCulled=ic;
- OPT.done=true;OPT.stats.merged=n;OPT.stats.skipped=skip;OPT.stats.sectorMeshes=[...OPT.sectors.values()].reduce((a,s)=>a+s.meshes.length,0);OPT.stats.ms=+((window.__pn?__pn():Date.now())-t0).toFixed(1);
- // contornos: no modo realista ficam ocultos (OLM.visible=false), como antes
- console.log('OPT36',JSON.stringify(OPT.stats))}
+ STAGE='';buildMeshes();for(const rec of newRecs){rec.o.layers.set(HIDE);rec.ol.forEach(c=>c.layers.set(HIDE));guard(rec.o,rec)}watchMats();OPT.stats.groupItems=n;OPT.gdone=true}
 // A/B para validação: mostra o cenário original (true) ou agrupado (false) no mesmo quadro
 OPT.ab=orig=>{for(const[o,rec]of OPT.items){if(rec.det)continue;const L=orig?0:HIDE;o.layers.set(L);rec.ol.forEach(c=>c.layers.set(L))}for(const s of OPT.sectors.values())s.meshes.forEach(m=>m.layers.set(orig?HIDE:0))};
-OPT.run=run;OPT._dbg={GSNAP,stableG,msig,effVis,eligible};
+OPT.run=()=>{runStatic();runGroups()};OPT._dbg={GSNAP,stableG,msig,effVis,eligible};
 // os objetos pequenos escondidos pelo modo leve (v34e) não precisam mais: os setores já são recortados pela câmera
-let tt=0,wt=0,sn=0;const _u=update;update=function(dt){_u(dt);if(PAUSED)return;
- if(OPT.done){for(const G of OPT.groups){for(const rec of G.its){if(rec.det)continue;const o=rec.o,ev=effVis(o)&&attached(o);if(ev!==rec.ev){rec.ev=ev;sync(rec)}const e=o.matrixWorld.elements,m=rec.mw;for(let i=0;i<16;i++)if(e[i]!==m[i]){detach(o,'moveu');break}}}
-  if((wt-=dt)<0){wt=.4;for(const[m,a]of OPT.byMat){const s=sig(m);if(s!==a.s){a.s=s;a.o.forEach(x=>detach(x,'cor'));OPT.byMat.delete(m)}}}return}
- if(!OPT.on)return;tt+=dt;if(tt>1.2&&!sn){sn=1;snapMats();snapGroups()}if(tt>3.6){try{run()}catch(e){console.log('OPT36 erro',e);OPT.on=false}}};
+// etapa 1 roda agora, durante o carregamento (antes rodava 3,6 s depois de começar a jogar, e travava)
+try{if(OPT.on){snapGroups();runStatic()}}catch(e){console.log('OPT36 erro',e);OPT.on=false}
+let tt=0,wt=0;OPT.groups=OPT.groups||[];const _u=update;update=function(dt){_u(dt);if(PAUSED)return;
+ if(OPT.done){if(!OPT.gdone){tt+=dt;if(tt>3.6){try{runGroups()}catch(e){console.log('OPT36g',e);OPT.gdone=true}}}for(const G of OPT.groups){for(const rec of G.its){if(rec.det)continue;const o=rec.o,ev=effVis(o)&&attached(o);if(ev!==rec.ev){rec.ev=ev;sync(rec)}const e=o.matrixWorld.elements,m=rec.mw;for(let i=0;i<16;i++)if(e[i]!==m[i]){detach(o,'moveu');break}}}
+  watchTick();return}};
 })();
 
 </script><script type='text/game' class='gb'>
@@ -5751,6 +5778,81 @@ const _u=update;update=function(dt){_u(dt);if(PAUSED)return;t-=dt;if(t>0)return;
   for(const v of vehs){if(!v.g||!v.g.visible)continue;const imp=v===P.veh||v.ai||v.pol;if(!imp)continue;const d=Math.hypot(v.x-P.x,v.z-P.z);if(d<LC.vo*1.8)for(const m of ols(v))m.visible=true}
  }catch(e){console.log('v37',e)}};
 window.OL37=window.OL37||{};
+})();
+
+</script><script type='text/game' class='gb'>
+// ===== v40 (desempenho): grade de vizinhança por quadro + escrita no DOM só quando muda + materiais compartilhados para tiros/partículas =====
+(function(){
+// ---------- grade de vizinhos (pedestres e veículos), refeita uma vez por quadro antes da lógica ----------
+const CS=8,KP=new Map(),KV=new Map(),POOL=[];let pi=0;const key=(x,z)=>(Math.floor(x/CS)+1000)*8192+(Math.floor(z/CS)+1000);
+function put(M,o){const k=key(o.x,o.z);let a=M.get(k);if(!a){a=POOL[pi]||(POOL[pi]=[]);pi++;a.length=0;M.set(k,a)}a.push(o)}
+function build(){KP.clear();KV.clear();pi=0;for(let i=0;i<peds.length;i++)put(KP,peds[i]);for(let i=0;i<vehs.length;i++)put(KV,vehs[i]);NBQ.ok=true}
+function any(M,x,z,r,pred){const r2=r*r,c0=Math.floor((x-r)/CS),c1=Math.floor((x+r)/CS),d0=Math.floor((z-r)/CS),d1=Math.floor((z+r)/CS);
+ for(let i=c0;i<=c1;i++)for(let j=d0;j<=d1;j++){const a=M.get((i+1000)*8192+(j+1000));if(!a)continue;for(let k=0;k<a.length;k++){const o=a[k],dx=o.x-x,dz=o.z-z;if(dx*dx+dz*dz<r2&&pred(o))return true}}return false}
+const OUT=[];function near(M,x,z,r){OUT.length=0;const c0=Math.floor((x-r)/CS),c1=Math.floor((x+r)/CS),d0=Math.floor((z-r)/CS),d1=Math.floor((z+r)/CS);
+ for(let i=c0;i<=c1;i++)for(let j=d0;j<=d1;j++){const a=M.get((i+1000)*8192+(j+1000));if(a)for(let k=0;k<a.length;k++)OUT.push(a[k])}return OUT}
+const NBQ=window.NBQ={ok:false,anyPed:(x,z,r,p)=>any(KP,x,z,r,p),anyVeh:(x,z,r,p)=>any(KV,x,z,r,p),vehsNear:(x,z,r)=>near(KV,x,z,r),pedsNear:(x,z,r)=>near(KP,x,z,r),build};// a lista devolvida é reaproveitada: usar antes da próxima consulta
+const _u=update;update=function(dt){if(!PAUSED){try{build()}catch(e){NBQ.ok=false}}else NBQ.ok=false;return _u(dt)};
+// ---------- materiais compartilhados para tiros e partículas (antes cada bala/fagulha criava um material novo) ----------
+const TM=new Map();const shared=m=>{if(!m||Array.isArray(m)||m.map||m.transparent||!m.color)return m;const k=m.type+'|'+m.color.getHex()+'|'+(m.gradientMap?1:0);let s=TM.get(k);if(!s){s=m;TM.set(k,s)}return s};
+const wrapPush=arr=>{const op=arr.push;arr.push=function(...a){for(const q of a){try{if(q&&q.m&&q.m.isMesh){const s=shared(q.m.material);if(s!==q.m.material){q.m.material=s;q.m.children.forEach(c=>{if(c.isMesh&&c.material!==OLM)c.material=shared(c.material)})}}}catch(e){}}return op.apply(this,a)}};
+try{wrapPush(parts);wrapPush(trc)}catch(e){}
+window.V40={NBQ,TM};
+})();
+
+</script><script type='text/game' class='gb'>
+// ===== v39: diagnóstico de desempenho (desligado por padrão; liga com o código de cheat "diag") =====
+// Mede tempo EXCLUSIVO de cada sistema (sem contar duas vezes funções que chamam outras), tempo de quadro real,
+// picos, draw calls e contagens. Tempo de GPU só aparece se o aparelho expuser EXT_disjoint_timer_query_webgl2.
+(function(){
+const now=window.__pn||performance.now.bind(performance);
+const D=window.DIAG={on:false,acc:{},fr:{},cnt:{},spikes:[],frames:[],child:0,gpu:null,gpuMs:null,ver:1};
+const SEC=[['IA policial',['copAI','carAI']],['IA pedestres',['pedWalk']],['Tráfego',['trafAI']],['Física de veículos',['drive']],['Colisões',['push']],
+ ['Linha de visão',['los']],['Animações',['anim']],['Tiros e efeitos',['tracer','tracer3','boom','hurt','hurtP','dmgV']],['Sons',['snd']]];
+const ORIG={};let installed=false;
+// as funções do jogo são declarações globais (function/let no topo dos blocos): reatribuímos pelo nome global
+function install(){if(installed)return;installed=true;for(const[sec,fs]of SEC)for(const n of fs)setG(n,sec)}
+function uninstall(){if(!installed)return;installed=false;for(const n in ORIG)restoreG(n)}
+const G={get copAI(){return copAI},set copAI(v){copAI=v},get carAI(){return carAI},set carAI(v){carAI=v},get pedWalk(){return pedWalk},set pedWalk(v){pedWalk=v},
+ get trafAI(){return trafAI},set trafAI(v){trafAI=v},get drive(){return drive},set drive(v){drive=v},get push(){return push},set push(v){push=v},get los(){return los},set los(v){los=v},
+ get anim(){return anim},set anim(v){anim=v},get tracer(){return tracer},set tracer(v){tracer=v},get tracer3(){return typeof tracer3!=='undefined'?tracer3:null},set tracer3(v){},
+ get boom(){return boom},set boom(v){boom=v},get hurt(){return hurt},set hurt(v){hurt=v},get hurtP(){return hurtP},set hurtP(v){hurtP=v},get dmgV(){return dmgV},set dmgV(v){dmgV=v},get snd(){return snd},set snd(v){snd=v}};
+function setG(n,sec){const f=G[n];if(typeof f!=='function')return;ORIG[n]=f;
+ const w=function(){const prev=D.child;D.child=0;const t=now();try{return f.apply(this,arguments)}finally{const el=now()-t;D.fr[sec]=(D.fr[sec]||0)+el-D.child;D.child=prev+el}};G[n]=w}
+function restoreG(n){const f=ORIG[n];if(!f)return;G[n]=f}
+// lógica total e render (JS) — medidos em volta de update/render; "Outros" = lógica − sistemas medidos
+let gl=null,ext=null,qs=[];
+function gpuBegin(){if(!ext)return null;const q=gl.createQuery();gl.beginQuery(ext.TIME_ELAPSED_EXT,q);return q}
+function gpuPoll(){for(let i=qs.length-1;i>=0;i--){const q=qs[i];if(gl.getQueryParameter(q,gl.QUERY_RESULT_AVAILABLE)){const dis=gl.getParameter(ext.GPU_DISJOINT_EXT);if(!dis){const ns=gl.getQueryParameter(q,gl.QUERY_RESULT);D.gpuAcc=(D.gpuAcc||0)+ns/1e6;D.gpuN=(D.gpuN||0)+1}gl.deleteQuery(q);qs.splice(i,1)}}}
+const _u=update;update=function(dt){if(!D.on)return _u(dt);D.child=0;const t=now();try{return _u(dt)}finally{const el=now()-t;D.fr['Lógica (total)']=(D.fr['Lógica (total)']||0)+el}};
+const _r=rd.render.bind(rd);rd.render=function(s,c){if(!D.on)return _r(s,c);const t=now();let q=null;try{q=gpuBegin()}catch(e){}try{return _r(s,c)}finally{if(q){try{gl.endQuery(ext.TIME_ELAPSED_EXT);qs.push(q)}catch(e){}}D.fr['Render (JS)']=(D.fr['Render (JS)']||0)+(now()-t);D.calls=rd.info.render.calls;D.tris=rd.info.render.triangles}};
+// tempo de quadro real: intervalo entre chamadas do requestAnimationFrame
+let lastF=0,win0=0;const W={n:0,sum:0,max:0,sp33:0,sp50:0,acc:{}};
+const _loop=loop;loop=function(n){if(!D.on)return _loop(n);const t=now();if(lastF){const ft=t-lastF;W.n++;W.sum+=ft;if(ft>W.max)W.max=ft;if(ft>33.4)W.sp33++;if(ft>50){W.sp50++;const top=Object.entries(D.fr).filter(e=>e[0]!='Lógica (total)').sort((a,b)=>b[1]-a[1])[0];D.spikes.push({t:+(t/1000).toFixed(1),ms:+ft.toFixed(1),maior:top?top[0]+' '+top[1].toFixed(1)+'ms':'-'});if(D.spikes.length>12)D.spikes.shift()}}lastF=t;
+ // fecha o quadro anterior: acumula por janela
+ const lg=D.fr['Lógica (total)']||0;let meas=0;for(const k in D.fr){W.acc[k]=(W.acc[k]||0)+D.fr[k];if(k!='Lógica (total)'&&k!='Render (JS)')meas+=D.fr[k]}W.acc['Outros (lógica)']=(W.acc['Outros (lógica)']||0)+Math.max(0,lg-meas);D.fr={};
+ try{if(ext)gpuPoll()}catch(e){}
+ return _loop(n)};
+// contagens (a cada 0,5 s, barato)
+function counts(){const c={};c.peds=peds.length;c.cops=peds.filter(p=>p.cop&&!p.rag).length;c.vehs=vehs.length;c.polCars=vehs.filter(v=>(v.ai||v.pol)&&!v.dead).length;c.heli=(typeof hl!=='undefined'?hl.length:0);
+ c.parts=parts.length;c.trc=trc.length;c.gren=gren.length;try{c.gore=(window.RAGDBG&&RAGDBG.GP?RAGDBG.GP.length:0)+(window.RAGDBG&&RAGDBG.DEC?RAGDBG.DEC.length:0)}catch(e){}
+ c.cena=sc.children.length;try{if(performance.memory)c.heapMB=Math.round(performance.memory.usedJSHeapSize/1048576)}catch(e){}return c}
+let vis=0,visT=0;function countVis(){let n=0;sc.traverseVisible(o=>{if(o.isMesh&&o.layers.mask&1)n++});return n}
+// painel
+let el=null;function panel(){if(el)return el;el=document.createElement('div');el.id='diagp';el.style.cssText='position:fixed;left:.6vh;top:16vh;z-index:9999;background:#000c;color:#d7ffd0;font:11px/1.25 monospace;padding:6px 8px;border-radius:6px;pointer-events:none;white-space:pre;max-width:46vw';document.body.appendChild(el);return el}
+function report(){const n=Math.max(1,W.n),o={fps:+(1000/(W.sum/n)).toFixed(1),frameMs:+(W.sum/n).toFixed(2),frameMaxMs:+W.max.toFixed(1),quadros:W.n,picos33:W.sp33,picos50:W.sp50,drawCalls:D.calls,triangulos:D.tris,objetosVisiveis:vis,
+ gpuMs:D.gpuN?+(D.gpuAcc/D.gpuN).toFixed(2):(ext?'aguardando':'indisponível neste aparelho'),sistemasMsPorQuadro:{}};for(const k in W.acc)o.sistemasMsPorQuadro[k]=+(W.acc[k]/n).toFixed(3);Object.assign(o,counts());return o}
+function draw(){const r=report();const S=Object.entries(r.sistemasMsPorQuadro).sort((a,b)=>b[1]-a[1]);
+ panel().textContent=`FPS ${r.fps}  quadro ${r.frameMs}ms (máx ${r.frameMaxMs})\npicos >33ms ${r.picos33}  >50ms ${r.picos50}\ndraw calls ${r.drawCalls}  tri ${Math.round((r.triangulos||0)/1000)}k  visíveis ${r.objetosVisiveis}\nGPU ${typeof r.gpuMs=='number'?r.gpuMs+'ms':r.gpuMs}\nNPCs ${r.peds}  polícia ${r.cops}  veíc ${r.vehs} (viat ${r.polCars})  heli ${r.heli}\npartíc ${r.parts}  tiros ${r.trc}  gore ${r.gore||0}${r.heapMB?'  heap '+r.heapMB+'MB':''}\n— ms por quadro —\n`+S.map(([k,v])=>k.padEnd(20)+v.toFixed(2)).join('\n')+(D.spikes.length?'\n— picos —\n'+D.spikes.slice(-4).map(s=>s.t+'s '+s.ms+'ms ('+s.maior+')').join('\n'):'')}
+function resetW(){W.n=0;W.sum=0;W.max=0;W.sp33=0;W.sp50=0;W.acc={};D.gpuAcc=0;D.gpuN=0}
+let tick=null;
+function enable(on){D.on=!!on;try{localStorage.setItem('maua_diag',on?'1':'0')}catch(e){}
+ if(on){install();try{gl=rd.getContext();ext=gl.getExtension('EXT_disjoint_timer_query_webgl2')}catch(e){ext=null}resetW();lastF=0;
+  tick=setInterval(()=>{try{if((visT-=.5)<=0){visT=2;vis=countVis()}draw();if(W.n>240)resetW()}catch(e){}},500)}
+ else{uninstall();clearInterval(tick);if(el){el.remove();el=null}}}
+D.enable=enable;D.report=report;D.reset=resetW;
+try{window.CHEATS.diag=()=>{enable(!D.on);return D.on?'📊 Diagnóstico de desempenho ligado (digite diag de novo para desligar)':'Diagnóstico desligado'}}catch(e){}
+try{if(localStorage.getItem('maua_diag')==='1'||/[?&#]diag/.test(location.href))enable(true)}catch(e){}
 })();
 
 </script><script>
