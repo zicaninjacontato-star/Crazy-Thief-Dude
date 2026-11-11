@@ -5732,6 +5732,8 @@ OPT.byMatArr=[];let wi=0;
 function watchTick(){const A=OPT.byMatArr;if(!A.length)return;for(let k=0;k<40&&k<A.length;k++){wi=(wi+1)%A.length;const a=A[wi],s=msigN(a.m);let ch=false;for(let i=0;i<5;i++)if(s[i]!==a.s[i]){ch=true;break}if(ch){a.s=s;a.o.forEach(x=>detach(x,'cor'));a.o=[]}}}
 // etapa 2 (já em jogo): grupos estáticos criados depois do congelamento, só se não se moveram desde a amostra
 function runGroups(){DYN=dynSet();let n=0;STAGE='g:';const newRecs=[];
+ // objetos soltos que só ficaram prontos depois do carregamento (congelados ou visíveis mais tarde)
+ for(const o of sc.children){if(DYN.has(o)||OPT.items.has(o)||!eligible(o))continue;if((Array.isArray(o.material)?o.material:[o.material]).some(m=>m&&vol(m)))continue;const rec=addMesh(o);if(!rec)continue;OPT.items.set(o,rec);newRecs.push(rec);n++}
  OPT.groups=[];for(const g of sc.children){if(DYN.has(g)||g.isMesh||!g.children.length||!GSNAP.has(g))continue;if(!stableG(g))continue;const its=[];
   g.traverse(o=>{if(o===g||!o.isMesh||!o.visible||!effVis(o))return;if(o.isInstancedMesh||o.isSkinnedMesh||o.renderOrder||o.frustumCulled===false||o.userData.opt36||o.userData.dmg||o.layers.mask!==1)return;
    if(o.children.some(c=>!(c.isMesh&&c.material===OLM&&!c.children.length)))return;if((Array.isArray(o.material)?o.material:[o.material]).some(m=>m&&vol(m)))return;
