@@ -29,7 +29,26 @@ rpg:`<path d="M6 26h58v12H6z" fill="#5c6b3c" ${O}/><path d="M64 22l14-4 16 14-16
 const URL={};for(const k in SV)URL[k]='data:image/svg+xml;utf8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 64">'+SV[k]+'</svg>');
 window.WIMG=(k,sz)=>"<img src='"+(URL[k]||URL.fist)+"' draggable='false' style='width:"+(sz||'78%')+";height:auto;pointer-events:none;filter:drop-shadow(0 .4vh .5vh #0009)'>";
 window.WICON=(el,k,sz)=>{if(!el)return;if(el._wk!==k){el._wk=k;el.innerHTML=WIMG(k,sz)}};
-document.head.insertAdjacentHTML('beforeend',"<style>html body #wbt{background:transparent!important;box-shadow:none!important;border:none!important}html body #wbt img{width:92%!important}</style>");
+document.head.insertAdjacentHTML('beforeend',"<style>html body #wbt{background:transparent!important;box-shadow:none!important;border:none!important}html body #wbt img{width:92%!important}html body #bA,html body #bB,html body #bC,html body #bD,html body #rlb,html body #bAm{background:rgba(12,14,20,.34)!important;border:.4vh solid rgba(255,255,255,.6)!important;box-shadow:0 .4vh 1.2vh rgba(0,0,0,.35)!important;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}html body #bAm.on{background:rgba(255,60,60,.7)!important}</style>");
+})();
+// v31: colisão de veículos pela caixa real (largura x comprimento, girada com o veículo)
+(function(){
+ function vsz(v){if(v._sz&&v._szT===v.t)return v._sz;const c=v.g&&v.g.children&&v.g.children[0];let hw=1,hl=2;
+  if(c&&c.scale&&c.geometry&&c.geometry.type=='BoxGeometry'){hw=Math.max(.25,c.scale.x/2);hl=Math.max(.6,c.scale.z/2)}
+  else{const r=(typeof S!=='undefined'&&S[v.t]?S[v.t].r:2);hw=r*.5;hl=r}
+  if(v.t=='moto'||v.t=='bike'||v.t=='smoto'){hw=Math.max(hw,.32);hl=Math.max(hl,1.0)}
+  v._szT=v.t;return v._sz={hw:hw+.05,hl:hl+.08}}
+ const ax=v=>{const s=Math.sin(v.yaw||0),c=Math.cos(v.yaw||0);return{f:[s,c],r:[c,-s]}};
+ window.VCOL=function(a,b){const A=vsz(a),B=vsz(b),aa=ax(a),bb=ax(b),D=[a.x-b.x,a.z-b.z];let best=1e9,n=null;
+  for(const u of[aa.f,aa.r,bb.f,bb.r]){const dot=(p,q)=>p[0]*q[0]+p[1]*q[1];
+   const ra=A.hw*Math.abs(dot(aa.r,u))+A.hl*Math.abs(dot(aa.f,u)),rb=B.hw*Math.abs(dot(bb.r,u))+B.hl*Math.abs(dot(bb.f,u)),dp=dot(D,u),ov=ra+rb-Math.abs(dp);
+   if(ov<=0)return null;if(ov<best){best=ov;n=dp<0?[-u[0],-u[1]]:u}}
+  return{nx:n[0],nz:n[1],k:best}};
+ window.VNEAR=function(v,p,m){const A=vsz(v),o=ax(v),dx=p.x-v.x,dz=p.z-v.z,lf=dx*o.f[0]+dz*o.f[1],lr=dx*o.r[0]+dz*o.r[1];
+  return Math.abs(lf)<A.hl+m&&Math.abs(lr)<A.hw+m};
+ window.VPUSH=function(v){if(typeof push!=='function')return false;const A=vsz(v),o=ax(v),L=Math.max(0,A.hl-A.hw),n=Math.max(1,Math.ceil(L/A.hw));let hit=false,sx=0,sz=0;
+  let bm=0;for(let i=-n;i<=n;i++){const t=L*i/n,q={x:v.x+o.f[0]*t,z:v.z+o.f[1]*t},x0=q.x,z0=q.z;if(window.__push0(q,A.hw,v.y||0)){hit=true;const ex=q.x-x0,ez=q.z-z0,m=ex*ex+ez*ez;if(m>bm){bm=m;sx=ex;sz=ez}}}
+  if(hit){v.x+=sx;v.z+=sz}return hit};
 })();
 // ===== v30-pre: estilo gráfico (0 = cartoon, 1 = realista) — troca o sombreamento toon por iluminação suave =====
 (function(){let g=1;try{const o=JSON.parse(localStorage.getItem('maua_cfg')||'null');if(o&&typeof o.gfx=='number')g=o.gfx}catch(e){}window.GFX=g;if(!g)return;
@@ -63,7 +82,7 @@ for(let i=0;i<8;i++)for(let j=0;j<8;j++){const cx=-175+i*50,cz=-175+j*50;
  if(cx==25&&cz==25){for(let k=0;k<10;k++)tree(cx-15+R()*30,cz-15+R()*30);continue}
  const ind=cx<-100&&cz<-100;bld(cx,cz,16+R()*20,16+R()*20,ind?6+R()*5:7+R()*R()*30,ind?0x8a8f96:pal[(R()*7)|0]);
  if(ind&&R()<.5)chim(cx+6,cz+6)}
-function push(o,r,y){let hit=false;for(const b of solids){if(y>=b.h)continue;const cx=cl(o.x,b.x0,b.x1),cz=cl(o.z,b.z0,b.z1),dx=o.x-cx,dz=o.z-cz,d=Math.hypot(dx,dz);
+window.__push0=(o,r,y)=>push(o,r,y);function push(o,r,y){let hit=false;for(const b of solids){if(y>=b.h)continue;const cx=cl(o.x,b.x0,b.x1),cz=cl(o.z,b.z0,b.z1),dx=o.x-cx,dz=o.z-cz,d=Math.hypot(dx,dz);
  if(d<r){if(d<1e-4)o.x=b.x0-r;else{o.x+=dx/d*(r-d);o.z+=dz/d*(r-d)}hit=true}}return hit}
 // ---------- ENTIDADES ----------
 const peds=[],vehs=[],parts=[],gren=[],trc=[],H={h:0,q:99,sp:0};let shake=0,mt=0;
@@ -114,7 +133,7 @@ function drive(v,ax,ay,c,dt){const s=S[v.t];
  else{v.sp+=ay*s.a*dt-v.sp*.7*dt;if(c)v.sp-=v.sp*3*dt;v.sp=cl(v.sp,-s.m*.4,s.m);v.yaw-=ax*s.tr*dt*cl(v.sp/8,-1,1)}
  v.x+=sin(v.yaw)*v.sp*dt;v.z+=cos(v.yaw)*v.sp*dt;
  if(v.t=='boat'){v.x=cl(v.x,-1500,1500);v.z=cl(v.z,-1500,1500)}
- else{v.x=cl(v.x,-365,365);v.z=cl(v.z,-365,365);if(push(v,s.r,v.y)){const k=Math.abs(v.sp);if(k>7)dmgV(v,k*1.5);v.sp*=-.3;v.rev=1}}
+ else{v.x=cl(v.x,-365,365);v.z=cl(v.z,-365,365);if(window.VPUSH?VPUSH(v):push(v,s.r,v.y)){const k=Math.abs(v.sp);if(k>7)dmgV(v,k*1.5);v.sp*=-.3;v.rev=1}}
  v.g.position.set(v.x,v.y,v.z);v.g.rotation.y=v.yaw}
 function carAI(v,dt){const tg=P.veh||P,dx=tg.x-v.x,dz=tg.z-v.z,d=Math.hypot(dx,dz),st=stars();let df=Math.atan2(dx,dz)-v.yaw;df=Math.atan2(sin(df),cos(df));
  let ax=-cl(df*2,-1,1),ay=Math.abs(df)<1.3?1:.3;if(v.sp>12+st*6)ay=0;if(v.rev>0){v.rev-=dt;ay=-1;ax=-ax}if(!st)ay=0;
@@ -162,11 +181,11 @@ function update(dt){
   push(P,.5,0);P.x=cl(P.x,-450,450);P.z=cl(P.z,-450,450);P.g.position.set(P.x,P.y,P.z);P.g.rotation.set(0,P.yaw,0);
   fireTick(dt)}
  else{const v=P.veh;drive(v,I.ax,I.ay,I.c,dt);P.x=v.x;P.z=v.z;P.yaw=v.yaw;
-  if(v.t!='plane'&&v.t!='boat'&&Math.abs(v.sp)>6)peds.forEach(p=>{if(!p.rag&&Math.hypot(p.x-v.x,p.z-v.z)<S[v.t].r+.6)hurt(p,99,v.x,v.z,v.sp*.8)})}
+  if(v.t!='plane'&&v.t!='boat'&&Math.abs(v.sp)>6)peds.forEach(p=>{if(!p.rag&&(window.VNEAR?VNEAR(v,p,.5):Math.hypot(p.x-v.x,p.z-v.z)<S[v.t].r+.6))hurt(p,99,v.x,v.z,v.sp*.8)})}
  vehs.forEach(v=>{if(v===P.veh)return;if(v.dead){v.T-=dt;return}if(v.ai)carAI(v,dt);else if(v.tr)trafAI(v,dt);else if(Math.abs(v.sp)>.3)drive(v,0,0,1,dt)});
  for(let i=0;i<vehs.length;i++)for(let j=i+1;j<vehs.length;j++){const a=vehs[i],b=vehs[j];if((a.t=='boat')!=(b.t=='boat')||Math.abs(a.y-b.y)>3)continue;
-  const d=Math.hypot(a.x-b.x,a.z-b.z),rr=S[a.t].r+S[b.t].r;
-  if(d<rr&&d>.01){const nx=(a.x-b.x)/d,nz=(a.z-b.z)/d,k=(rr-d)/2;a.x+=nx*k;a.z+=nz*k;b.x-=nx*k;b.z-=nz*k;const rel=Math.abs(a.sp)+Math.abs(b.sp);
+  let d=Math.hypot(a.x-b.x,a.z-b.z),rr=S[a.t].r+S[b.t].r,ob=null;if(window.VCOL&&d<rr+3){ob=VCOL(a,b);rr=ob?d+ob.k*2:0}
+  if(d<rr&&d>.01){const nx=ob?ob.nx:(a.x-b.x)/d,nz=ob?ob.nz:(a.z-b.z)/d,k=ob?ob.k/2:(rr-d)/2;a.x+=nx*k;a.z+=nz*k;b.x-=nx*k;b.z-=nz*k;const rel=Math.abs(a.sp)+Math.abs(b.sp);
    if(rel>9&&!a.dead&&!b.dead&&!(a.tr&&b.tr)){dmgV(a,rel*1.2);dmgV(b,rel*1.2);a.sp*=.4;b.sp*=.4}a.g.position.set(a.x,a.y,a.z);b.g.position.set(b.x,b.y,b.z)}}
  copSpawn(dt);
  peds.forEach(p=>{if(p.rag){ragU(p,dt);return}const ox=p.x,oz=p.z;
@@ -809,7 +828,7 @@ const _uD=update;update=function(dt){
  if(veh){d=pl?14:ty=='tank'?9:ty=='boat'?7.5:ty=='bus'?12.5:ty=='truck'?12.5:(ty=='moto'||ty=='bike')?5:6.4;h=pl?4.5:ty=='tank'?3.6:ty=='boat'?3:ty=='bus'?5:ty=='truck'?4.8:2.5;fv=pl?66:62;
   // v31: câmera dinâmica — afasta, abaixa e abre o campo de visão com a velocidade
   if(!pl){d*=1+Math.min(.16,vsp/150);h*=1-Math.min(.1,vsp/260);fv+=Math.min(11,vsp*.28)}}
- else if(AIM){d=2.7;h=1.62;fv=50;side=1.0}
+ else if(AIM){const dn=Math.max(0,-AP);d=3.0-dn*.6;h=2.05+dn*1.6;fv=50;side=.95}
  else if(ind){d=2.1;h=1.55;fv=74}
  else{d=3.6;h=2.1;fv=(typeof rn!=='undefined'&&rn)?66:62;if(CPI<0){const k=-CPI/.2;d*=1-.38*k;side=.75*k;h+=.15*k}}
  // v31: a pé, a câmera acompanha o personagem quando ele corre e você não está arrastando a tela
@@ -4479,12 +4498,13 @@ function equip(o,k){const u=o.g.userData;let sig=k;if(o===P&&k)try{const x=own.x
   if(x&&x.sil&&k!='shot')part(g,.07,.26,.07,0x15151a,0,k=='smg'?-1.55:-1.17,.06)}catch(e){}}
 let THR=0;const _ln=launch;launch=function(k){if(k=='gren')THR=.5;return _ln(k)};
 const _anim=anim;anim=function(o,sp,dt,hold){_anim(o,sp,dt,hold);try{const u=o.g&&o.g.userData;if(!u||!u.aR)return;
- const k=o===P?(P.veh?null:cur):(hold?'pist':null);
+ const swimP=o===P&&FZ2&&(FZ2.mode=='swim'||FZ2.mode=='climb'||FZ2.mode=='train');const k=o===P?(P.veh||swimP?null:cur):(hold?'pist':null);
+ if(swimP){equip(o,null);if(u.gun)u.gun.visible=false;if(u.aL)u.aL.rotation.z=0;if(u.aR)u.aR.rotation.z=0;return}
  if(!hold&&!(o===P&&(k=='gren'||k=='rpg'))){equip(o,null);return}
  if(u.gun)u.gun.visible=false;equip(o,k);
- if(k=='pist'){u.aR.rotation.x=-1.4;u.aR.rotation.z=0}
- else if(k=='smg'||k=='shot'){u.aR.rotation.x=-1.42;u.aR.rotation.z=0;u.aL.rotation.x=-1.25;u.aL.rotation.z=-.62}
- else if(k=='rpg'){u.aR.rotation.x=-1.55;u.aR.rotation.z=.15;u.aL.rotation.x=-1.35;u.aL.rotation.z=-.45}
+ if(k=='pist'){u.aR.rotation.x=-1.4;u.aR.rotation.z=-.05;u.aL.rotation.z=0}
+ else if(k=='smg'||k=='shot'){u.aR.rotation.x=-1.42;u.aR.rotation.z=-.08;u.aL.rotation.x=-1.3;u.aL.rotation.z=.72}
+ else if(k=='rpg'){u.aR.rotation.x=-1.25;u.aR.rotation.z=-.12;u.aL.rotation.x=-1.45;u.aL.rotation.z=.62}
  else if(k=='gren'){if(o===P&&THR>0){const t=1-THR/.5;u.aR.rotation.x=t<.45?-2.9*(t/.45):-2.9+(t-.45)/.55*2.3;u.aR.rotation.z=0;if(u._wg)u._wg.visible=t<.6}else{u.aR.rotation.x=-.35;u.aR.rotation.z=0;if(u._wg)u._wg.visible=true}}
  }catch(e){}};
 function thrTick(dt){if(THR>0)THR=Math.max(0,THR-dt)}
@@ -4542,6 +4562,24 @@ try{const RG2=(window.XTERR&&XTERR.F&&XTERR.F.ring)||[];const segs=RG2.slice().s
  const _pwO=pedWalk;pedWalk=function(p,dt){const o=p.ow;if(!o||p.rx||p.fl>0||p.swm||p.sm||p.rag)return _pwO(p,dt);
   o.s+=o.d*1.5*dt;if(o.s>o.L){o.s=o.L;o.d=-1}else if(o.s<0){o.s=0;o.d=1}p.x=o.x0+o.ux*o.s;p.z=o.z0+o.uz*o.s;p.yaw=Math.atan2(o.ux*o.d,o.uz*o.d)};
  lg('pedestres no anel',n)}catch(e){lg('ped anel',e)}
+// ---------- 17) segurar o tiro e arrastar o mesmo dedo gira a câmera (mirar e atirar ao mesmo tempo) ----------
+try{const b=document.getElementById('bB');let id=null;b.onpointerleave=null;const d0=b.onpointerdown,u0=b.onpointerup;
+ b.onpointerdown=ev=>{d0&&d0(ev);id=ev.pointerId;try{b.setPointerCapture(id)}catch(x){}try{cv.onpointermove({pointerId:-777,clientX:ev.clientX,clientY:ev.clientY})}catch(x){}lx=ev.clientX;if(dg==null)dg=id};
+ b.addEventListener('pointermove',e=>{if(e.pointerId===id&&dg===id)try{cv.onpointermove(e)}catch(x){}});
+ b.onpointerup=b.onpointercancel=e=>{u0&&u0(e);if(dg===id)dg=null;id=null}}catch(e){}
+// ---------- 18) tiroteio: pedestres por perto correm ou se escondem (agachados, mãos na cabeça) ----------
+function gunfire(x,z){const now=performance.now();peds.forEach(q=>{if(q.cop||q.rag||q.rx||q.sm||q.swm||q.mg||(q._rxT||0)>now)return;const d=Math.hypot(q.x-x,q.z-z);if(d>32)return;
+ q._rxT=now+12000;const r=Math.random();q.fl=0;
+ if(r<.5){q.rx='flee';q.rt=6+Math.random()*3;q.cl=Math.random()<.25?2.5:0}
+ else if(r<.85){q.rx='hide';q.rt=7+Math.random()*3;q._hp=0}
+ else{q.rx='phone';q.rt=3.2}})}
+const _shG=shoot;shoot=function(w){_shG(w);try{const xu=own.xwu&&own.xwu[cur];if(!(xu&&xu.sil&&cur!='shot'))gunfire(P.x,P.z)}catch(e){}};
+const _lnG=launch;launch=function(k){_lnG(k);try{gunfire(P.x,P.z)}catch(e){}};
+function hideTick(dt){peds.forEach(q=>{const hid=q.rx=='hide';if(!hid){if(q._hd){q._hd=0;q.g.scale.y=1}return}
+ if(q.rt>4.5){const a=Math.atan2(q.x-P.x,q.z-P.z);q.yaw=a;q.x+=Math.sin(a)*5.2*dt;q.z+=Math.cos(a)*5.2*dt;q.g.position.set(q.x,q.y||.9,q.z);q.g.rotation.y=a;q._hd=0;q.g.scale.y=1}
+ else{q._hd=1;q.g.scale.y=.64;q.g.position.y=(q.y||.9)*.64;q.yaw=Math.atan2(P.x-q.x,P.z-q.z)+Math.PI;q.g.rotation.y=q.yaw}
+ if(q.rt<=0){q.rx='flee';q.rt=3;q.cl=0;q._hd=0;q.g.scale.y=1}})}
+const _anH=anim;anim=function(o,sp,dt,hold){_anH(o,sp,dt,hold);try{if(o.rx=='hide'&&o._hd){const u=o.g.userData;u.aR.rotation.x=u.aL.rotation.x=-2.75;u.aR.rotation.z=-.55;u.aL.rotation.z=.55;u.lL.rotation.x=u.lR.rotation.x=-.9}}catch(e){}};
 // ---------- 8c) menu principal: fundo é o próprio jogo em 3D, numa cena sorteada a cada abertura (sem textos) ----------
 document.head.insertAdjacentHTML('beforeend',"<style>#menu{background:linear-gradient(180deg,#0003 0%,#0006 55%,#000b 100%)!important}.bgi2{background-image:var(--wall,var(--mimg))!important}</style>");
 const WSC=['policia','trem','personagem','cidade','mar','avenida','carro'];let wsc=null,wt=0,wa0=0,wsnap=0,wobj=null;
@@ -4598,7 +4636,7 @@ function sightTick(){let sg='';const aim=$('bAm')&&$('bAm').className=='on'&&!P.
  if(sg=='laser'){if(!BEAM){BEAM=new T.Mesh(new T.BoxGeometry(.025,.025,1),new T.MeshBasicMaterial({color:0xff2020,transparent:true,opacity:.55,depthWrite:false}));sc.add(BEAM)}
   const d=new T.Vector3();cam.getWorldDirection(d);const L=26,o=new T.Vector3(P.x+Math.cos(P.yaw)*-.35,1.35+(P.g?P.g.position.y-.9:0),P.z-Math.sin(P.yaw)*-.35);
   const e=cam.position.clone().addScaledVector(d,L+4);BEAM.visible=true;BEAM.position.copy(o).lerp(e,.5);BEAM.scale.z=o.distanceTo(e);BEAM.lookAt(e)}else if(BEAM)BEAM.visible=false}
-const _u=update;let ut=0;update=function(dt){MISS=0;if(window.GOD&&P.hp<100&&P.dead<=0)P.hp=100;_u(dt);try{swimFix();crashTick(dt);deadFall(dt);sightTick();wheelTick(dt);menuWall(dt);thrTick(dt);if(!PAUSED){vrxTick(dt);rxTick(dt);polTick()}}catch(e){console.log('v31',e)}if(PAUSED)return;if((ut-=dt)<=0){ut=3;try{vehs.forEach(unstick)}catch(e){}}};
+const _u=update;let ut=0;update=function(dt){MISS=0;if(window.GOD&&P.hp<100&&P.dead<=0)P.hp=100;_u(dt);try{swimFix();crashTick(dt);deadFall(dt);sightTick();wheelTick(dt);menuWall(dt);thrTick(dt);if(!PAUSED){vrxTick(dt);rxTick(dt);polTick();hideTick(dt)}}catch(e){console.log('v31',e)}if(PAUSED)return;if((ut-=dt)<=0){ut=3;try{vehs.forEach(unstick)}catch(e){}}};
 try{console.log('v31',LOG.join(' | '))}catch(e){}
 })();
 </script><script type='text/game' class='gb'>
