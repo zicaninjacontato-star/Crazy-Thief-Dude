@@ -6316,7 +6316,7 @@ function rayRect(px,pz,dx,dz,b){let t0=-1e9,t1=1e9;for(const[p,d,lo,hi]of[[px,dx
 function topAt(x,z){let h=0;const Lq=window.SGQ?SGQ(x-.5,x+.5,z-.5,z+.5,PQ):solids;for(const s of Lq){if(x>s.x0&&x<s.x1&&z>s.z0&&z<s.z1&&s.h>h)h=s.h}return h}
 function pkProbe(){const yw=P.yaw,dx=Math.sin(yw),dz=Math.cos(yw),feet=P.y-.9,px=P.x+dx*.75,pz=P.z+dz*.75;let best=null;
  const Lq=window.SGQ?SGQ(px-.8,px+.8,pz-.8,pz+.8,PQ):solids;
- for(const b of Lq){if(!(b.h>feet+.55)||b.h>70||b.fall)continue;if(px>b.x0-.05&&px<b.x1+.05&&pz>b.z0-.05&&pz<b.z1+.05){const r=rayRect(P.x,P.z,dx,dz,b);if(!r||r[0]<-.2||r[0]>1.2)continue;if(!best||b.h<best.h)best={b,t0:Math.max(0,r[0]),t1:r[1]}}}
+ for(const b of Lq){if(!(b.h>feet+.55)||b.h-feet>2.6||b.fall||b.ms||b.isH||b.v43||b.w)continue;/* só obstáculos (muros, cercas, muretas): nada de prédios/casas */if(px>b.x0-.05&&px<b.x1+.05&&pz>b.z0-.05&&pz<b.z1+.05){const r=rayRect(P.x,P.z,dx,dz,b);if(!r||r[0]<-.2||r[0]>1.2)continue;if(!best||b.h<best.h)best={b,t0:Math.max(0,r[0]),t1:r[1]}}}
  return best}
 function pkStart(hit){const b=hit.b,yw=P.yaw,dx=Math.sin(yw),dz=Math.cos(yw),feet=P.y-.9,dh=b.h-feet,depth=hit.t1-hit.t0;
  const wx=P.x+dx*(hit.t0-.42),wz=P.z+dz*(hit.t0-.42);// encostado na parede
@@ -6324,8 +6324,7 @@ function pkStart(hit){const b=hit.b,yw=P.yaw,dx=Math.sin(yw),dz=Math.cos(yw),fee
  const onX=P.x+dx*(hit.t0+.9),onZ=P.z+dz*(hit.t0+.9);
  const ovX=P.x+dx*(hit.t1+.8),ovZ=P.z+dz*(hit.t1+.8),ovH=topAt(ovX,ovZ);
  Object.assign(PK,{b,dx,dz,y0:P.y,x0:P.x,z0:P.z,wx,wz,t:0,ph:0,top:b.h+.9,stand:canStand,onX,onZ,ovX,ovZ,ovY:ovH+.9});
- PK.kind=dh<=1.7?'vault':dh<=3.8?'climb':'wall';PK.st=1;PK.cy=null;PK.pull=null;FZ.mode='pk';P.vy=0;
- if(PK.kind=='wall')msg('🧗 Segure para frente para escalar · toque 🚗 para soltar',2200)}
+ PK.kind=dh<=1.7?'vault':'climb';PK.st=1;PK.cy=null;PK.pull=null;FZ.mode='pk';P.vy=0;}
 function pkEnd(x,z,y,stand){P.x=x;P.z=z;P.y=y;P.vy=0;PK.st=0;try{const u=P.g.userData;[u.aL,u.aR,u.lL,u.lR].forEach(l=>l&&l.rotation.set(0,0,0))}catch(e){}if(stand){FZ.mode='gnd';FZ.py=y}else{FZ.mode='air';FZ.vy=0;FZ.fs=y;FZ.ta=0;FZ.chute=0;FZ.py=y}FZ.px=P.x;FZ.pz=P.z}
 function pkRelease(){if(FZ.mode!=='pk')return;pkEnd(P.x-PK.dx*.3,P.z-PK.dz*.3,P.y,false)}
 const lerp=(a,b,k)=>a+(b-a)*k;
@@ -6352,7 +6351,7 @@ function pkTick(dt){
  const hit=pkProbe();if(!hit){PK.press=0;return}
  const moved=Math.hypot(P.x-(PK.lx||P.x),P.z-(PK.lz||P.z));PK.lx=P.x;PK.lz=P.z;
  if(moved>3.2*dt*.5){PK.press=0;return}// ainda andando: não está empurrando a parede
- PK.press+=dt;const dh=hit.b.h-(P.y-.9);if(PK.press>=(dh>3.8?.38:.16)){PK.press=0;pkStart(hit)}}
+ PK.press+=dt;if(PK.press>=.16){PK.press=0;pkStart(hit)}}
 function pkPose(){const u=P.g.userData,k=PK.kind,s=Math.sin(PK.ph);if(!u.aL)return;
  if(k=='wall'&&PK.pull==null){u.aL.rotation.set(-2.7+s*.35,0,0);u.aR.rotation.set(-2.7-s*.35,0,0);u.lL.rotation.set(-.5-s*.4,0,0);u.lR.rotation.set(-.5+s*.4,0,0)}
  else if(k=='vault'){u.aL.rotation.set(-1.2,0,.4);u.aR.rotation.set(-1.2,0,-.4);u.lL.rotation.set(-1.1,0,0);u.lR.rotation.set(-.3,0,0)}
