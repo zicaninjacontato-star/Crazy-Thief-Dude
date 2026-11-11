@@ -511,7 +511,7 @@ const _a3=act;act=function(){if(PAUSED)return;if(nearDoor()){DR.o=DR.o?0:1;snd('
 const _u5=update;update=function(dt){_u5(dt);if(PAUSED)return;
  doorG.visible=false;DR.s.h=0;
  if(!DR.o&&inHouse(P)&&peds.some(p=>p.cop&&!p.rag&&Math.hypot(p.x-222,p.z-60)<3.5))DR.o=1;
- if(!SH.on){if(nearDoor()){$('bA').textContent='🚪';$('bA').style.opacity=1}const f=P.veh||P,fy=P.veh?P.veh.y:0;camClip(f.x,fy+1.6,f.z);cam.lookAt(f.x,fy+1.5,f.z)}};
+ if(!SH.on){if(nearDoor()){$('bA').textContent='🚪';$('bA').style.opacity=1}/* v38: câmera posicionada só pelo clipCam (v11d); o camClip antigo era recalculado e descartado a cada quadro */}};
 </script><script type='text/game' class='gb'>
 let WP=null,sx0=0,sy0=0,pinched=0;const TS={x:211,z:16};
 document.head.insertAdjacentHTML('beforeend',`<style>.b{background:#0003;border:2px solid #fff9;font-size:20px}#bA,#bB,#bC,#bD,#rlb{width:46px;height:46px}#wbt{width:42px;height:42px;font-size:18px}#wh .b{width:60px;height:60px;font-size:22px}#bB{right:calc(16px + env(safe-area-inset-right,0px))!important;bottom:calc(26px + env(safe-area-inset-bottom,0px))!important}#bA{right:calc(72px + env(safe-area-inset-right,0px))!important;bottom:calc(26px + env(safe-area-inset-bottom,0px))!important}#bC{right:calc(16px + env(safe-area-inset-right,0px))!important;bottom:calc(80px + env(safe-area-inset-bottom,0px))!important}#bD{right:calc(72px + env(safe-area-inset-right,0px))!important;bottom:calc(80px + env(safe-area-inset-bottom,0px))!important}#rlb{right:calc(128px + env(safe-area-inset-right,0px))!important;bottom:calc(52px + env(safe-area-inset-bottom,0px))!important}#stick{width:104px!important;height:104px!important;left:calc(14px + env(safe-area-inset-left,0px))!important;bottom:calc(26px + env(safe-area-inset-bottom,0px))!important}#knob{width:42px;height:42px}</style>`);
@@ -853,12 +853,21 @@ const _ln=launch;launch=function(k){if(AIM)P.yaw=aimYaw();_ln(k);if(AIM&&k=='rpg
  if(k=='gren'){const g=gren[gren.length-1],pa=cl((AIM?AP:CPI*1.6)+.25,-.2,1.35);if(g&&!g.rk){const v=15,h=v*Math.cos(pa);g.vx=sin(P.yaw)*h;g.vz=cos(P.yaw)*h;g.vy=4+v*Math.sin(pa)}}};
 window.CAMPITCH=()=>AIM?AP:CPI;
 // ---- colisão da câmera: percorre o raio em passos curtos ----
-function clipCam(tx,ty,tz,cx,cy,cz,minD){const dx=cx-tx,dy=cy-ty,dz=cz-tz,len=Math.hypot(dx,dy,dz)||1,n=Math.ceil(len/.15);let free=len;
- for(let i=1;i<=n;i++){const t=i/n,x=tx+dx*t,y=ty+dy*t,z=tz+dz*t;let hit=y<.25;
-  if(!hit)for(const s of solids){if(s.h>.8&&s.h>y&&x>s.x0-.22&&x<s.x1+.22&&z>s.z0-.22&&z<s.z1+.22){hit=true;break}}
-  if(!hit&&y>3.05&&y<3.7&&rf(x,z))hit=true;
-  if(hit){free=Math.max(minD,(t-1/n)*len-.3);break}}
+const CQ=[],RFB=[[221.6,238.4,53.6,66.4],[221.6,232.4,65.6,76.4]];window.CAMSTAT={n:0,c:0};
+// entrada do segmento [0..1] numa caixa (x0..x1, z0..z1) com faixa de altura (ylo..yhi); -1 se não cruza
+function segBox(tx,ty,tz,dx,dy,dz,x0,x1,z0,z1,ylo,yhi,st){if(x1<x0||z1<z0)return -1;let a=0,b=1;const sl=(o,d,lo,hi)=>{if(Math.abs(d)<1e-9)return o>lo&&o<hi;let p=(lo-o)/d,q=(hi-o)/d;if(p>q){const w=p;p=q;q=w}if(p>a)a=p;if(q<b)b=q;return a<b};
+ if(!sl(tx,dx,x0,x1)||!sl(tz,dz,z0,z1)||!sl(ty,dy,ylo,yhi))return -1;if(a<=0&&st&&b<st)return -1;return a}
+function clipCam(tx,ty,tz,cx,cy,cz,minD){const dx=cx-tx,dy=cy-ty,dz=cz-tz,len=Math.hypot(dx,dy,dz)||1,ST=1/Math.ceil(len/.15);let te=2;
+ // chão (y<.25)
+ if(ty<.25)te=0;else if(dy<0){const t=(.25-ty)/dy;if(t<te)te=t}
+ // paredes próximas (grade espacial); mesma margem de .22 e altura mínima .8 do sistema anterior
+ const q=window.SGQ?SGQ(Math.min(tx,cx)-.3,Math.max(tx,cx)+.3,Math.min(tz,cz)-.3,Math.max(tz,cz)+.3,CQ):solids;window.CAMSTAT.n++;window.CAMSTAT.c+=q.length;
+ for(let k=0;k<q.length;k++){const s=q[k];if(!(s.h>.8))continue;const t=segBox(tx,ty,tz,dx,dy,dz,s.x0-.22,s.x1+.22,s.z0-.22,s.z1+.22,-1e9,s.h,ST);if(t>=0&&t<te)te=t}
+ // laje/teto da casa (interiores)
+ for(const r of RFB){const t=segBox(tx,ty,tz,dx,dy,dz,r[0],r[1],r[2],r[3],3.05,3.7,ST);if(t>=0&&t<te)te=t}
+ let free=len;if(te<=1){const st=.15/len;free=Math.max(minD,Math.max(0,te*len-.15*.5)-.3)}
  const k=Math.min(1,free/len);return{x:tx+dx*k,y:ty+dy*k,z:tz+dz*k,free}}
+window.CLIPCAM=clipCam;
 const _uD=update;update=function(dt){
  if(PAUSED||SH.on){if(AIM)AIM=0}
  else{if(AIM&&!canAim())AIM=0;LKT=AIM?pickLock():null}
@@ -2241,6 +2250,11 @@ function fpush(o,r,y){if(solids.length!==GN)gridBuild();let hit=false;
  for(let i=i0;i<=i1;i++)for(let j=j0;j<=j1;j++){const a=G.get(GK(i,j));if(a)for(let k=0;k<a.length;k++)if(pushBody(o,r,y,a[k]))hit=true}
  for(let k=0;k<BIG.length;k++)if(pushBody(o,r,y,BIG[k]))hit=true;return hit}
 push=function(o,r,y){if(o===P&&(FZ.mode=='top'||FZ.mode=='climb'||FZ.mode=='train'))return false;return fpush(o,r,y)};
+// v38: a grade é refeita sempre que a lista de paredes muda (antes só olhava o tamanho: trocar uma parede por outra deixava a grade velha)
+try{for(const k of['push','pop','shift','unshift','splice','sort','reverse','fill','copyWithin']){const f=Array.prototype[k];Object.defineProperty(solids,k,{configurable:true,writable:true,value:function(...a){GN=-1;return f.apply(this,a)}})}}catch(e){}
+// v38: paredes próximas de uma área (usada pela câmera)
+let QS=0;const QSEEN=new Set();window.SGQ=function(x0,x1,z0,z1,out){if(solids.length!==GN)gridBuild();out.length=0;QSEEN.clear();const i0=Math.floor(x0/CS),i1=Math.floor(x1/CS),j0=Math.floor(z0/CS),j1=Math.floor(z1/CS);
+ for(let i=i0;i<=i1;i++)for(let j=j0;j<=j1;j++){const a=G.get(GK(i,j));if(a)for(let k=0;k<a.length;k++){const b=a[k];if(!QSEEN.has(b)){QSEEN.add(b);out.push(b)}}}for(let k=0;k<BIG.length;k++)out.push(BIG[k]);return out};
 los=function(a,b,ya=1.3,yb=1.3){if(solids.length!==GN)gridBuild();const dx=b.x-a.x,dz=b.z-a.z,n=Math.max(2,Math.ceil(Math.hypot(dx,dz)/2));
  for(let i=1;i<n;i++){const t=i/n,x=a.x+dx*t,z=a.z+dz*t,y=ya+(yb-ya)*t,arr=G.get(GK(Math.floor(x/CS),Math.floor(z/CS)));
   if(arr)for(let k=0;k<arr.length;k++){const s=arr[k];if(s.h>1&&s.h>y&&x>s.x0&&x<s.x1&&z>s.z0&&z<s.z1)return false}
@@ -5393,9 +5407,9 @@ window.DMSHOP={open:openDM,close:closeDM};
 (function(){
 const low=()=>{const c=window.CFG||{};return c.ren===0||c.gfx===0||c.res===0||window.GFX===0};window.LOWGFX=low;
 let done=0;
-function strip(){if(!low()||done)return;done=1;const dyn=new Set();try{vehs.forEach(v=>dyn.add(v.g));peds.forEach(p=>dyn.add(p.g));dyn.add(P.g)}catch(e){}
+function strip(){const c=window.CFG||{};if(!(c.ren===0||c.res===0)||done)return;done=1;const dyn=new Set();try{vehs.forEach(v=>dyn.add(v.g));peds.forEach(p=>dyn.add(p.g));dyn.add(P.g)}catch(e){}
  const rm=[];sc.children.forEach(o=>{if(dyn.has(o))return;o.traverse(m=>{if(m.isMesh&&m.material===OLM)rm.push(m)})});rm.forEach(m=>m.parent&&m.parent.remove(m));window.LOWSTRIP=rm.length}
-let PROPS=null,pt=0;function props(){PROPS=[];const dyn=new Set();try{vehs.forEach(v=>dyn.add(v.g));peds.forEach(p=>dyn.add(p.g))}catch(e){}sc.children.forEach(o=>{if(dyn.has(o)||o===P.g||!o.isMesh||o.isInstancedMesh||o.matrixAutoUpdate!==false||!o.visible)return;const s=o.scale,gm=o.geometry;if(!gm)return;if(!gm.boundingSphere)gm.computeBoundingSphere();const rad=(gm.boundingSphere?gm.boundingSphere.radius:1)*Math.max(s.x,s.y,s.z);if(rad>3.5)return;const mt=o.material;if(mt&&(mt.transparent||(mt.color&&mt.color.b>mt.color.r*1.4&&mt.color.b>.45)))return;PROPS.push(o)})}
+let PROPS=null,pt=0;function props(){PROPS=[];const dyn=new Set();try{vehs.forEach(v=>dyn.add(v.g));peds.forEach(p=>dyn.add(p.g))}catch(e){}sc.children.forEach(o=>{if(dyn.has(o)||o===P.g||!o.isMesh||o.isInstancedMesh||o.matrixAutoUpdate!==false||!o.visible||(window.OPT36&&OPT36.items.has(o))||o.userData.opt36)return;const s=o.scale,gm=o.geometry;if(!gm)return;if(!gm.boundingSphere)gm.computeBoundingSphere();const rad=(gm.boundingSphere?gm.boundingSphere.radius:1)*Math.max(s.x,s.y,s.z);if(rad>3.5)return;const mt=o.material;if(mt&&(mt.transparent||(mt.color&&mt.color.b>mt.color.r*1.4&&mt.color.b>.45)))return;PROPS.push(o)})}
 function propTick(){if(!PROPS)props();const R2=78*78;for(const o of PROPS){const dx=o.position.x-P.x,dz=o.position.z-P.z,v=dx*dx+dz*dz<R2;if(o.visible!==v&&(v||o.visible)){if(!v)o.userData.lowh=1;else if(!o.userData.lowh)continue;o.visible=v;if(v)o.userData.lowh=0}}}
 const _an=anim;anim=function(o,sp,dt,h){if(low()&&o!==P&&o.x!=null&&Math.abs(o.x-P.x)+Math.abs(o.z-P.z)>70)return;return _an(o,sp,dt,h)};
 let t=0;const _u=update;update=function(dt){_u(dt);if(PAUSED)return;t+=dt;if(t>2.5&&!done)strip();
@@ -5593,6 +5607,152 @@ try{rd.compile(sc,cam)}catch(e){}
 // "Carregar jogo" só habilitado se existir save
 setInterval(()=>{try{const h=!!localStorage.getItem('maua_save2');['mlod','pld'].forEach(i=>{const b=$q(i);if(b)b.style.opacity=h?1:.4})}catch(e){}},600);
 })();
+</script><script type='text/game' class='gb'>
+// ===== v36 (otimização fase 1): agrupamento de geometrias estáticas por setores do mapa =====
+// Junta malhas estáticas (já congeladas pelo v12c) em uma malha por setor × material compatível, com cor por vértice.
+// As malhas originais continuam na cena (camada 31, invisível à câmera) com colisão, referências e materiais intactos:
+// ao serem danificadas, escondidas, removidas, movidas ou terem o material trocado, elas são "destacadas" do grupo
+// (seus triângulos somem do setor) e voltam a ser desenhadas sozinhas — destruição e interações continuam funcionando.
+(function(){
+const SEC=64,HIDE=31;
+const OPT=window.OPT36={on:true,done:false,sectors:new Map(),items:new Map(),stats:{},out:[]};
+const IMG=new WeakMap();let imgN=0;const imgId=o=>{if(!o)return 0;if(!IMG.has(o))IMG.set(o,++imgN);return IMG.get(o)};
+const BASE=new Map();// textura base (repeat 1) por imagem
+function baseTex(t){const k=imgId(t.image)+'_'+t.wrapS+'_'+t.wrapT+'_'+t.magFilter+'_'+t.minFilter;let b=BASE.get(k);if(!b){b=t.clone();b.repeat.set(1,1);b.offset.set(0,0);b.needsUpdate=true;BASE.set(k,b)}return b}
+const hx=c=>c?c.getHex():-1;
+function mkey(m){if(!m||m.visible===false||m.transparent||m.vertexColors||m.isShaderMaterial||m.isMeshStandardMaterial&&0)return null;
+ if(m.map){const t=m.map;if(t.rotation||t.center.x||t.center.y||!t.image)return null;if((t.repeat.x!==1||t.repeat.y!==1||t.offset.x||t.offset.y)&&(t.wrapS!==T.RepeatWrapping||t.wrapT!==T.RepeatWrapping))return null}
+ if(m.alphaMap||m.bumpMap||m.normalMap||m.lightMap||m.aoMap||m.specularMap||m.displacementMap)return null;
+ return [m.type,m.map?imgId(m.map.image)+'w'+m.map.wrapS:'-',m.side,m.depthWrite?1:0,m.depthTest?1:0,m.polygonOffset?m.polygonOffsetFactor+','+m.polygonOffsetUnits:'-',hx(m.emissive),m.onBeforeCompile&&m.customProgramCacheKey?m.customProgramCacheKey():'-',
+  m.fog?1:0,m.flatShading?1:0,m.gradientMap?m.gradientMap.uuid:'-',m.envMap?m.envMap.uuid:'-',m.shininess==null?'-':m.shininess,hx(m.specular),m.reflectivity==null?'-':m.reflectivity,m.combine==null?'-':m.combine,m.alphaTest,m.opacity,m.colorWrite?1:0].join('|')}
+const PROTO=new Map();// material compartilhado por chave
+function sharedMat(m,k){let s=PROTO.get(k);if(s)return s;s=m.clone();s.color&&s.color.setRGB(1,1,1);s.vertexColors=true;if(m.map)s.map=baseTex(m.map);
+ if(m.onBeforeCompile){s.onBeforeCompile=m.onBeforeCompile;s.customProgramCacheKey=m.customProgramCacheKey}s.userData=Object.assign({},m.userData,{opt36:1});s.needsUpdate=true;PROTO.set(k,s);return s}
+// ---------- elegibilidade ----------
+let DYN=null;
+function dynSet(){const d=new Set();try{vehs.forEach(v=>v.g&&d.add(v.g));peds.forEach(p=>p.g&&d.add(p.g));d.add(P.g);hl.forEach(h=>h.g&&d.add(h.g));(SH.m||[]).forEach(o=>d.add(o));if(typeof doorG!=='undefined'&&doorG)d.add(doorG)}catch(e){}return d}
+function eligible(o){if(!o.isMesh||o.isInstancedMesh||o.isSkinnedMesh||o.isSprite||o.isPoints||o.isLine)return false;
+ if(o.matrixAutoUpdate!==false||!o.visible||o.frustumCulled===false||o.renderOrder!==0||o.userData.opt36||o.userData.dmg)return false;
+ if(o.onBeforeRender&&o.onBeforeRender!==T.Object3D.prototype.onBeforeRender&&o.onBeforeRender.toString().length>20)return false;
+ if(o.layers.mask!==1)return false;const g=o.geometry;if(!g||!g.attributes||!g.attributes.position||g.morphAttributes&&Object.keys(g.morphAttributes).length)return false;
+ for(const c of o.children){if(!(c.isMesh&&c.material===OLM&&c.children.length==0))return false}// só aceita contornos como filhos
+ return true}
+// ---------- acumuladores por setor ----------
+const V3=new T.Vector3(),N3=new T.Vector3(),NM=new T.Matrix3();
+function bucket(sx,sz,key,mat){const sk=sx+'_'+sz;let s=OPT.sectors.get(sk);if(!s){s={sx,sz,b:new Map(),meshes:[]};OPT.sectors.set(sk,s)}let b=s.b.get(key);if(!b){b={key,mat,pos:[],nor:[],uv:[],col:[],items:[],uvOn:!!(mat.map),mesh:null};s.b.set(key,b)}return b}
+// acrescenta os triângulos de (mesh, grupo/material) ao balde; guarda o intervalo de vértices para destacar depois
+function addPart(o,mat,start,count,b,rec,sharedOL){const g=o.geometry,pa=g.attributes.position,na=g.attributes.normal,ua=g.attributes.uv,ix=g.index;
+ const mw=o.matrixWorld;NM.getNormalMatrix(mw);const t=mat.map,rx=t?t.repeat.x:1,ry=t?t.repeat.y:1,ox=t?t.offset.x:0,oy=t?t.offset.y:0;
+ const c=sharedOL?{r:1,g:1,b:1}:mat.color;const v0=b.pos.length/3;
+ for(let i=start;i<start+count;i++){const vi=ix?ix.getX(i):i;V3.fromBufferAttribute(pa,vi).applyMatrix4(mw);b.pos.push(V3.x,V3.y,V3.z);
+  if(na){N3.fromBufferAttribute(na,vi).applyMatrix3(NM).normalize();b.nor.push(N3.x,N3.y,N3.z)}else b.nor.push(0,1,0);
+  if(b.uvOn){if(ua)b.uv.push(ua.getX(vi)*rx+ox,ua.getY(vi)*ry+oy);else b.uv.push(0,0)}
+  b.col.push(c.r,c.g,c.b)}
+ const it={b,v0,n:count,o};b.items.push(it);rec.parts.push(it)}
+function addMesh(o){const rec={o,parts:[],det:false,lv:true,ol:[]};const g=o.geometry,mats=Array.isArray(o.material)?o.material:[o.material];
+ // centro do objeto define o setor (objetos grandes também cabem: o setor recebe o volume real no bounding sphere)
+ V3.set(0,0,0).applyMatrix4(o.matrixWorld);const sx=Math.floor(V3.x/SEC),sz=Math.floor(V3.z/SEC);
+ const parts=[];const total=g.index?g.index.count:g.attributes.position.count;
+ if(Array.isArray(o.material)){if(!g.groups||!g.groups.length)return null;for(const gr of g.groups){const m=mats[gr.materialIndex];if(!m)continue;if(m.visible===false)continue;const k=mkey(m);if(!k)return null;parts.push([m,k,gr.start,Math.min(gr.count,total-gr.start)])}}
+ else{const m=o.material,k=mkey(m);if(!k)return null;const dr=g.drawRange;const st=Math.max(0,dr.start),cn=Math.min(total-st,dr.count);parts.push([m,k,st,cn])}
+ for(const[m,k,st,cn]of parts){const b=bucket(sx,sz,k,sharedMat(m,k));addPart(o,m,st,cn,b,rec,false)}
+ // contornos (filhos com OLM): vão para o balde de contorno do setor
+ if(OLM.visible!==false)for(const c of o.children){c.updateMatrixWorld(true);const cg=c.geometry,cn=cg.index?cg.index.count:cg.attributes.position.count;const b=bucket(sx,sz,'OLM',OLM);addPart(c,OLM,0,cn,b,rec,true);rec.ol.push(c)}
+ return rec}
+// ---------- construção dos setores ----------
+function buildMeshes(){for(const s of OPT.sectors.values()){for(const b of s.b.values()){if(!b.pos.length)continue;const g=new T.BufferGeometry();
+  g.setAttribute('position',new T.Float32BufferAttribute(b.pos,3));g.setAttribute('normal',new T.Float32BufferAttribute(b.nor,3));if(b.uvOn)g.setAttribute('uv',new T.Float32BufferAttribute(b.uv,2));
+  if(b.key!=='OLM')g.setAttribute('color',new T.Float32BufferAttribute(b.col,3));g.computeBoundingSphere();g.computeBoundingBox();
+  const m=new T.Mesh(g,b.mat);m.matrixAutoUpdate=false;m.updateMatrix();m.updateMatrixWorld(true);m.userData.opt36=1;m.userData.sec=s;m.userData.ol=b.key==='OLM';m.name='opt36_'+s.sx+'_'+s.sz;sc.add(m);b.mesh=m;s.meshes.push(m);b.orig=new Float32Array(b.pos);b.pos=null;b.nor=null;b.uv=null;b.col=null}}}
+// some/volta com os triângulos de um objeto dentro do balde
+function setParts(rec,show){for(const it of rec.parts){const m=it.b.mesh;if(!m)continue;const a=m.geometry.attributes.position,arr=a.array,o=it.b.orig;
+  for(let i=it.v0*3,e=(it.v0+it.n)*3;i<e;i++)arr[i]=show?o[i]:0;a.needsUpdate=true}}
+const attached=o=>{let p=o;while(p){if(p===sc)return true;p=p.parent}return false};
+const effVis=o=>{let p=o.parent;while(p&&p!==sc){if(!p.visible)return false;p=p.parent}return true};
+function sync(rec){setParts(rec,rec.lv&&rec.ev!==false&&!rec.det&&attached(rec.o))}
+// destaca de vez: o objeto original volta a ser desenhado sozinho (dano, material trocado, movido)
+function detach(o,why){const rec=OPT.items.get(o);if(!rec||rec.det)return;const W=OPT.why||(OPT.why={});W[why||'?']=(W[why||'?']||0)+1;rec.det=true;sync(rec);o.layers.set(0);rec.ol.forEach(c=>c.layers.set(0));OPT.stats.detached=(OPT.stats.detached||0)+1}
+OPT.detach=detach;
+function guard(o,rec){let vis=o.visible,mt=o.material;
+ Object.defineProperty(o,'visible',{configurable:true,get(){return vis},set(v){v=!!v;if(v===vis)return;vis=v;rec.lv=v;if(!rec.det)sync(rec)}});
+ Object.defineProperty(o,'material',{configurable:true,get(){return mt},set(v){mt=v;if(v!==undefined)detach(o,'material')}});
+ let gm=o.geometry;Object.defineProperty(o,'geometry',{configurable:true,get(){return gm},set(v){gm=v;if(v!==undefined)detach(o,'geometry')}});
+ if(o.matrixAutoUpdate===false){const um=o.updateMatrix.bind(o);o.updateMatrix=function(){um();if(!rec.det)detach(o,'updateMatrix')}}
+ o.addEventListener('removed',()=>{if(!rec.det)sync(rec)});o.addEventListener('added',()=>{if(!rec.det)sync(rec)});
+ rec.ol.forEach(c=>c.addEventListener('removed',()=>{if(!rec.det){for(const it of rec.parts)if(it.o===c){const m=it.b.mesh;if(m){const arr=m.geometry.attributes.position.array;for(let i=it.v0*3,e=(it.v0+it.n)*3;i<e;i++)arr[i]=0;m.geometry.attributes.position.needsUpdate=true}}}}))}
+// prédios: qualquer dano (hitB) destaca o prédio antes, para rachaduras/escurecimento continuarem aparecendo
+const _hb=hitB;hitB=function(x,z){if(OPT.done)for(const b of solids){if(!b.ms||!b.ms[0])continue;const d=Math.hypot(x-cl(x,b.x0,b.x1),z-cl(z,b.z0,b.z1));if(d<=9.5)b.ms.forEach(m=>m&&m.isMesh&&detach(m,'dano'))}return _hb(x,z)};
+const GSNAP=new Map();const msig=o=>{const a=[];o.traverse(c=>{c.updateMatrixWorld&&0;a.push(c.matrixWorld.elements.join(','))});return a.join('|')};
+function snapGroups(){const d=dynSet();for(const g of sc.children){if(d.has(g)||g.isMesh||!g.children.length)continue;g.updateMatrixWorld(true);GSNAP.set(g,msig(g))}}
+function stableG(g){g.updateMatrixWorld(true);return GSNAP.get(g)===msig(g)}
+const SPH=new T.Sphere(),BX=new T.Box3(),M4=new T.Matrix4();
+function instBounds(o){const g=o.geometry;const tg=new T.BufferGeometry();tg.setAttribute('position',g.attributes.position);tg.computeBoundingSphere();const loc=tg.boundingSphere.clone();BX.makeEmpty();
+ for(let i=0;i<o.count;i++){o.getMatrixAt(i,M4);if(Math.abs(M4.determinant())<1e-9)continue;SPH.copy(loc).applyMatrix4(M4);BX.expandByPoint(V3.copy(SPH.center).addScalar(SPH.radius));BX.expandByPoint(V3.copy(SPH.center).addScalar(-SPH.radius))}
+ if(BX.isEmpty())return;const g2=new T.BufferGeometry();for(const k in g.attributes)g2.setAttribute(k,g.attributes[k]);if(g.index)g2.setIndex(g.index);g.groups.forEach(q=>g2.addGroup(q.start,q.count,q.materialIndex));g2.boundingSphere=BX.getBoundingSphere(new T.Sphere());g2.boundingBox=BX.clone();o.geometry=g2}
+const SNAP=new Map();const sig=m=>[hx(m.color),hx(m.emissive),m.visible,m.opacity,m.map?m.map.uuid:'',m.map?m.map.repeat.x+','+m.map.repeat.y:''].join('|');
+function snapMats(){sc.children.forEach(o=>{if(!o.isMesh||o.isInstancedMesh)return;(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{if(m&&!SNAP.has(m))SNAP.set(m,sig(m))})})}
+const VOL=new Set();// materiais que mudam sozinhos (semáforos, luzes): não entram no agrupamento
+function vol(m){return VOL.has(m)||(SNAP.has(m)&&SNAP.get(m)!==sig(m))}
+function run(){for(const[m,s0]of SNAP)if(sig(m)!==s0)VOL.add(m);const t0=performance.now&&window.__pn?__pn():Date.now();DYN=dynSet();let n=0,skip=0;const list=[];
+ for(const o of sc.children){if(DYN.has(o)){continue}if(!eligible(o)){if(o.isMesh)skip++;continue}if((Array.isArray(o.material)?o.material:[o.material]).some(m=>m&&vol(m))){skip++;continue}list.push(o)}
+ for(const o of list){const rec=addMesh(o);if(!rec){skip++;continue}OPT.items.set(o,rec);n++}
+ // grupos estáticos (criados depois do congelamento): só entram se não se moveram desde a primeira amostra
+ OPT.groups=[];for(const g of sc.children){if(DYN.has(g)||g.isMesh||!g.children.length||!GSNAP.has(g))continue;if(!stableG(g))continue;const its=[];
+  g.traverse(o=>{if(o===g||!o.isMesh||!o.visible||!effVis(o))return;if(o.isInstancedMesh||o.isSkinnedMesh||o.renderOrder||o.frustumCulled===false||o.userData.opt36||o.userData.dmg||o.layers.mask!==1)return;
+   if(o.children.some(c=>!(c.isMesh&&c.material===OLM&&!c.children.length)))return;if((Array.isArray(o.material)?o.material:[o.material]).some(m=>m&&vol(m)))return;
+   o.updateMatrixWorld(true);const rec=addMesh(o);if(!rec)return;rec.mw=o.matrixWorld.elements.slice();rec.ev=true;OPT.items.set(o,rec);its.push(rec);n++});
+  if(its.length)OPT.groups.push({g,its})}
+ buildMeshes();
+ try{rd.compile(sc,cam)}catch(e){}// compila os shaders dos setores agora (evita travadinha quando aparecem)
+ for(const[o,rec]of OPT.items){o.layers.set(HIDE);rec.ol.forEach(c=>c.layers.set(HIDE));guard(o,rec)}
+ // vigia contínuo: se um material agrupado mudar de cor/visibilidade, os objetos dele saem do grupo
+ OPT.byMat=new Map();for(const[o,rec]of OPT.items){(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{if(!m)return;let a=OPT.byMat.get(m);if(!a){a={s:sig(m),o:[]};OPT.byMat.set(m,a)}a.o.push(o)})}
+ // decor instanciado: liga o recorte por setor (antes era desenhado sempre)
+ let ic=0;for(const o of sc.children){if(!o.isInstancedMesh||o.frustumCulled||DYN.has(o))continue;try{instBounds(o);o.frustumCulled=true;ic++}catch(e){}}OPT.stats.instCulled=ic;
+ OPT.done=true;OPT.stats.merged=n;OPT.stats.skipped=skip;OPT.stats.sectorMeshes=[...OPT.sectors.values()].reduce((a,s)=>a+s.meshes.length,0);OPT.stats.ms=+((window.__pn?__pn():Date.now())-t0).toFixed(1);
+ // contornos: no modo realista ficam ocultos (OLM.visible=false), como antes
+ console.log('OPT36',JSON.stringify(OPT.stats))}
+// A/B para validação: mostra o cenário original (true) ou agrupado (false) no mesmo quadro
+OPT.ab=orig=>{for(const[o,rec]of OPT.items){if(rec.det)continue;const L=orig?0:HIDE;o.layers.set(L);rec.ol.forEach(c=>c.layers.set(L))}for(const s of OPT.sectors.values())s.meshes.forEach(m=>m.layers.set(orig?HIDE:0))};
+OPT.run=run;OPT._dbg={GSNAP,stableG,msig,effVis,eligible};
+// os objetos pequenos escondidos pelo modo leve (v34e) não precisam mais: os setores já são recortados pela câmera
+let tt=0,wt=0,sn=0;const _u=update;update=function(dt){_u(dt);if(PAUSED)return;
+ if(OPT.done){for(const G of OPT.groups){for(const rec of G.its){if(rec.det)continue;const o=rec.o,ev=effVis(o)&&attached(o);if(ev!==rec.ev){rec.ev=ev;sync(rec)}const e=o.matrixWorld.elements,m=rec.mw;for(let i=0;i<16;i++)if(e[i]!==m[i]){detach(o,'moveu');break}}}
+  if((wt-=dt)<0){wt=.4;for(const[m,a]of OPT.byMat){const s=sig(m);if(s!==a.s){a.s=s;a.o.forEach(x=>detach(x,'cor'));OPT.byMat.delete(m)}}}return}
+ if(!OPT.on)return;tt+=dt;if(tt>1.2&&!sn){sn=1;snapMats();snapGroups()}if(tt>3.6){try{run()}catch(e){console.log('OPT36 erro',e);OPT.on=false}}};
+})();
+
+</script><script type='text/game' class='gb'>
+// ===== v37 (otimização fase 1): contornos cartoon sob demanda =====
+// Realista: os contornos nunca aparecem (OLM.visible=false), então as cópias de malha são removidas de vez.
+// Cartoon: contornos do cenário ficam agrupados por setor (v36) e só são desenhados perto da câmera;
+// pessoas próximas e veículos importantes mantêm o contorno; os distantes perdem.
+(function(){
+const real=()=>OLM.visible===false;
+const CF=()=>window.CFG||{};
+function stripOL(root){const rm=[];root.traverse(m=>{if(m.isMesh&&m.material===OLM)rm.push(m)});rm.forEach(m=>m.parent&&m.parent.remove(m));return rm.length}
+let removed=0;
+if(real()){
+ const _sp=spawnPed;spawnPed=function(...a){const p=_sp(...a);try{if(p&&p.g)removed+=stripOL(p.g)}catch(e){}return p};
+ const _sv=spawnV;spawnV=function(...a){const v=_sv(...a);try{if(v&&v.g)removed+=stripOL(v.g)}catch(e){}return v};}
+// distâncias: contorno de cenário por setor e prioridade para pessoas/veículos
+const OLR=()=>({0:0,1:110,2:150}[CF().ren==null?1:CF().ren]),PMAX=14;
+let t=0,swept=0;const V=new T.Vector3();
+const _u=update;update=function(dt){_u(dt);if(PAUSED)return;t-=dt;if(t>0)return;t=.3;
+ try{
+  if(real()){if(!swept&&window.OPT36&&OPT36.done){swept=1;removed+=stripOL(sc);window.OL37={removed}}else if(swept&&(swept++%10)==0){peds.forEach(p=>{if(p.g&&!p.g.userData.ol0){p.g.userData.ol0=1;removed+=stripOL(p.g)}});vehs.forEach(v=>{if(v.g&&!v.g.userData.ol0){v.g.userData.ol0=1;removed+=stripOL(v.g)}})}return}
+  // cartoon: setores de contorno só perto da câmera
+  const R=OLR(),cp=cam.position;if(window.OPT36&&OPT36.done)for(const s of OPT36.sectors.values())for(const m of s.meshes){if(!m.userData.ol)continue;const bs=m.geometry.boundingSphere;const on=R>0&&bs.center.distanceTo(cp)-bs.radius<R;if(m.visible!==on)m.visible=on}
+  // pessoas: só as PMAX mais próximas (dentro do raio do LOD) mantêm contorno
+  const LC=window.LODC||{po:26,vo:50};const near=peds.filter(p=>p.g&&p.g.visible&&!p._of).map(p=>[p,Math.hypot(p.x-P.x,p.z-P.z)]).sort((a,b)=>a[1]-b[1]);
+  const ols=o=>{if(!o._ol2){const a=[];o.g.traverse(m=>{if(m.isMesh&&m.material===OLM)a.push(m)});o._ol2=a}return o._ol2};
+  near.forEach(([p,d],i)=>{if(i>=PMAX)for(const m of ols(p))m.visible=false});
+  // veículos importantes (seu, polícia, perseguição) mantêm contorno mais longe
+  for(const v of vehs){if(!v.g||!v.g.visible)continue;const imp=v===P.veh||v.ai||v.pol;if(!imp)continue;const d=Math.hypot(v.x-P.x,v.z-P.z);if(d<LC.vo*1.8)for(const m of ols(v))m.visible=true}
+ }catch(e){console.log('v37',e)}};
+window.OL37=window.OL37||{};
+})();
+
 </script><script>
 // ===== v31: música desde a tela inicial (inicial, carregamento e menu) + ambiente na pausa =====
 (function(){
