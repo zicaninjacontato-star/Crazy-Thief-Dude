@@ -3317,8 +3317,8 @@ const _u=update;update=function(dt){_u(dt);try{
  const S0=XS.cur;
  if(S0){const f=S0.focus(),k=Math.min(1,dt*6),tg=S0.tgt?S0.tgt():S0===GA?S0.v:P,ty=(S0===GA?(S0.v.y||0):0)+f.y;
   XS.fx+=((tg.x)-XS.fx)*k;XS.fz+=((tg.z)-XS.fz)*k;XS.fy+=(ty-XS.fy)*k;XS.fr+=(f.r-XS.fr)*k;
-  cam.position.set(XS.fx+Math.sin(XS.ang)*XS.fr,XS.fy+XS.fr*.16,XS.fz+Math.cos(XS.ang)*XS.fr);cam.lookAt(XS.fx,XS.fy,XS.fz);rd.render(sc,cam);return}
- // vestuário: reaplica ao carregar jogo
+  cam.position.set(XS.fx+Math.sin(XS.ang)*XS.fr,XS.fy+XS.fr*.16,XS.fz+Math.cos(XS.ang)*XS.fr);cam.lookAt(XS.fx,XS.fy,XS.fz);return}
+ // vestuário: reaplica ao carregar JOGO
  if(own.xcl!==CL.ref){dress(CLs().e);CL.ref=own.xcl}
  // visual das armas
  const k=cur,wu=own.xwu&&own.xwu[k],key=k+'|'+(wu?wu.sk+wu.sg+wu.sil:'')+'|'+(P.g.userData.gun?P.g.userData.gun.visible:0);
@@ -3476,7 +3476,6 @@ const _u2=update;update=function(dt){_u2(dt);try{
  else if(GG.st=='out'){const O2=GG.W(0,19),k=ease(GG.t/2.6),s=GG.s0;place2(I.x+(O2.x-I.x)*k,I.z+(O2.z-I.z)*k,inYaw+Math.PI*ease(Math.min(1,GG.t/1.0)));
   camTo(v,dt);if(GG.t>=2.6){GG.st='close';GG.t=0}}
  else if(GG.st=='close'){gateSet(1-ease(GG.t/1.0));camTo(v,dt);if(GG.t>=1.0){gateSet(0);finish()}}
- if(GG.st!='shop')rd.render(sc,cam);
 }catch(e){console.log('v27 upd',e)}};
 window.GG_DEBUG=GG;
 })();
