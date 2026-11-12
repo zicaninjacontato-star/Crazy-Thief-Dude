@@ -111,7 +111,7 @@ document.head.insertAdjacentHTML('beforeend',"<style>html body #wbt{background:t
 (function(){let g=1;try{const o=JSON.parse(localStorage.getItem('maua_cfg')||'null');if(o&&typeof o.gfx=='number')g=o.gfx;if(o&&o.ren===0)g=0}catch(e){}window.GFX=g;if(!g)return;
 const L=THREE.MeshLambertMaterial;class TM extends L{constructor(p){p=Object.assign({},p||{});delete p.gradientMap;super(p)}}THREE.MeshToonMaterial=TM})();
 </script><script type='text/game' class='gb'>
-const T=THREE,R=(()=>{window.MAPSEED=window.MAPSEED||3;let s=window.MAPSEED>>>0;const rn=()=>{s=(s+0x6D2B79F5)>>>0;let t=s;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296},mr=Math.random;window.__sd=1;Math.random=function(){return window.__sd?rn():mr()};return Math.random})(),PI=Math.PI,sin=Math.sin,cos=Math.cos,cl=(v,a,b)=>Math.max(a,Math.min(b,v)),$=i=>document.getElementById(i);
+const T=THREE,R=(()=>{window.MAPSEED=window.MAPSEED||3;let s=window.MAPSEED>>>0;const rn=()=>{s=(s+0x6D2B79F5)>>>0;let t=s;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296},mr=Math.random;window.__sd=1;window.__rs=k=>{s=(Math.imul((window.MAPSEED>>>0)+1,2654435761)^Math.imul(k+1,40503))>>>0};Math.random=function(){return window.__sd?rn():mr()};return Math.random})(),PI=Math.PI,sin=Math.sin,cos=Math.cos,cl=(v,a,b)=>Math.max(a,Math.min(b,v)),$=i=>document.getElementById(i);
 const sc=new T.Scene();sc.background=new T.Color(0x8fc6e8);sc.fog=new T.Fog(0x8fc6e8,80,260);
 const cam=new T.PerspectiveCamera(65,innerWidth/innerHeight,.1,400);
 const rd=new T.WebGLRenderer();rd.setPixelRatio(Math.min(devicePixelRatio,1.25));rd.setSize(innerWidth,innerHeight);document.body.prepend(rd.domElement);
@@ -4303,7 +4303,7 @@ const _dr=drive;drive=function(v,ax,ay,c,dt){
 })();
 // carros reais (no máx. 3) nos estacionamentos
 try{for(const q of (window.PKS||[]))spawnV('car',q[0],q[1],q[2],q[3],0)}catch(e){console.log('pks',e)}
-window.__sd=0;
+// o sorteio do mapa continua fixo até o fim do carregamento (o mapa é sempre o mesmo)
 
 </script><script type='text/game' class='gb'>
 // ===== v28: motos de NPC dirigindo =====
@@ -6534,8 +6534,8 @@ document.body.insertAdjacentHTML('beforeend',`<style>.bo{position:fixed;inset:0;
  const setP=p=>{$b('lfill').style.width=p+'%';$b('lpct').textContent='Carregando... '+Math.round(p)+'%'};
  function load(){t0=performance.now();iv=0;setP(5);const raf=window.requestAnimationFrame;window.requestAnimationFrame=()=>0;
   const s=document.createElement('script');s.src='three.min.js';s.onerror=()=>{s.onerror=()=>{$b('lcap').textContent='Falha ao carregar. Verifique a conexão.'};const s2=document.createElement('script');s2.src='https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';s2.onerror=s.onerror;s2.onload=s.onload;document.head.appendChild(s2)};s.onload=()=>{setP(25);run(0)};document.head.appendChild(s);
-  function run(i){const bl=document.querySelectorAll('script.gb');if(i>=bl.length){fin();return}const e=document.createElement('script');e.textContent=bl[i].textContent;document.body.appendChild(e);setP(25+70*(i+1)/bl.length);setTimeout(()=>run(i+1),200)}
-  function fin(){window.requestAnimationFrame=raf;setTimeout(()=>{setP(100);clearInterval(iv);$b('load').style.display='none';$b('hud').style.display='';requestAnimationFrame(loop)},Math.max(0,5200-(performance.now()-t0)))}}
+  function run(i){const bl=document.querySelectorAll('script.gb');if(i>=bl.length){fin();return}try{if(window.__rs)window.__rs(i)}catch(x){}const e=document.createElement('script');e.textContent=bl[i].textContent;document.body.appendChild(e);setP(25+70*(i+1)/bl.length);setTimeout(()=>run(i+1),200)}
+  function fin(){window.__sd=0;window.requestAnimationFrame=raf;setTimeout(()=>{setP(100);clearInterval(iv);$b('load').style.display='none';$b('hud').style.display='';requestAnimationFrame(loop)},Math.max(0,5200-(performance.now()-t0)))}}
  $b('bj').onclick=()=>{goFS();$b('boot').style.display='none';$b('load').style.display='block';load()};$b('bs').onclick=exitGame})();
 </script></body></html>
 
