@@ -1043,9 +1043,9 @@ S.swat={m:38,a:28,tr:1.8,r:2.4,hp:260,n:'Viatura'};
 function swat(x,z,yaw){const v=spawnV('swat',x,z,yaw,0,1),g=v.g;box(2.4,1,4.8,0x15181f,0,.9,0,g);box(2.1,.9,2.4,0x2a3340,0,1.85,-.2,g);box(2.42,.25,3,0xffffff,0,.9,0,g);for(const a of[-1.15,1.15])for(const b of[-1.5,1.5])box(.35,.8,.8,0x111111,a,.4,b,g);box(.9,.3,.5,0xdd2222,-.5,2.45,-.2,g);box(.9,.3,.5,0x2255dd,.5,2.45,-.2,g);v.hp=260;return v}
 const _dv=dmgV;dmgV=function(v,n){const was=v.dead,h0=v.hp;_dv(v,n);if(v.pol&&((v.dead&&!was)||(v.mh&&v.hp<v.mh*.85&&h0>=v.mh*.85)))RE=1};
 // ---- despacho a partir da delegacia ----
-copSpawn=function(dt){const st=stars();if(!st||!A)return;if(H.dl>0){H.dl-=dt;return}H.sp-=dt;if(H.sp>0)return;H.sp=3;const lv=RE?Math.max(st,2):st;if(lv<2)return;
- const foot=peds.filter(p=>p.cop&&!p.rag&&!p.pat).length,cars=vehs.filter(v=>v.disp&&!v.dead).length,mf=lv>=3?6:3,mc2=lv>=3?3:1,opt=[];
- if(!hl.length)opt.push(2);if(cars<mc2)opt.push(1);if(foot<mf)opt.push(0);
+copSpawn=function(dt){const st=stars();if(!st||!A)return;if(H.dl>0){H.dl-=dt;return}H.sp-=dt;if(H.sp>0)return;const CC=window.COPCAP;H.sp=CC?CC.iv():3;const lv=RE?Math.max(st,2):st;if(lv<2)return;
+ const foot=CC?CC.foot():peds.filter(p=>p.cop&&!p.rag&&!p.pat).length,cars=CC?CC.cars():vehs.filter(v=>v.disp&&!v.dead).length,mf=CC?CC.f(lv):(lv>=3?6:3),mc2=CC?CC.c(lv):(lv>=3?3:1),opt=[];
+ if(!hl.length&&(!CC||CC.heliOk(lv)))opt.push(2);if(cars<mc2-(CC?CC.pend('c'):0))opt.push(1);if(foot<mf-(CC?CC.pend('f'):0))opt.push(0);
  if(hl.length)hl.forEach(h=>h.armed=lv>=3);
  if(!opt.length)return;const k=opt[R()*opt.length|0];
  if(k==2)spawnHeli({x:POL.x,z:POL.z},lv>=3);
@@ -1058,7 +1058,7 @@ const _uH=update;update=function(dt){_uH(dt);if(PAUSED)return;
  const st=stars();acc+=dt;
  if(acc>=.4){acc=0;
   if(!st){HOT=0;vehs.forEach(v=>{v.dm=0});if(RE||peds.some(p=>p.al)||vehs.some(v=>v.al)){RE=0;peds.forEach(p=>{if(p.pat&&p.al){p.al=0;p.ax=null}});vehs.forEach(v=>{if(v.pol&&v.al){v.al=0;v.ax='z';v.rl=nl(v.x);v.dir=cos(v.yaw)>0?1:-1;v.tr=v.stolen?0:1;v.sp=Math.min(v.sp,8)}})}}
-  else{const nF=RE?99:[0,2,4,6][st],nC=RE?99:[0,1,1,2][st],pick=(arr,al,n)=>{let c=arr.filter(o=>o.al).length;if(c>=n)return;arr.filter(o=>!o.al).map(o=>[Math.hypot(o.x-P.x,o.z-P.z),o]).sort((a,b)=>a[0]-b[0]).slice(0,n-c).forEach(q=>{q[1].al=1})};
+  else{const CC=window.COPCAP,lvA=RE?Math.max(st,2):st,nF=CC?CC.f(lvA):(RE?99:[0,2,4,6][st]),nC=CC?CC.c(lvA):(RE?99:[0,1,1,2][st]),pick=(arr,al,n)=>{let c=arr.filter(o=>o.al).length;if(c>=n)return;arr.filter(o=>!o.al).map(o=>[Math.hypot(o.x-P.x,o.z-P.z),o]).sort((a,b)=>a[0]-b[0]).slice(0,n-c).forEach(q=>{q[1].al=1})};
    pick(peds.filter(p=>p.pat&&!p.rag),0,nF);pick(vehs.filter(v=>v.pol&&!v.disp&&!v.dead&&!v.stolen&&v!==P.veh),0,nC)}}
  // policiais de elite (3 estrelas) atiram com mais força
  if(A&&A.red&&P.dead<=0)peds.forEach(p=>{if(!p.el||p.rag)return;p.eb=(p.eb||0)-dt;if(p.eb>0)return;const d=Math.hypot(P.x-p.x,P.z-p.z);if(d<32&&los(p,P)){p.eb=.4;const tg=P.veh||P;tracer(p,tg);snd('mg',p.x,p.z,.7);if(P.veh)dmgV(P.veh,2.2);else if(R()<.3)hurtP(5)}});
@@ -4702,7 +4702,7 @@ const _cAI=carAI;carAI=function(v,dt){
  if(d>13){drive(v,-Math.max(-1,Math.min(1,df*2)),Math.abs(df)<1.3?1:.35,d<24&&v.sp>12?1:0,dt);return}
  drive(v,0,0,1,dt);if(Math.abs(v.sp)>2)return;
  // parou perto: policiais descem
- v._out=1;v.nodrv=1;if(v.drv)v.drv.visible=false;const st=stars(),n=v.t=='swat'?2:1;
+ v._out=1;v.nodrv=1;if(v.drv)v.drv.visible=false;const st=stars(),n=Math.min(v.t=='swat'?2:1,window.COPCAP?COPCAP.room():9);
  for(let i=0;i<n;i++){const sd=i?-1:1,q=spawnPed(v.x+Math.cos(v.yaw)*2.3*sd,v.z-Math.sin(v.yaw)*2.3*sd,1);
   if(st<=1){q.pat=1;q.al=1;q.arr=1}else{q.pat=0;q.al=1}
   Object.defineProperty(q,'lv',{get(){return stars()<=0?1:0},set(x){},configurable:true})}
@@ -6402,6 +6402,46 @@ const _u=update;update=function(dt){_u(dt);
  if(PAUSED)return;
  try{pkTick(dt)}catch(e){console.log('v43 pk',e);if(FZ.mode=='pk')FZ.mode='gnd'}
  try{jobTick(dt);jobMotoTick(dt)}catch(e){console.log('v43 job',e)}};
+})();
+
+</script><script type='text/game' class='gb'>
+// ===== v44: perseguição mais leve — limites por nível de procurado, reposição com espera, unidades distantes processadas com menos frequência =====
+(function(){
+// aparelho fraco: pouca memória/núcleos ou resolução/distância de desenho no mínimo
+const nav=navigator,WEAK=!!((nav.deviceMemory&&nav.deviceMemory<=4)||(nav.hardwareConcurrency&&nav.hardwareConcurrency<=4)||(window.CFG&&(CFG.res===0||CFG.ren===0)));
+//            ★0 ★1 ★2 ★3
+const FOOT=WEAK?[0,2,4,6]:[0,2,5,8],CARS=WEAK?[0,1,2,3]:[0,1,2,4];
+// espera para repor uma unidade depois que ela é abatida (antes: ~3 s, quase na hora)
+const WAIT=WEAK?{f:8,c:15,h:45}:{f:6,c:12,h:35};
+const lvOf=l=>Math.max(0,Math.min(3,l|0));
+const isPolV=v=>(v.pol||v.t=='swat')&&!v.dead&&!v.stolen&&v!==P.veh&&!v.mg;
+const Q={f:[],c:[]};// vagas de unidades abatidas: cada uma só volta a ser preenchida depois da espera
+const C=window.COPCAP={weak:WEAK,cdH:0,pend:k=>Q[k].length,
+ f:l=>FOOT[lvOf(l)],c:l=>CARS[lvOf(l)],
+ iv:()=>WEAK?3.5:3,
+ // conta todos os policiais que estão de fato na perseguição: despachados, os que desceram das viaturas e a patrulha alertada
+ foot:()=>{let n=0;for(const p of peds)if(p.cop&&!p.rag&&!p.mg&&(!p.pat||p.al))n++;return n},
+ cars:()=>{let n=0;for(const v of vehs)if(isPolV(v)&&(v.disp||v.al))n++;return n},
+ heliOk:l=>C.cdH<=0&&(l>=3||(!WEAK&&l>=2)),
+ room:()=>{const st=stars();return Math.max(0,FOOT[lvOf(st)]+1-C.foot())},
+ stats:()=>({weak:WEAK,estrelas:stars(),aPe:C.foot(),viaturas:C.cars(),heli:hl.length,limiteAPe:FOOT[lvOf(stars())],limiteViaturas:CARS[lvOf(stars())],espera:{pe:Q.f.map(t=>+t.toFixed(1)),viatura:Q.c.map(t=>+t.toFixed(1)),heli:+C.cdH.toFixed(1)}})};
+// abates: começam a contar a espera da reposição
+const _hu=hurt;hurt=function(p,n,fx,fz,f){const was=p&&p.rag;const r=_hu.apply(this,arguments);try{if(p&&p.cop&&!p.mg&&!was&&p.rag&&stars()>0&&Q.f.length<12)Q.f.push(WAIT.f)}catch(e){}return r};
+const _dv=dmgV;dmgV=function(v,n){const was=v&&v.dead;const r=_dv.apply(this,arguments);try{if(v&&!was&&v.dead&&(v.pol||v.t=='swat')&&stars()>0&&Q.c.length<8)Q.c.push(WAIT.c)}catch(e){}return r};
+// unidades distantes: IA a cada 3 quadros (a pé, a mais de ~90 m) ou 2 quadros (viatura, a mais de ~130 m), com o tempo acumulado — andam a mesma distância
+const _ca=copAI;copAI=function(p,dt){if(p.mg||p.rag)return _ca(p,dt);const d=Math.abs(p.x-P.x)+Math.abs(p.z-P.z);
+ if(d>125){p._ad=(p._ad||0)+dt;if((p._af=(p._af||0)+1)%3)return;const t=p._ad;p._ad=0;return _ca(p,Math.min(t,.2))}
+ if(p._ad){const t=p._ad+dt;p._ad=0;return _ca(p,Math.min(t,.2))}return _ca(p,dt)};
+const _cr=carAI;carAI=function(v,dt){if(!(v.pol||v.t=='swat')||v.mg)return _cr(v,dt);const d=Math.abs(v.x-P.x)+Math.abs(v.z-P.z);
+ if(d>180){v._ad=(v._ad||0)+dt;if((v._af=(v._af||0)+1)%2)return;const t=v._ad;v._ad=0;return _cr(v,Math.min(t,.12))}
+ if(v._ad){const t=v._ad+dt;v._ad=0;return _cr(v,Math.min(t,.12))}return _cr(v,dt)};
+let lastH=0;
+const _u=update;update=function(dt){_u(dt);if(PAUSED)return;try{
+ for(const k of['f','c']){const a=Q[k];for(let i=a.length-1;i>=0;i--){a[i]-=dt;if(a[i]<=0)a.splice(i,1)}}if(C.cdH>0)C.cdH-=dt;
+ // helicóptero derrubado (ou piloto abatido): espera antes de mandar outro
+ const st=stars();if(hl.length<lastH&&st>=2)C.cdH=Math.max(C.cdH,WAIT.h);lastH=hl.length;
+ if(!st){Q.f.length=0;Q.c.length=0;C.cdH=0}
+}catch(e){console.log('v44',e)}};
 })();
 
 </script><script type='text/game' class='gb'>
