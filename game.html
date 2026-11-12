@@ -174,7 +174,7 @@ function ragU(o,dt){const r=o.rag;o.x+=r.vx*dt;o.z+=r.vz*dt;o.y+=r.vy*dt;r.vy-=2
  o.g.rotation.x+=r.w*dt;o.g.rotation.z+=r.w*.7*dt;o.g.position.set(o.x,o.y,o.z);push(o,.4,0)}
 function hurt(p,n,fx,fz,f=6){if(p.rag)return;p.hp-=n;if(p.hp<=0){ragdoll(p,fx,fz,f);drop(p);crime(p.cop?1.5:.8,p.x,p.z)}else if(!p.cop)p.fl=6}
 function hurtP(n){if(P.dead>0)return;P.hp-=n;if(P.hp<=0){P.hp=0;P.dead=3.5;P.g.visible=true;ragdoll(P,P.x+R()-.5,P.z+R()-.5,6);msg('WASTED')}}
-function dmgV(v,n){if(v.dead)return;v.hp-=n;if(v.hp<=0){v.dead=1;v.T=25;if(v.ai)crime(1.5,v.x,v.z);boom(v.x,v.z,v.y);
+function dmgV(v,n){if(v.dead)return;v.hp-=n;if(v.hp<=0){v.dead=1;v.T=10;if(v.ai)crime(1.5,v.x,v.z);boom(v.x,v.z,v.y);
  v.g.traverse(m=>{if(m.material)m.material=mat(0x1b1b1b)});v.sp=0;
  if(P.veh===v){P.veh=null;P.x=v.x;P.z=v.z;P.y=Math.max(.9,v.y);if(v.rd)v.rd.visible=false;hurtP(100)}}}
 function boom(x,z,y=.5){shake=.8;snd('boom',x,z,1.2);hitB(x,z);if(Math.hypot(P.x-x,P.z-z)<90)crime(1.2,x,z);
@@ -789,7 +789,7 @@ function fx(x,y,z,k){const m=fxm[fxi];fxi=(fxi+1)%FXN;const u=m.userData;u.t=0;u
 function fxTick(dt){for(const m of fxm){const u=m.userData;if(!u.on)continue;u.t+=dt;const a=u.t/u.life;if(a>=1){u.on=0;m.visible=false;continue}
  m.position.x+=u.vx*dt;m.position.y+=u.vy*dt;m.position.z+=u.vz*dt;m.scale.setScalar(u.s0+(u.s1-u.s0)*a);m.material.opacity=u.k==2?(1-a)*.95:Math.min(1,a*6)*(1-a)*.75;m.rotation.y+=dt}}
 function darken(v){v.g.traverse(m=>{if(m.isMesh&&m.material&&m.material!==OLM&&!m.material.isMeshBasicMaterial)m.material=Array.isArray(m.material)?m.material.map(()=>CHAR):CHAR})}
-function explodeV(v){if(v.dead)return;v.fire=0;const pi=INCH;INCH=1;try{_dm0(v,1e9)}finally{INCH=pi}}
+function explodeV(v){if(v.dead)return;v.fire=0;const pi=INCH;INCH=1;try{_dm0(v,1e9)}finally{INCH=pi}}window.FXP=fx;
 boom=function(x,z,y){BX=x;BZ=z;BLAST=INCH?0:1;try{_bm(x,z,y)}finally{BLAST=0}};
 dmgV=function(v,n){if(v.dead||!v.g)return;if(typeof hl!='undefined'&&hl.includes(v))return _dm0(v,n);
  if(!v.mh)v.mh=Math.max(v.hp,1);
@@ -1035,7 +1035,7 @@ const _ca30=carAI;carAI=function(v,dt){
  if(v.rev>0){v.rev-=dt;drive(v,df>0?1:-1,-1,0,dt);v.cd-=dt;return}
  const ax=-cl(df*2,-1,1);let ay=Math.abs(df)<1.3?1:.3;if(d<12||v.sp>15)ay=0;
  drive(v,ax,ay,d<12?1:0,dt);v.cd-=dt;
- if(d<15&&Math.abs(v.sp)<5&&!v.dm&&P.dead<=0){v.dm=1;const p=spawnPed(v.x+cos(v.yaw)*2.4,v.z-sin(v.yaw)*2.4,1);p.pat=1;p.al=1;p.arr=1;msg('🚔 Polícia! Fique parado ou será preso',2800)}};
+ if(d<15&&Math.abs(v.sp)<5&&!v.dm&&!v._rel&&P.dead<=0){v.dm=1;v._rel=1;const p=spawnPed(v.x+cos(v.yaw)*2.4,v.z-sin(v.yaw)*2.4,1);p.pat=1;p.al=1;p.arr=1;msg('🚔 Polícia! Fique parado ou será preso',2800)}};
 // reação: matar policial (ou destruir viatura) mobiliza todos
 const _hu=hurt;hurt=function(p,n,fx,fz,f){const was=p.rag;_hu(p,n,fx,fz,f);if(p.cop&&!was&&p.rag)RE=1;if(p.cop&&n>0&&stars()>0)HOT=1};
 // viaturas SUV (3 estrelas): maiores, mais rápidas e mais fortes
@@ -4702,7 +4702,7 @@ const _cAI=carAI;carAI=function(v,dt){
  if(d>13){drive(v,-Math.max(-1,Math.min(1,df*2)),Math.abs(df)<1.3?1:.35,d<24&&v.sp>12?1:0,dt);return}
  drive(v,0,0,1,dt);if(Math.abs(v.sp)>2)return;
  // parou perto: policiais descem
- v._out=1;v.nodrv=1;if(v.drv)v.drv.visible=false;const st=stars(),n=Math.min(v.t=='swat'?2:1,window.COPCAP?COPCAP.room():9);
+ v._out=1;v.nodrv=1;if(v.drv)v.drv.visible=false;const st=stars(),n=v._rel?0:Math.min(1,window.COPCAP?COPCAP.room():9);if(n)v._rel=1;
  for(let i=0;i<n;i++){const sd=i?-1:1,q=spawnPed(v.x+Math.cos(v.yaw)*2.3*sd,v.z-Math.sin(v.yaw)*2.3*sd,1);
   if(st<=1){q.pat=1;q.al=1;q.arr=1}else{q.pat=0;q.al=1}
   Object.defineProperty(q,'lv',{get(){return stars()<=0?1:0},set(x){},configurable:true})}
@@ -6024,13 +6024,18 @@ const GGB=(()=>{try{const s=window.GG_DEBUG&&GG_DEBUG.shell;if(!s)return null;co
 const hitBox=(x0,x1,z0,z1,L)=>L.some(o=>o[1]>x0&&o[0]<x1&&o[3]>z0&&o[2]<z1);
 V43.OBST=OBST;
 const SITES=[];
+try{const Z=new T.Matrix4().makeScale(0,0,0);let nf=0;for(const c of(window.XINST||[])){let ch=false;c.a.forEach((d,i)=>{if(d.dead||d[6]!==0x8a6a3a||Math.max(d[3],d[5])<6)return;const x0=d[0]-d[3]/2,x1=d[0]+d[3]/2,z0=d[2]-d[5]/2,z1=d[2]+d[5]/2;
+  if(((window.XTERR&&XTERR.roadsR)||[]).some(r=>r[1]>x0&&r[0]<x1&&r[3]>z0&&r[2]<z1)){d.dead=1;c.m.setMatrixAt(i,Z);ch=true;nf++}});if(ch)c.m.instanceMatrix.needsUpdate=true}console.log('v43 cercas sobre ruas',nf)}catch(e){console.log('v43 cercas',e)}
+const RDR=()=>(window.XTERR&&XTERR.roadsR)||[];
+function nearRoad(x,z){let best=null,bd=1e9;for(const r of RDR()){const cx=Math.max(r[0],Math.min(x,r[1])),cz=Math.max(r[2],Math.min(z,r[3])),d=Math.hypot(x-cx,z-cz);if(d<bd){bd=d;best={d,cx,cz}}}return best}
+const onRoadR=(x0,x1,z0,z1,m)=>RDR().some(r=>r[1]>x0-m&&r[0]<x1+m&&r[3]>z0-m&&r[2]<z1+m);
 function findSite(cx,cz,w,d,maxR){for(let r=0;r<=maxR;r+=3){const n=r?Math.max(10,Math.round(r/2.5)):1;for(let i=0;i<n;i++){const a=i/n*6.2832+r*.37,x=cx+Math.cos(a)*r,z=cz+Math.sin(a)*r;
-  const lx=nl(x),lz=nl(z),dX=Math.abs(x-lx),dZ=Math.abs(z-lz);if(Math.min(dX,dZ)>46)continue;
-  let fx=0,fz=0;if(dX<dZ)fx=Math.sign(lx-x)||1;else fz=Math.sign(lz-z)||1;
-  const hw=fx?d/2:w/2,hd=fx?w/2:d/2;if(!rectFree(x,z,hw,hd,1.2,9))continue;
-  const mx=x+fx*(d/2+2.8),mz=z+fz*(d/2+2.8),mr=rd(mx,mz);if(mr<6.8||mr>30)continue;
+  const nr=nearRoad(x,z);if(!nr||nr.d>30)continue;
+  const ddx=nr.cx-x,ddz=nr.cz-z;let fx=0,fz=0;if(Math.abs(ddx)>=Math.abs(ddz))fx=Math.sign(ddx)||1;else fz=Math.sign(ddz)||1;
+  const hw=fx?d/2:w/2,hd=fx?w/2:d/2;if(!rectFree(x,z,hw,hd,1.2,0))continue;if(onRoadR(x-hw,x+hw,z-hd,z+hd,1.5))continue;
+  const mx=x+fx*(d/2+2.8),mz=z+fz*(d/2+2.8);if(onRoadR(mx-1,mx+1,mz-1,mz+1,0))continue;const mr=nearRoad(mx,mz);if(!mr||mr.d>8)continue;
   if(usedSpots().some(m=>Math.hypot(m.x-x,m.z-z)<26))continue;
-  return{x,z,fx,fz,mx,mz,yaw:Math.atan2(fx,fz),hw,hd,w,d,ry:fx?(fz?0:0):0,road:fx?'z':'x'}}}return null}
+  return{x,z,fx,fz,mx,mz,yaw:Math.atan2(fx,fz),hw,hd,w,d,road:fx?'z':'x'}}}return null}
 function signTex(txt,bg,fg){const c=document.createElement('canvas');c.width=512;c.height=110;const x=c.getContext('2d');x.fillStyle=bg;x.fillRect(0,0,512,110);x.strokeStyle=fg;x.lineWidth=6;x.strokeRect(5,5,502,100);
  x.fillStyle=fg;let fs=58;x.font='bold '+fs+'px system-ui';while(x.measureText(txt).width>480&&fs>20){fs-=2;x.font='bold '+fs+'px system-ui'}x.textAlign='center';x.textBaseline='middle';x.fillText(txt,256,58);const t=new T.CanvasTexture(c);return t}
 const SG=new T.PlaneGeometry(1,1);
@@ -6086,8 +6091,8 @@ function vehShop(id,title,emo,list){return{title,tabs:[{id:'v',ico:emo,n:'Modelo
  sw(){return{l:VCOL,s:this.col}},swatch(c){this.col=c;this.spawnPrev()},
  foot(){const it=list.find(q=>q.k==this.sel);return{t:XV.KINDS[this.sel].n+' — '+fmt(it.p),b:'COMPRAR '+fmt(it.p),ok:money>=it.p,msg:'Dinheiro insuficiente'}},
  buy(){const it=list.find(q=>q.k==this.sel);if(!it||!pay(it.p))return;const v=this.v;this.v=null;v.mg=0;v.prev=0;v.mine=1;closeShop();
-  P.veh=v;P.g.visible=false;try{ca=v.yaw;co=0;camInit=0}catch(e){}
-  msg('🎉 '+XV.KINDS[it.k].n+' comprado! Guarde na garagem da sua casa 🏠 para não perder',4200)}}}
+  P.veh=v;P.g.visible=false;try{ca=v.yaw;co=0;camInit=0}catch(e){}(own.xveh=own.xveh||[]).push({k:it.k,col:this.col});
+  msg('🎉 '+XV.KINDS[it.k].n+' comprado! Ele também fica no inventário 🎒 para chamar quando quiser',4200)}}}
 const CARS=[{h:'POPULARES'},{k:'basico',p:3500},{k:'comum',p:6000},{h:'CAMINHONETES E SUV'},{k:'pickup',p:8500},{k:'suv',p:12500},{h:'LUXO'},{k:'luxo',p:28000},{k:'esportivo',p:45000}];
 const MOTOS=[{k:'msimples',p:1500,s:'econômica'},{k:'mluxo',p:5200,s:'custom'},{k:'mcorrida',p:8900,s:'esportiva'}];
 const TRUCKS=[{k:'tpequeno',p:22000,s:'até 6 m'},{k:'tmedio',p:31000,s:'até 8 m'},{k:'tgrande',p:42000,s:'carreta 9 m'}];
@@ -6200,7 +6205,7 @@ const DEF=[
  ['mc',70,60,16,10,160,{h:5.2,col:0xe3f2fd,roof:0x1565c0,gl:1,name:'🛒 MERCADO',sbg:'#1565c0',sfg:'#ffffff'},'🛒',0x1565c0,'Mercado'],
  ['cv',250,-40,16,10,120,{h:5.2,col:0xdfe6ee,roof:0x1565c0,gl:1,name:'🚗 CONCESSIONÁRIA',sbg:'#0d47a1',sfg:'#ffffff'},'🚗',0x1976d2,'Concessionária'],
  ['mt',250,-140,12,8,120,{h:4.6,col:0xffe0b2,roof:0xe65100,gl:1,name:'🏍️ MOTOS',sbg:'#e65100',sfg:'#ffffff'},'🏍️',0xe65100,'Loja de Motos'],
- ['tk',-40,-250,18,10,140,{h:6.5,col:0xcfd8dc,roof:0x37474f,gl:1,name:'🚚 CAMINHÕES',sbg:'#263238',sfg:'#ffd23a'},'🚚',0x37474f,'Loja de Caminhões'],
+ ['tk',-60,-247,18,10,140,{h:6.5,col:0xcfd8dc,roof:0x37474f,gl:1,name:'🚚 CAMINHÕES',sbg:'#263238',sfg:'#ffd23a'},'🚚',0x37474f,'Loja de Caminhões'],
  ['tj',60,-250,18,12,140,{h:7,col:0xb0bec5,roof:0x2e7d32,name:'🚛 TRANSPORTADORA',sbg:'#1b5e20',sfg:'#ffffff'},'🚛',0x2e7d32,'Transportadora']];
 const SITE={};
 function clearRect(x0,x1,z0,z1){
@@ -6442,6 +6447,164 @@ const _u=update;update=function(dt){_u(dt);if(PAUSED)return;try{
  const st=stars();if(hl.length<lastH&&st>=2)C.cdH=Math.max(C.cdH,WAIT.h);lastH=hl.length;
  if(!st){Q.f.length=0;Q.c.length=0;C.cdH=0}
 }catch(e){console.log('v44',e)}};
+})();
+
+</script><script type='text/game' class='gb'>
+// ===== v45: carros destruídos somem em 10 s; ocupantes saem de carros avariados/em chamas; inventário; garagem grande dos apartamentos de luxo =====
+(function(){
+const API=window.XSHOP_API,GAR=window.XGAR_API,XV=window.XVEH,UI=window.MGUI,XP=window.XPROP,V43=window.V43||{},FZ=window.TRAINDBG.FZ;
+if(!API||!GAR||!XV||!UI||!XP){console.log('v45: sem API');return}
+const $$=id=>document.getElementById(id),RR=Math.random;
+const V45=window.V45={};
+// ---------------------------------------------------------------- 1) destroços: afundam aos poucos e somem em 10 s
+function wreckTick(){for(const v of vehs){if(!v.dead||v.T==null||v.T<0||v.t=='boat'||v.snk)continue;
+  if(v.T>10)v.T=10;
+  if(v.T<4&&v.g){const k=(4-v.T)/4;v.g.position.y=(v.y||0)-k*1.6}}}
+// ---------------------------------------------------------------- 2) ocupantes saem antes da explosão (os de carro em chamas saem pegando fogo)
+const occupied=v=>v!==P.veh&&!v.dead&&!v.nodrv&&!v.mg&&!v.dtv&&!v.g6&&!v.prev&&(v.t=='car'||v.t=='truck'||v.t=='swat'||v.t=='bus'||v.t=='junk')&&(v.tr||v.ai||v.pol||v.disp||(v.drv&&v.drv.visible));
+const BURN=[];
+function ejectOcc(v,burn){v.nodrv=1;v.tr=0;if(v.drv)v.drv.visible=false;v.sp*=.4;const cop=!!(v.pol||v.t=='swat'||v.ai||v.disp);
+ const a=v.yaw+Math.PI/2,x=v.x+Math.sin(a)*2.4,z=v.z+Math.cos(a)*2.4,p=spawnPed(x,z,cop?1:0);
+ if(cop){p.pat=0;p.al=1}else{p.fl=6}
+ if(burn){p.burn=3.5;p.bt=0;BURN.push(p);p.fl=6}
+ return p}
+let et=0;
+function ejectTick(dt){if((et-=dt)>0)return;et=.25;
+ for(const v of vehs){if(!occupied(v)||(v.t=='bus'&&FZ.bus===v))continue;const mh=v.mh||(S[v.t]&&S[v.t].hp)||100;
+  if(v.fire){ejectOcc(v,true);continue}
+  // muito avariado: alguns já descem antes de pegar fogo
+  if(v.hp<mh*.42){if(v._ejc==null)v._ejc=RR()<.6;if(v._ejc&&RR()<.3)ejectOcc(v,false)}}}
+const FXP=()=>window.FXP;
+function burnTick(dt){for(let i=BURN.length-1;i>=0;i--){const p=BURN[i];if(!p||peds.indexOf(p)<0||p.rag){BURN.splice(i,1);continue}
+  p.burn-=dt;p.bt-=dt;if(p.bt<=0){p.bt=.09;try{const f=FXP();if(f){f(p.x+(RR()-.5)*.3,1.2+RR()*.5,p.z+(RR()-.5)*.3,2)}}catch(e){}
+   p._bd=(p._bd||0)+1;if(p._bd%5==0){p.hp-=4;if(p.hp<=0){try{hurt(p,99,p.x,p.z,1)}catch(e){}}}}
+  p.fl=Math.max(p.fl||0,1);if(p.burn<=0)BURN.splice(i,1)}}
+// ---------------------------------------------------------------- 3) inventário: carros pessoais e acessórios
+const XVE=()=>own.xveh||(own.xveh=[]);
+document.head.insertAdjacentHTML('beforeend',`<style>
+#bInv{position:absolute;left:1.4vw;top:calc(2vh + 30vh + 5.5vh);width:7.5vh;height:7.5vh;border-radius:50%;background:#000a;border:2px solid #ffffffaa;display:flex;align-items:center;justify-content:center;font-size:3.6vh;pointer-events:auto;z-index:6}
+#inv45{position:absolute;left:calc(1.4vw + 31vh);top:2vh;width:38vh;max-height:70vh;overflow:auto;background:#0b0f14ee;border:2px solid #ffffff33;border-radius:12px;color:#fff;font:600 1.9vh system-ui;padding:1vh 1.2vh;display:none;pointer-events:auto;z-index:7}
+#inv45 h5{margin:.8vh 0 .5vh;font-size:1.7vh;color:#ffd23a;letter-spacing:.05em}
+#inv45 .r{display:flex;align-items:center;justify-content:space-between;gap:.8vh;padding:.6vh .4vh;border-bottom:1px solid #ffffff14}
+#inv45 .b{background:#2e7d32;border-radius:8px;padding:.6vh 1.1vh;font-weight:800;white-space:nowrap}
+#inv45 .a{background:#ffffff22;border-radius:8px;padding:.4vh 1.1vh;font-weight:900}
+#inv45 .x{position:absolute;right:.8vh;top:.6vh;background:#c62828;border-radius:8px;padding:.2vh .9vh}
+#inv45 .n{flex:1;text-align:center;font-weight:700}
+#inv45 small{color:#ffffff99;font-weight:500}
+</style>`);
+$$('hud').insertAdjacentHTML('beforeend',"<div id='bInv'>🎒</div><div id='inv45'></div>");
+const bInv=$$('bInv'),inv=$$('inv45');
+const vname=k=>(XV.KINDS[k]&&XV.KINDS[k].n)||k;
+const hatsOf=c=>{const C=(API.CAT||[]).find(q=>q.id==c);return C?C.st:[]};
+function owned(cat){const o=own.xcl&&own.xcl.o||{};return['',...((o[cat+'.st'])||[])]}
+function nameOf(cat,id){if(!id)return'Nenhum';const s=hatsOf(cat).find(q=>q[0]==id);return s?s[1]:id}
+function cycle(cat,d){if(!own.xcl)return;const L=owned(cat),cur=own.xcl.e[cat]?own.xcl.e[cat][0]:'';let i=L.indexOf(cur);i=(i+d+L.length)%L.length;const id=L[i];
+ const cols=(own.xcl.o[cat+'.co'])||[];const col=own.xcl.e[cat]&&own.xcl.e[cat][1]!=null&&id?own.xcl.e[cat][1]:(cols[0]!=null?cols[0]:0x222222);
+ own.xcl.e[cat]=[id,col];try{API.dress(own.xcl.e)}catch(e){}render()}
+function render(){const L=XVE();let h="<div class='x' data-c='x'>✕</div><h5>🚗 CARROS PESSOAIS</h5>";
+ if(!L.length)h+="<div class='r'><small>Compre um veículo na concessionária, loja de motos ou de caminhões.</small></div>";
+ L.forEach((r,i)=>{h+="<div class='r'><span>"+vname(r.k)+"</span><span class='b' data-c='s"+i+"'>Spawnar</span></div>"});
+ h+="<h5>🧢 ACESSÓRIOS</h5>";
+ for(const[c,t]of[['ht','Boné / chapéu'],['gs','Óculos']]){const cur=own.xcl&&own.xcl.e[c]?own.xcl.e[c][0]:'';h+="<div class='r'><small>"+t+"</small></div><div class='r'><span class='a' data-c='"+c+"-'>‹</span><span class='n'>"+nameOf(c,cur)+"</span><span class='a' data-c='"+c+"+'>›</span></div>"}
+ inv.innerHTML=h}
+bInv.onpointerdown=e=>{e.preventDefault();if(PAUSED)return;const on=inv.style.display!=='block';inv.style.display=on?'block':'none';if(on)render()};
+inv.onpointerdown=e=>{e.preventDefault();e.stopPropagation();const t=e.target.closest('[data-c]');if(!t)return;const c=t.dataset.c;
+ if(c=='x'){inv.style.display='none';return}
+ if(c[0]=='s'){spawnPersonal(+c.slice(1));return}
+ cycle(c.slice(0,2),c[2]=='+'?1:-1)};
+// onde um veículo pode aparecer: só em rua/calçada livre (sem prédio, casa, construção, água ou outro veículo)
+const RDS=()=>(window.XTERR&&XTERR.roadsR)||[];
+function onRoad(x,z,m){for(const r of RDS())if(x>r[0]-m&&x<r[1]+m&&z>r[2]-m&&z<r[3]+m)return r;return null}
+function blocked(x,z,r){for(const b of solids){if(b.h>.25&&x>b.x0-r&&x<b.x1+r&&z>b.z0-r&&z<b.z1+r)return true}for(const v of vehs){if(!v.dead&&Math.hypot(v.x-x,v.z-z)<r+3)return true}
+ for(const o of(V43.OBST||[]))if(x>o[0]-r&&x<o[1]+r&&z>o[2]-r&&z<o[3]+r)return true;try{if(XV.wat(x,z))return true}catch(e){}try{if(Math.abs(GRH(x,z))>.5)return true}catch(e){}return false}
+function findSpawn(k){const K=XV.KINDS[k],t=K?K.t:'car',hl=t=='truck'?4.8:t=='moto'?1.2:2.6,hw=t=='truck'?1.5:t=='moto'?.6:1.3;
+ for(let r=7;r<=60;r+=2.5){const n=Math.max(12,Math.round(r*1.4));for(let i=0;i<n;i++){const a=i/n*6.2832,x=P.x+Math.sin(a)*r,z=P.z+Math.cos(a)*r,rd=onRoad(x,z,3);if(!rd)continue;
+   const along=(rd[1]-rd[0])>(rd[3]-rd[2])?'x':'z',yaw=along=='x'?Math.PI/2:0,ux=along=='x'?1:0,uz=along=='z'?1:0;let ok=true;
+   for(const s of[-hl,0,hl]){if(blocked(x+ux*s,z+uz*s,hw)){ok=false;break}}
+   if(ok)return{x,z,yaw}}}return null}
+function spawnPersonal(i){const r=XVE()[i];if(!r)return;
+ if(P.veh){msg('Saia do veículo para chamar outro',2000);return}if(window.MGACT||XP.IN.prop>=0||G6.inHall){msg('Aqui não dá para chamar o veículo',2000);return}
+ const sp=findSpawn(r.k);if(!sp){msg('Sem lugar livre na rua por perto. Vá para uma rua e tente de novo.',2600);return}
+ if(V45.pv&&V45.pv!==P.veh&&vehs.indexOf(V45.pv)>=0)GAR.dropV(V45.pv);
+ const v=XV.spawnK(r.k,sp.x,sp.z,sp.yaw,r.col);v.tr=0;v.sp=0;v.mine=1;v.pers=1;v.stolen=0;
+ if(XV.KINDS[r.k]&&XV.KINDS[r.k].t=='truck'){try{const c=v.g.children[1];c.material=c.material.clone();c.material.color.setHex(r.col)}catch(e){}}
+ V45.pv=v;inv.style.display='none';msg('🚗 '+vname(r.k)+' chegou perto de você',2200)}
+V45.findSpawn=findSpawn;V45.spawnPersonal=spawnPersonal;
+// ---------------------------------------------------------------- 4) garagem grande (6 vagas) dos apartamentos de luxo
+const PR=XP.PR,G6={doors:{},inHall:false,pid:null,hv:[]};V45.G6=G6;
+const G6S=()=>own.g6||(own.g6={});
+// salão da garagem: no mar a oeste, depois dos interiores dos imóveis
+let zmax=-100;for(const p of PR)if(p.Z0!=null)zmax=Math.max(zmax,p.Z0+(p.ID||12));
+const HX=-410,HZ=zmax+48,HW=13,HD=12;G6.HX=HX;G6.HZ=HZ;
+(window.ARN=window.ARN||[]).push([HX-HW-6,HX+HW+6,HZ-HD-6,HZ+HD+6]);
+const BAYS=[];for(const sd of[-1,1])for(const dz of[-7,0,7])BAYS.push({x:HX+sd*7.5,z:HZ+dz,yaw:sd<0?Math.PI/2:-Math.PI/2});
+const HALLDOOR={x:HX,z:HZ+HD-2.2};
+let hallBuilt=0;
+function buildHall(){if(hallBuilt)return;hallBuilt=1;const g=new T.Group();sc.add(g);const B=(w,h,d,c,x,y,z)=>{const m=new T.Mesh(BG,mat(c));m.scale.set(w,h,d);m.position.set(x,y,z);g.add(m);return m};
+ B(HW*2+8,1,HD*2+8,0x3a3d42,HX,-.48,HZ);B(HW*2,.02,HD*2,0x54585f,HX,.02,HZ);
+ const wl=(x0,x1,z0,z1)=>{B(x1-x0,5,z1-z0,0xb0b5bd,(x0+x1)/2,2.5,(z0+z1)/2);solids.push({x0,x1,z0,z1,h:5,g6:1})};
+ wl(HX-HW,HX+HW,HZ-HD,HZ-HD+.4);wl(HX-HW,HX-HW+.4,HZ-HD,HZ+HD);wl(HX+HW-.4,HX+HW,HZ-HD,HZ+HD);wl(HX-HW,HX-2,HZ+HD-.4,HZ+HD);wl(HX+2,HX+HW,HZ+HD-.4,HZ+HD);
+ B(HW*2,.3,HD*2,0x2a2d33,HX,5.15,HZ);
+ for(const b of BAYS){B(5,.03,.15,0xffffff,b.x,.04,b.z-3.4);B(5,.03,.15,0xffffff,b.x,.04,b.z+3.4)}
+ for(let i=0;i<4;i++)B(1.6,.1,.4,0xfff6c8,HX,5,HZ-9+i*6);
+ B(3.6,4,.2,0x5b6270,HX,2,HZ+HD+.1);
+ const sm=new T.Mesh(new T.PlaneGeometry(6,1.2),new T.MeshBasicMaterial({map:(()=>{const c=document.createElement('canvas');c.width=512;c.height=100;const x=c.getContext('2d');x.fillStyle='#1b2a3a';x.fillRect(0,0,512,100);x.fillStyle='#ffd23a';x.font='bold 56px system-ui';x.textAlign='center';x.fillText('🅿️ GARAGEM',256,70);return new T.CanvasTexture(c)})()}));sm.position.set(HX,4.3,HZ-HD+.45);g.add(sm)}
+// portas das garagens (fora): ao lado de cada apartamento de luxo
+function sideSpot(p){const e=p.ext;if(!e)return null;const fx=Math.sin(e.yaw||0),fz=Math.cos(e.yaw||0),rx=fz,rz=-fx;
+ for(const bk of[4,8,0,12])for(const s of[1,-1])for(const off of[11,14,17,20,24,28]){const cx=e.x+rx*off*s-fx*bk,cz=e.z+rz*off*s-fz*bk;// recuado da rua
+  const hw=Math.abs(rx)*4.5+Math.abs(fx)*4,hd=Math.abs(rz)*4.5+Math.abs(fz)*4;
+  if(solids.some(b=>b.h>.25&&b.x1>cx-hw-1&&b.x0<cx+hw+1&&b.z1>cz-hd-1&&b.z0<cz+hd+1))continue;
+  if((V43.OBST||[]).some(o=>o[1]>cx-hw&&o[0]<cx+hw&&o[3]>cz-hd&&o[2]<cz+hd))continue;
+  try{if(XV.wat(cx,cz)||Math.abs(GRH(cx,cz))>.4)continue}catch(e){}
+  return{cx,cz,hw,hd,fx,fz,dx:cx+fx*5.2,dz:cz+fz*5.2,yaw:e.yaw||0}}return null}
+for(const p of PR){if(p.k!='aptoL'||!p.m)continue;try{const s=sideSpot(p);if(!s){console.log('v45: sem lugar para garagem',p.id);continue}
+  const g=new T.Group();g.position.set(s.cx,0,s.cz);g.rotation.y=s.yaw;const B=(w,h,d,c,x,y,z)=>box(w,h,d,c,x,y,z,g);
+  B(9,4.2,8,0x6b7280,0,2.1,0);B(9.4,.35,8.4,0x20242c,0,4.35,0);B(6.4,3.4,.14,0xb9bec7,0,1.7,4.02);for(let i=0;i<5;i++)B(6.42,.08,.16,0x8a9099,0,.5+i*.65,4.04);
+  sc.add(g);solids.push({x0:s.cx-s.hw,x1:s.cx+s.hw,z0:s.cz-s.hd,z1:s.cz+s.hd,h:4.2,g6:1});
+  G6.doors[p.id]={p,x:s.dx,z:s.dz,yaw:s.yaw}}catch(e){console.log('v45 garagem',p.id,e)}}
+// botão de contexto
+$$('hud').insertAdjacentHTML('beforeend',"<div id='b6' style='position:absolute;left:50%;transform:translateX(-50%);bottom:24vh;display:none;background:#fff;color:#000;font:800 2.3vh system-ui;padding:1.3vh 2.4vh;border-radius:5vh;pointer-events:auto;z-index:6'></div>");
+const b6=$$('b6');
+const isOwned=id=>(own.xown||[]).includes(id);
+function nearDoor(){let best=null,bd=1e9;for(const id in G6.doors){const d=G6.doors[id],k=Math.hypot((P.veh?P.veh.x:P.x)-d.x,(P.veh?P.veh.z:P.z)-d.z);if(k<bd){bd=k;best=d}}return best&&bd<(P.veh?8:4.5)?best:null}
+const STO=()=>window.XSTO||['car','moto','bike','junk'];
+function recOf(v){return{t:v.t,k:v.kd||null,col:v.t=='junk'?0:API.baseColor(v),xm:v.xm?API.JC(v.xm):null}}
+function clearHall(keep){for(const v of G6.hv)if(v!==keep&&vehs.indexOf(v)>=0)GAR.dropV(v);G6.hv=keep?[keep]:[]}
+function fillHall(pid){clearHall();const L=G6S()[pid]||[];L.forEach((rec,i)=>{if(!rec)return;const b=BAYS[i];try{const v=GAR.spawnRec({x:b.x,z:b.z,yaw:b.yaw},rec);v.g6=1;v.g6i=i;v.lim=500;v.tr=0;v.sp=0;G6.hv.push(v)}catch(e){console.log('g6 spawn',e)}})}
+function enterHall(pid){buildHall();G6.pid=pid;G6.inHall=true;fillHall(pid);if(P.veh){const v=P.veh;P.veh=null;if(v.rd)v.rd.visible=false}P.g.visible=true;FZ.mode='gnd';P.y=.9;place(HALLDOOR.x,HALLDOOR.z-1.5,Math.PI);try{camInit=0}catch(e){}}
+function leaveHall(withV){const d=G6.doors[G6.pid];G6.inHall=false;
+ if(withV){const L=G6S()[G6.pid]||[];if(withV.g6i!=null)L[withV.g6i]=null;clearHall(withV);G6.hv=[];
+  withV.g6=0;withV.lim=undefined;const x=d.x+Math.sin(d.yaw)*4,z=d.z+Math.cos(d.yaw)*4;withV.x=x;withV.z=z;withV.yaw=d.yaw;withV.sp=0;withV.g.position.set(x,0,z);withV.g.rotation.y=d.yaw;
+  P.x=x;P.z=z;try{ca=d.yaw;co=0;camInit=0}catch(e){}}
+ else{clearHall();place(d.x+Math.sin(d.yaw)*2,d.z+Math.cos(d.yaw)*2,d.yaw);try{camInit=0}catch(e){}}
+ G6.pid=null}
+function storeVehicle(d){const v=P.veh,pid=d.p.id;if(!STO().includes(v.t)&&v.t!='truck'){msg('Esse veículo não cabe na garagem',2000);return}
+ const L=G6S()[pid]||(G6S()[pid]=[]);let i=-1;for(let k=0;k<6;k++)if(!L[k]){i=k;break}if(i<0){msg('Garagem cheia (6 veículos)',2200);return}
+ L[i]=recOf(v);P.veh=null;if(v.rd)v.rd.visible=false;GAR.dropV(v);if(V45.pv===v)V45.pv=null;msg('🅿️ Veículo guardado ('+L.filter(Boolean).length+'/6)',2000);enterHall(pid)}
+const inHallArea=()=>Math.abs(P.x-HX)<HW+2&&Math.abs(P.z-HZ)<HD+2;
+function ctx(){if(PAUSED||window.MGACT||P.dead>0)return null;
+ if(G6.inHall){if(P.veh&&P.veh.g6)return{t:'🚗 Sair com veículo',f:()=>leaveHall(P.veh)};if(!P.veh&&Math.hypot(P.x-HALLDOOR.x,P.z-HALLDOOR.z)<3)return{t:'🚪 Sair',f:()=>leaveHall(null)};return null}
+ const d=nearDoor();if(!d)return null;if(!isOwned(d.p.id))return{t:'🅿️ Garagem do '+d.p.n+' (compre o apartamento)',f:null};
+ if(P.veh){if(Math.abs(P.veh.sp)>4)return null;return{t:'🅿️ Guardar veículo',f:()=>storeVehicle(d)}}
+ return{t:'🅿️ Entrar na garagem',f:()=>enterHall(d.p.id)}}
+let curCtx=null;b6.onpointerdown=e=>{e.preventDefault();if(curCtx&&curCtx.f)curCtx.f()};
+// dentro do salão os veículos não andam
+const _dr=drive;drive=function(v,ax,ay,c,dt){if(v&&v.g6){v.sp=0;return}return _dr(v,ax,ay,c,dt)};
+// sair do apartamento: "Sair" ou "Sair na garagem"
+try{const bPr=$$('bPr'),orig=bPr.onpointerdown;bPr.onpointerdown=function(e){const IN=XP.IN;
+  if(IN.prop>=0&&PR[IN.prop]&&PR[IN.prop].k=='aptoL'&&G6.doors[PR[IN.prop].id]&&/Sair/.test(bPr.textContent)&&!PAUSED){e.preventDefault();const p=PR[IN.prop];
+   UI.panel('🚪 Sair do apartamento','',[{t:'🚪 Sair',c:'g',f:()=>{orig.call(bPr,{preventDefault(){}})}},{t:'🅿️ Sair na garagem',c:'g',f:()=>{XP.IN.prop=-1;enterHall(p.id)}}]);return}
+  return orig.call(this,e)}}catch(e){console.log('v45 apto',e)}
+V45.enterHall=enterHall;V45.leaveHall=leaveHall;V45.storeVehicle=storeVehicle;V45.BAYS=BAYS;
+// ---------------------------------------------------------------- laço
+let ct=0;
+const _u=update;update=function(dt){_u(dt);if(PAUSED)return;
+ try{wreckTick();ejectTick(dt);burnTick(dt)}catch(e){console.log('v45 carros',e)}
+ try{if((ct-=dt)<=0){ct=.2;
+   // jogo carregado dentro do salão (ou saiu sem botão): volta para a porta
+   if(!G6.inHall&&inHallArea()){const d=Object.values(G6.doors).find(q=>isOwned(q.p.id));if(d){G6.pid=d.p.id;leaveHall(null)}}
+   curCtx=ctx();const w=curCtx?'block':'none';if(b6.style.display!==w)b6.style.display=w;if(curCtx&&b6.textContent!==curCtx.t)b6.textContent=curCtx.t}}catch(e){console.log('v45 g6',e)}
+ if(inv.style.display=='block'&&(P.veh||window.MGACT)){}};
 })();
 
 </script><script type='text/game' class='gb'>
