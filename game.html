@@ -1239,14 +1239,19 @@ const cellRec={
   D(cx,cz-6,8,2,.3,0xdd2222,13.02);D(cx,cz-6,2,8,.3,0xdd2222,13.02);D(cx,cz+.6,5.4,.1,5.4,0xffffff,5.2);D(cx,cz+.68,3.8,.1,1.2,0xdd2222,7.3);D(cx,cz+.68,1.2,.1,3.8,0xdd2222,6.0);
   D(cx,cz+1.6,8,2.4,.1,0xcfcfc9,.02);
   [[u.x0+2,u.z0+2],[u.x1-2,u.z0+2],[u.x0+2,u.z1-2],[u.x1-2,u.z1-2]].forEach(p=>{if(okp(p[0],p[1],1.5))TR(p[0],p[1],.9)})},
- soccer(u){soccer(u)},warehouse(u){begin(u);plate(u,0x66666e,'#555');const f=frameOf(u);Bf(f,0,-3,Math.min(24,f.Sh-10),Math.min(34,f.Lg-14),9,pick(IND));scat(u,3,2,(x,z)=>TR(x,z,1),2.5)}
+ soccer(u){soccer(u)},warehouse(u){begin(u);plate(u,0x66666e,'#555');const f=frameOf(u);Bf(f,0,-3,Math.min(24,f.Sh-10),Math.min(34,f.Lg-14),9,pick(IND));scat(u,3,2,(x,z)=>TR(x,z,1),2.5)},
+ // v46: avenida contínua ao norte e ao sul da cidade, ligada a cada rua da grade (as casas/prédios vêm depois dos imóveis)
+ avenue(u){begin(u);const cz=u.cz,x0=u.cx-23,x1=u.cx+23,AV=window.AVE||(window.AVE=[]);
+  D(u.cx,cz,46.2,10,.05,0x38383d,.012);D(u.cx,cz,46.2,.2,.05,0xe8c22a,.03);D(u.cx,cz-6.2,46.2,2.4,.1,0xb9b6ae);D(u.cx,cz+6.2,46.2,2.4,.1,0xb9b6ae);rc(x0,x1,cz-5,cz+5,'#444');AV.push([x0,x1,cz-5,cz+5]);
+  for(const l of L){if(l<x0-1||l>x1+1)continue;const zi=cz<0?-204:204,za=cz<0?cz+5:cz-5,m=(zi+za)/2,ln=Math.abs(za-zi);
+   D(l,m,10,ln,.05,0x38383d,.013);D(l,m,.2,ln,.05,0xe8c22a,.031);D(l-6.2,m,2.4,ln,.1,0xb9b6ae);D(l+6.2,m,2.4,ln,.1,0xb9b6ae);rc(l-5,l+5,Math.min(zi,za),Math.max(zi,za),'#444');AV.push([l-5,l+5,Math.min(zi,za),Math.max(zi,za)])}}
 };
 const cells=[];for(let i=0;i<15;i++)for(let j=0;j<15;j++){const cx=-322+i*46,cz=-322+j*46;if(i>=3&&i<=11&&j>=3&&j<=11)continue;cells.push({cx,cz,x0:cx-23,x1:cx+23,z0:cz-23,z1:cz+23})}
 const inRes=c=>RES.some(q=>c.x1>q.x0&&c.x0<q.x1&&c.z1>q.z0&&c.z0<q.z1);
-const ringW=[['forest',5],['orchard',1.2],['field',2],['farm',1],['pond',.8],['solar',.6],['scrap',.5],['cemetery',.4],['soccer',.5],['suburb',2.5],['warehouse',.5]];
+const ringW=[['forest',6.5],['orchard',1.2],['field',2.2],['farm',1],['pond',1.6],['solar',.6],['scrap',.5],['soccer',.5],['warehouse',.5]];// v46: sem subúrbios isolados e sem cemitérios
 const rpick=()=>{const t=ringW.reduce((a,b)=>a+b[1],0);let r=R()*t;for(const[n,w]of ringW){r-=w;if(r<=0)return n}return'forest'};
 LITE=true;cells.forEach(c=>{const u={x0:c.x0+4,x1:c.x1-4,z0:c.z0+4,z1:c.z1-4,w:38,d:38,cx:c.cx,cz:c.cz},res=inRes(c);rc(c.x0,c.x1,c.z0,c.z1,'#5a9e4b');TCOL=false;
- if(res){begin(u);scat(u,14,3,(x,z)=>TR(x,z,rnd(.9,1.5)),1)}else{let r=(c.cx==230&&c.cz==-138)?'hospital':rpick();if(r=='soccer'&&(window.SOCN=(window.SOCN||0)+1)>3)r='forest';CHK.push({r,u,start:solids.length,ring:1});cellRec[r](u);CHK[CHK.length-1].end=solids.length}});
+ if(res){begin(u);scat(u,14,3,(x,z)=>TR(x,z,rnd(.9,1.5)),1)}else{let r=(c.cx==230&&c.cz==-138)?'hospital':(Math.abs(c.cz)==230&&Math.abs(c.cx)<=230)?'avenue':rpick();if(r=='soccer'&&(window.SOCN=(window.SOCN||0)+1)>3)r='forest';CHK.push({r,u,start:solids.length,ring:1});cellRec[r](u);CHK[CHK.length-1].end=solids.length}});
 LITE=false;
 // propriedade da casa (leste) e pista de pouso: acabamento
 {const g=(x0,x1,z0,z1,c,mm)=>{D((x0+x1)/2,(z0+z1)/2,x1-x0,z1-z0,.05,c,.015);if(mm)rc(x0,x1,z0,z1,mm)};g(214,246,46,84,0x6bb35a,'#6aa856');for(const[x,z]of[[244,50],[244,60],[244,70],[244,80],[216,86],[226,86],[236,86]])TR(x,z,1.1);
@@ -3606,7 +3611,7 @@ function place1(p){const bw=p.k=='apto'||p.k=='aptoL'?13:p.k=='mansao'?(p.id=='m
  p.BW=bw;p.BD=bd;const sw=bw/2+4,sd=(bd+13)/2+1;const pts=[];const sides=gSides(p,bw);
  for(let x=-290;x<=290;x+=8)for(let z=-290;z<=290;z+=8)pts.push([x,z]);for(let i=pts.length-1;i>0;i--){const j=R()*(i+1)|0;[pts[i],pts[j]]=[pts[j],pts[i]]}
  for(const m of[1,0])for(const [x,z] of pts){
-  const dxr=nl(x)-x,dzr=nl(z)-z;let f;if(Math.abs(dxr)<Math.abs(dzr))f={x:Math.sign(dxr)||1,z:0};else f={x:0,z:Math.sign(dzr)||1};
+  const dxr=nl(x)-x,dzr=(Math.abs(Math.abs(z)-230)<Math.abs(nl(z)-z)&&Math.abs(x)<250?Math.sign(z)*230:nl(z))-z;let f;if(Math.abs(dxr)<Math.abs(dzr))f={x:Math.sign(dxr)||1,z:0};else f={x:0,z:Math.sign(dzr)||1};
   const rd=Math.min(Math.abs(dxr),Math.abs(dzr));if(rd<sd+3||rd>sd+30)continue;
   if(!ptsOk(x,z)||(window.XVAN&&Math.hypot(x-XVAN.x,z-XVAN.z)<30))continue;
   try{if(inLK(x,z,16))continue}catch(e){}if(z>104&&z<146)continue;
@@ -3615,7 +3620,7 @@ function place1(p){const bw=p.k=='apto'||p.k=='aptoL'?13:p.k=='mansao'?(p.id=='m
   {const rr={x:f.z,z:-f.x};let bad=false;for(const sd2 of sides){const gw=sd2.k*3.9+.6,uc=sd2.s*(bw/2+5+gw/2),cxg=x+rr.x*uc+f.x*-3.8,czg=z+rr.z*uc+f.z*-3.8,hwg=Math.abs(rr.x)*(gw/2+1)+Math.abs(f.x)*5,hdg=Math.abs(rr.z)*(gw/2+1)+Math.abs(f.z)*5;if(!free(cxg,czg,hwg+m,hdg+m)){bad=true;break}}if(bad)continue}
   return{x,z,f}}return null}
 // v31: retângulos das ruas da grade (avenida, ruas a cada 50 m) — o lote inteiro precisa ficar fora delas
-const ROADR=(()=>{const a=[];L.forEach(v=>{a.push([v-6.5,v+6.5,-207,207]);a.push([-207,207,v-6.5,v+6.5])});a.push([-207,207,-9.5,9.5]);return a})();
+const ROADR=(()=>{const a=[];L.forEach(v=>{a.push([v-6.5,v+6.5,-207,207]);a.push([-207,207,v-6.5,v+6.5])});a.push([-207,207,-9.5,9.5]);(window.AVE||[]).forEach(q=>a.push([q[0]-1.5,q[1]+1.5,q[2]-1.5,q[3]+1.5]));return a})();
 function lotOnRoad(x,z,f,bw,bd,sides){const r={x:f.z,z:-f.x};let up=bw/2+4,un=bw/2+4;for(const s2 of sides){const e=bw/2+5+s2.k*3.9+.6+1.5;if(s2.s>0)up=Math.max(up,e);else un=Math.max(un,e)}
  let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9;for(const u of[-un,up])for(const w of[-bd-6,8]){const px=x+r.x*u+f.x*w,pz=z+r.z*u+f.z*w;x0=Math.min(x0,px);x1=Math.max(x1,px);z0=Math.min(z0,pz);z1=Math.max(z1,pz)}
  return ROADR.some(q=>x1>q[0]&&x0<q[1]&&z1>q[2]&&z0<q[3])}
@@ -3920,7 +3925,7 @@ a.push([230,-138,26]);//hospital
  try{(window.XVEH&&XVEH.pads||[]).forEach(p=>a.push([p.x,p.z,12]))}catch(e){}
  return a}
 const PR=protPts();
-const RESV=[[207,250,-10,95],[255,299,-182,182],[-268,-210,-142,142],[-350,350,108,142]];
+const RESV=[[207,250,-10,95],[255,299,-182,182],[-268,-210,-142,142],[-350,350,108,142],[-262,262,-250,-208],[-262,262,208,250]];
 const nearP=(x,z,r)=>PR.some(p=>Math.hypot(p[0]-x,p[1]-z)<p[2]*.5+r);
 const hitRes=(x,z,r)=>RESV.some(q=>{const dx=Math.max(q[0]-x,0,x-q[1]),dz=Math.max(q[2]-z,0,z-q[3]);return Math.hypot(dx,dz)<r});
 const cityDist=(x,z)=>Math.hypot(Math.max(Math.abs(x)-224,0),Math.max(Math.abs(z)-224,0));
@@ -3930,13 +3935,13 @@ const roadsR=[];// retângulos de ruas (para limpeza)
 const RAMPS=[];
 const rampH=(r,x,z)=>{if(x<r.x0||x>r.x1||z<r.z0||z>r.z1)return 0;let t;if(r.d=='+z')t=(z-r.z0)/r.L;else if(r.d=='-z')t=(r.z1-z)/r.L;else if(r.d=='+x')t=(x-r.x0)/r.L;else t=(r.x1-x)/r.L;return r.h*t};
 const L2=[-200,-150,-100,-50,0,50,100,150,200];
-L2.forEach(v=>{roadsR.push([v-6,v+6,-216,216]);roadsR.push([-216,216,v-6,v+6])});roadsR.push([-216,216,-9,9],[-350,350,119,131],[-258,-242,-130,130],[-242,-216,-140,140]);
+L2.forEach(v=>{roadsR.push([v-6,v+6,-216,216]);roadsR.push([-216,216,v-6,v+6])});roadsR.push([-216,216,-9,9],[-350,350,119,131],[-258,-242,-130,130],[-242,-216,-140,140]);(window.AVE||[]).forEach(q=>roadsR.push(q.slice()));
 const shuffle=a=>{a=a.slice();for(let i=a.length-1;i>0;i--){const j=R()*(i+1)|0;[a[i],a[j]]=[a[j],a[i]]}return a};
 // ================= 1) escolha das feições =================
 try{
  // rio ao sul + 3 estradas com pontes
  let best=null;
- for(let z=238;z<=306;z+=3){const bl=[];PR.forEach(p=>{if(Math.abs(p[1]-z)<26+p[2]*.5)bl.push([p[0]-p[2]*.5-16,p[0]+p[2]*.5+16])});
+ for(let z=262;z<=306;z+=3){const bl=[];PR.forEach(p=>{if(Math.abs(p[1]-z)<26+p[2]*.5)bl.push([p[0]-p[2]*.5-16,p[0]+p[2]*.5+16])});
   bl.sort((a,b)=>a[0]-b[0]);let cur=-345;const iv=[];for(const q of bl){if(q[0]>cur)iv.push([cur,q[0]]);cur=Math.max(cur,q[1])}if(cur<345)iv.push([cur,345]);
   for(const q of iv){const len=q[1]-q[0];if(len>=170&&(!best||len+R()*30>best.len))best={z,x0:q[0],x1:q[1],len}}}
  if(best)F.river={z:best.z,w:8,x0:Math.max(-345,best.x0),x1:Math.min(345,best.x1)};
@@ -3945,9 +3950,9 @@ try{
  if(F.river){F.ext=exLines;if(!exLines.length)F.river=null}
  // montanhas com estrada (norte)
  const nl2=[];for(const x of shuffle([-150,-100,-50,0,50,100,150])){if(nl2.length>=2)break;
-  if(nl2.some(q=>Math.abs(q-x)<130))continue;const cx=x,cz=-268,R0=60;
+  if(nl2.some(q=>Math.abs(q-x)<130))continue;const cx=x,cz=-294,R0=50;
   if(nearP(cx,cz,R0))continue;nl2.push(x)}
- nl2.forEach(x=>F.mts.push({x,z:-268,R:60,H:rnd(16,19),pl:14,crag:.5,road:{x,z0:-210},s:R()*9}));
+ nl2.forEach(x=>F.mts.push({x,z:-294,R:50,H:rnd(16,19),pl:14,crag:.5,road:{x,z0:-210},s:R()*9}));
  // montanhas livres
  for(let t=0;t<1500&&F.mts.length<5;t++){const R0=rnd(38,46),x=rnd(-285,285),z=rnd(-285,285);
   if(Math.abs(x)+R0>334||Math.abs(z)+R0>334||cityDist(x,z)<R0*.75||hitRes(x,z,R0+6)||nearP(x,z,R0)||obsCirc(x,z,R0*.5))continue;
@@ -6026,9 +6031,9 @@ V43.OBST=OBST;
 const SITES=[];
 try{const Z=new T.Matrix4().makeScale(0,0,0);let nf=0;for(const c of(window.XINST||[])){let ch=false;c.a.forEach((d,i)=>{if(d.dead||d[6]!==0x8a6a3a||Math.max(d[3],d[5])<6)return;const x0=d[0]-d[3]/2,x1=d[0]+d[3]/2,z0=d[2]-d[5]/2,z1=d[2]+d[5]/2;
   if(((window.XTERR&&XTERR.roadsR)||[]).some(r=>r[1]>x0&&r[0]<x1&&r[3]>z0&&r[2]<z1)){d.dead=1;c.m.setMatrixAt(i,Z);ch=true;nf++}});if(ch)c.m.instanceMatrix.needsUpdate=true}console.log('v43 cercas sobre ruas',nf)}catch(e){console.log('v43 cercas',e)}
-const RDR=()=>(window.XTERR&&XTERR.roadsR)||[];
-function nearRoad(x,z){let best=null,bd=1e9;for(const r of RDR()){const cx=Math.max(r[0],Math.min(x,r[1])),cz=Math.max(r[2],Math.min(z,r[3])),d=Math.hypot(x-cx,z-cz);if(d<bd){bd=d;best={d,cx,cz}}}return best}
-const onRoadR=(x0,x1,z0,z1,m)=>RDR().some(r=>r[1]>x0-m&&r[0]<x1+m&&r[3]>z0-m&&r[2]<z1+m);
+const RDR=()=>((window.XTERR&&XTERR.roadsR)||[]).filter(r=>Math.max(r[1]-r[0],r[3]-r[2])>=30&&Math.min(r[1]-r[0],r[3]-r[2])<=16);
+function nearRoad(x,z){let best=null,bd=1e9;for(const r of RDR()){const horiz=(r[1]-r[0])>(r[3]-r[2]);if(horiz?(x<r[0]+2||x>r[1]-2):(z<r[2]+2||z>r[3]-2))continue;/* a rua precisa passar na frente (não só a ponta dela) */const cx=Math.max(r[0],Math.min(x,r[1])),cz=Math.max(r[2],Math.min(z,r[3])),d=Math.hypot(x-cx,z-cz);if(d<bd){bd=d;best={d,cx,cz}}}return best}
+const onRoadR=(x0,x1,z0,z1,m)=>((window.XTERR&&XTERR.roadsR)||[]).some(r=>r[1]>x0-m&&r[0]<x1+m&&r[3]>z0-m&&r[2]<z1+m);
 function findSite(cx,cz,w,d,maxR){for(let r=0;r<=maxR;r+=3){const n=r?Math.max(10,Math.round(r/2.5)):1;for(let i=0;i<n;i++){const a=i/n*6.2832+r*.37,x=cx+Math.cos(a)*r,z=cz+Math.sin(a)*r;
   const nr=nearRoad(x,z);if(!nr||nr.d>30)continue;
   const ddx=nr.cx-x,ddz=nr.cz-z;let fx=0,fz=0;if(Math.abs(ddx)>=Math.abs(ddz))fx=Math.sign(ddx)||1;else fz=Math.sign(ddz)||1;
@@ -6041,7 +6046,7 @@ function signTex(txt,bg,fg){const c=document.createElement('canvas');c.width=512
 const SG=new T.PlaneGeometry(1,1);
 function faceRoad(s){if(!s||P.veh)return;P.yaw=s.yaw;P.g.rotation.y=s.yaw}
 // junta as peças de um prédio em 1 malha (cor por vértice) + 1 contorno: ~20 draw calls viram 2
-function mergeStatic(g){g.updateMatrixWorld(true);const inv=new T.Matrix4().copy(g.matrixWorld).invert(),A=[],O=[],M=new T.Matrix4();
+V43.mergeStatic=g=>mergeStatic(g);function mergeStatic(g){g.updateMatrixWorld(true);const inv=new T.Matrix4().copy(g.matrixWorld).invert(),A=[],O=[],M=new T.Matrix4();
  const take=(geo,m4,c,arr)=>{const q=(geo.index?geo.toNonIndexed():geo.clone());q.applyMatrix4(m4);const n=q.attributes.position.count,col=new Float32Array(n*3);if(c)for(let i=0;i<n;i++){col[i*3]=c.r;col[i*3+1]=c.g;col[i*3+2]=c.b}arr.push({q,col})};
  for(const m of g.children.slice()){if(!m.isMesh||Array.isArray(m.material)||m.material.map||m.material.transparent||!m.material.color)continue;
   M.multiplyMatrices(inv,m.matrixWorld);take(m.geometry,M,m.material.color,A);
@@ -6091,7 +6096,7 @@ function vehShop(id,title,emo,list){return{title,tabs:[{id:'v',ico:emo,n:'Modelo
  sw(){return{l:VCOL,s:this.col}},swatch(c){this.col=c;this.spawnPrev()},
  foot(){const it=list.find(q=>q.k==this.sel);return{t:XV.KINDS[this.sel].n+' — '+fmt(it.p),b:'COMPRAR '+fmt(it.p),ok:money>=it.p,msg:'Dinheiro insuficiente'}},
  buy(){const it=list.find(q=>q.k==this.sel);if(!it||!pay(it.p))return;const v=this.v;this.v=null;v.mg=0;v.prev=0;v.mine=1;closeShop();
-  P.veh=v;P.g.visible=false;try{ca=v.yaw;co=0;camInit=0}catch(e){}(own.xveh=own.xveh||[]).push({k:it.k,col:this.col});
+  P.veh=v;P.g.visible=false;try{ca=v.yaw;co=0;camInit=0}catch(e){}(own.xveh=own.xveh||[]).push({k:it.k,col:this.col});try{if(window.V45){if(V45.pv&&V45.pv!==v&&vehs.indexOf(V45.pv)>=0&&V45.pv!==P.veh)XGAR_API.dropV(V45.pv);V45.pv=v}}catch(e){}
   msg('🎉 '+XV.KINDS[it.k].n+' comprado! Ele também fica no inventário 🎒 para chamar quando quiser',4200)}}}
 const CARS=[{h:'POPULARES'},{k:'basico',p:3500},{k:'comum',p:6000},{h:'CAMINHONETES E SUV'},{k:'pickup',p:8500},{k:'suv',p:12500},{h:'LUXO'},{k:'luxo',p:28000},{k:'esportivo',p:45000}];
 const MOTOS=[{k:'msimples',p:1500,s:'econômica'},{k:'mluxo',p:5200,s:'custom'},{k:'mcorrida',p:8900,s:'esportiva'}];
@@ -6215,16 +6220,20 @@ function clearRect(x0,x1,z0,z1){
  for(const o of [...sc.children]){if(o.isMesh&&!o.isInstancedMesh&&o.position.x>x0&&o.position.x<x1&&o.position.z>z0&&o.position.z<z1&&o.position.y>.3)sc.remove(o)}
  for(let i=TREES.length-2;i>=0;i-=2){const x=TREES[i],z=TREES[i+1];if(x>x0&&x<x1&&z>z0&&z<z1)TREES.splice(i,2)}
  try{rc(x0,x1,z0,z1,'#5a9e4b')}catch(e){}}
-try{const w=22,d=14;let ok=null;
- for(const[bx,bz]of[[-25,25],[25,-25],[-25,-25],[25,25],[-75,25],[75,-25],[-75,-25],[75,25],[-25,75],[25,-75]]){const sg=Math.sign(bz),sz=bz+sg*3,cx0=bx-13,cx1=bx+13,cz0=sg>0?sz-11:sz-10,cz1=sg>0?sz+10:sz+11;
+// v46: prefeitura e boutique de luxo em quarteirões centrais (sem oficina, lojas ou pontos de ônibus)
+function placeInBlock(id,w,d,o,emo,col,label,plaza){let ok=null;
+ for(const[bx,bz]of[[-25,25],[25,-25],[-25,-25],[25,25],[-75,25],[75,-25],[-75,-25],[75,25],[-25,75],[25,-75],[-75,75],[75,-75]]){const sg=Math.sign(bz),sz=bz+sg*3,cx0=bx-13,cx1=bx+13,cz0=sg>0?sz-11:sz-10,cz1=sg>0?sz+10:sz+11;
   const mk=[...MK,...((MGo&&MGo.mk)||[])].some(m=>m.x>cx0-8&&m.x<cx1+8&&m.z>cz0-8&&m.z<cz1+8);
   const bus=(window.BUSDBG&&BUSDBG.BS||[]).some(b=>b.x>cx0-6&&b.x<cx1+6&&b.z>cz0-6&&b.z<cz1+6);
-  const gg=GGB&&hitBox(cx0-4,cx1+4,cz0-4,cz1+4,[GGB]);
-  if(!mk&&!bus&&!gg){ok={bx,sz,sg,cx0,cx1,cz0,cz1};break}}
- if(ok){const s={x:ok.bx,z:ok.sz,fx:0,fz:-ok.sg,w,d,hw:w/2,hd:d/2,road:'x'};s.yaw=Math.atan2(0,-ok.sg);s.mx=s.x;s.mz=s.z-ok.sg*(d/2+2.8);
-  clearRect(ok.cx0,ok.cx1,ok.cz0,ok.cz1);building(s,Object.assign({id:'pf'},DEF[0][6]));box(26,.12,24,0xd8d2c4,s.x,.06,s.z-ok.sg*.5);try{rc(s.x-11,s.x+11,s.z-7,s.z+7,'#efe6d2')}catch(e){}
-  const m=mkr('pf',s.mx,s.mz,'🏛️',0xffffff,'Prefeitura',5);noDisc(m);m.site=s;s.m=m;SITE.pf=s}else console.log('v43: sem quarteirão para a prefeitura')}catch(e){console.log('v43 prefeitura',e)}
-for(const d of DEF.slice(1)){try{const s=place43(...d);if(s){SITE[d[0]]=s;try{rc(s.x-s.hw,s.x+s.hw,s.z-s.hd,s.z+s.hd,'#b9a98c')}catch(e){}}}catch(e){console.log('v43 prédio',d[0],e)}}
+  const gg=GGB&&hitBox(cx0-4,cx1+4,cz0-4,cz1+4,[GGB]);const own2=SITES.some(q=>q.x>cx0-4&&q.x<cx1+4&&q.z>cz0-4&&q.z<cz1+4);
+  if(!mk&&!bus&&!gg&&!own2){ok={bx,sz,sg,cx0,cx1,cz0,cz1};break}}
+ if(!ok){console.log('v43: sem quarteirão para',id);return null}
+ const s={x:ok.bx,z:ok.sz,fx:0,fz:-ok.sg,w,d,hw:w/2,hd:d/2,road:'x'};s.yaw=Math.atan2(0,-ok.sg);s.mx=s.x;s.mz=s.z-ok.sg*(d/2+2.8);
+ clearRect(ok.cx0,ok.cx1,ok.cz0,ok.cz1);building(s,Object.assign({id},o));box(26,.12,24,plaza,s.x,.06,s.z-ok.sg*.5);try{rc(ok.cx0,ok.cx1,ok.cz0,ok.cz1,'#5a9e4b');rc(s.x-w/2,s.x+w/2,s.z-d/2,s.z+d/2,'#efe6d2')}catch(e){}
+ const m=mkr(id,s.mx,s.mz,emo,col,label,5);noDisc(m);m.site=s;s.m=m;SITE[id]=s;return s}
+try{placeInBlock('pf',22,14,DEF[0][6],'🏛️',0xffffff,'Prefeitura',0xd8d2c4)}catch(e){console.log('v43 prefeitura',e)}
+try{const L1=DEF.find(q=>q[0]=='lx');placeInBlock('lx',12,9,L1[6],'💎',0xc9a227,'Boutique de Luxo',0xcfc7b4)}catch(e){console.log('v43 boutique',e)}
+for(const d of DEF.slice(1)){if(d[0]=='lx')continue;try{const s=place43(...d);if(s){SITE[d[0]]=s;try{rc(s.x-s.hw,s.x+s.hw,s.z-s.hd,s.z+s.hd,'#b9a98c')}catch(e){}}}catch(e){console.log('v43 prédio',d[0],e)}}
 V43.SITE=SITE;
 // ---------------------------------------------------------------- 7) prefeitura: provas de habilitação (A caminhão $500, B ônibus $250)
 const LIC=()=>own.lic||(own.lic={});const DSOL=[];V43.DSOL=DSOL;
@@ -6485,12 +6494,13 @@ document.head.insertAdjacentHTML('beforeend',`<style>
 #bInv{position:absolute;left:1.4vw;top:calc(2vh + 30vh + 5.5vh);width:7.5vh;height:7.5vh;border-radius:50%;background:#000a;border:2px solid #ffffffaa;display:flex;align-items:center;justify-content:center;font-size:3.6vh;pointer-events:auto;z-index:6}
 #inv45{position:absolute;left:calc(1.4vw + 31vh);top:2vh;width:38vh;max-height:70vh;overflow:auto;background:#0b0f14ee;border:2px solid #ffffff33;border-radius:12px;color:#fff;font:600 1.9vh system-ui;padding:1vh 1.2vh;display:none;pointer-events:auto;z-index:7}
 #inv45 h5{margin:.8vh 0 .5vh;font-size:1.7vh;color:#ffd23a;letter-spacing:.05em}
-#inv45 .r{display:flex;align-items:center;justify-content:space-between;gap:.8vh;padding:.6vh .4vh;border-bottom:1px solid #ffffff14}
-#inv45 .b{background:#2e7d32;border-radius:8px;padding:.6vh 1.1vh;font-weight:800;white-space:nowrap}
-#inv45 .a{background:#ffffff22;border-radius:8px;padding:.4vh 1.1vh;font-weight:900}
-#inv45 .x{position:absolute;right:.8vh;top:.6vh;background:#c62828;border-radius:8px;padding:.2vh .9vh}
-#inv45 .n{flex:1;text-align:center;font-weight:700}
-#inv45 small{color:#ffffff99;font-weight:500}
+#inv45 .ivr{display:flex;align-items:center;justify-content:space-between;gap:.8vh;padding:.6vh .4vh;border-bottom:1px solid #ffffff14;font-size:1.9vh}
+#inv45 .ivb{background:#2e7d32;border-radius:8px;padding:.5vh 1vh;font:800 1.7vh system-ui;white-space:nowrap;width:auto;height:auto;min-width:0}
+#inv45 .ivb.off{background:#555}
+#inv45 .iva{background:#ffffff22;border-radius:8px;padding:.3vh 1vh;font:900 2vh system-ui;width:auto;height:auto}
+#inv45 .ivx{position:absolute;right:.8vh;top:.6vh;background:#c62828;border-radius:8px;padding:.2vh .9vh;font:800 1.8vh system-ui;width:auto;height:auto}
+#inv45 .ivn{flex:1;text-align:center;font-weight:700}
+#inv45 small{color:#ffffff99;font-weight:500;font-size:1.6vh}
 </style>`);
 $$('hud').insertAdjacentHTML('beforeend',"<div id='bInv'>🎒</div><div id='inv45'></div>");
 const bInv=$$('bInv'),inv=$$('inv45');
@@ -6501,12 +6511,13 @@ function nameOf(cat,id){if(!id)return'Nenhum';const s=hatsOf(cat).find(q=>q[0]==
 function cycle(cat,d){if(!own.xcl)return;const L=owned(cat),cur=own.xcl.e[cat]?own.xcl.e[cat][0]:'';let i=L.indexOf(cur);i=(i+d+L.length)%L.length;const id=L[i];
  const cols=(own.xcl.o[cat+'.co'])||[];const col=own.xcl.e[cat]&&own.xcl.e[cat][1]!=null&&id?own.xcl.e[cat][1]:(cols[0]!=null?cols[0]:0x222222);
  own.xcl.e[cat]=[id,col];try{API.dress(own.xcl.e)}catch(e){}render()}
-function render(){const L=XVE();let h="<div class='x' data-c='x'>✕</div><h5>🚗 CARROS PESSOAIS</h5>";
- if(!L.length)h+="<div class='r'><small>Compre um veículo na concessionária, loja de motos ou de caminhões.</small></div>";
- L.forEach((r,i)=>{h+="<div class='r'><span>"+vname(r.k)+"</span><span class='b' data-c='s"+i+"'>Spawnar</span></div>"});
+const CDMS=30000;const cdLeft=()=>Math.max(0,Math.ceil((CDMS-(performance.now()-(V45.lastSp||-1e9)))/1000));
+function render(){const L=XVE(),cd=cdLeft();let h="<div class='ivx' data-c='x'>✕</div><h5>🚗 CARROS PESSOAIS</h5>";
+ if(!L.length)h+="<div class='ivr'><small>Compre um veículo na concessionária, loja de motos ou de caminhões.</small></div>";
+ L.forEach((r,i)=>{h+="<div class='ivr'><span>"+vname(r.k)+"</span><span class='ivb"+(cd?" off":"")+"' data-c='s"+i+"'>"+(cd?'⏳ '+cd+'s':'Spawnar')+"</span></div>"});
  h+="<h5>🧢 ACESSÓRIOS</h5>";
- for(const[c,t]of[['ht','Boné / chapéu'],['gs','Óculos']]){const cur=own.xcl&&own.xcl.e[c]?own.xcl.e[c][0]:'';h+="<div class='r'><small>"+t+"</small></div><div class='r'><span class='a' data-c='"+c+"-'>‹</span><span class='n'>"+nameOf(c,cur)+"</span><span class='a' data-c='"+c+"+'>›</span></div>"}
- inv.innerHTML=h}
+ for(const[c,t]of[['ht','Boné / chapéu'],['gs','Óculos']]){const cur=own.xcl&&own.xcl.e[c]?own.xcl.e[c][0]:'';h+="<div class='ivr'><small>"+t+"</small></div><div class='ivr'><span class='iva' data-c='"+c+"-'>‹</span><span class='ivn'>"+nameOf(c,cur)+"</span><span class='iva' data-c='"+c+"+'>›</span></div>"}
+ if(inv._h!==h){inv._h=h;inv.innerHTML=h}}
 bInv.onpointerdown=e=>{e.preventDefault();if(PAUSED)return;const on=inv.style.display!=='block';inv.style.display=on?'block':'none';if(on)render()};
 inv.onpointerdown=e=>{e.preventDefault();e.stopPropagation();const t=e.target.closest('[data-c]');if(!t)return;const c=t.dataset.c;
  if(c=='x'){inv.style.display='none';return}
@@ -6522,13 +6533,13 @@ function findSpawn(k){const K=XV.KINDS[k],t=K?K.t:'car',hl=t=='truck'?4.8:t=='mo
    const along=(rd[1]-rd[0])>(rd[3]-rd[2])?'x':'z',yaw=along=='x'?Math.PI/2:0,ux=along=='x'?1:0,uz=along=='z'?1:0;let ok=true;
    for(const s of[-hl,0,hl]){if(blocked(x+ux*s,z+uz*s,hw)){ok=false;break}}
    if(ok)return{x,z,yaw}}}return null}
-function spawnPersonal(i){const r=XVE()[i];if(!r)return;
+function spawnPersonal(i){const r=XVE()[i];if(!r)return;const cd=cdLeft();if(cd){msg('Aguarde '+cd+' s para chamar outro veículo',1800);return}
  if(P.veh){msg('Saia do veículo para chamar outro',2000);return}if(window.MGACT||XP.IN.prop>=0||G6.inHall){msg('Aqui não dá para chamar o veículo',2000);return}
  const sp=findSpawn(r.k);if(!sp){msg('Sem lugar livre na rua por perto. Vá para uma rua e tente de novo.',2600);return}
  if(V45.pv&&V45.pv!==P.veh&&vehs.indexOf(V45.pv)>=0)GAR.dropV(V45.pv);
  const v=XV.spawnK(r.k,sp.x,sp.z,sp.yaw,r.col);v.tr=0;v.sp=0;v.mine=1;v.pers=1;v.stolen=0;
  if(XV.KINDS[r.k]&&XV.KINDS[r.k].t=='truck'){try{const c=v.g.children[1];c.material=c.material.clone();c.material.color.setHex(r.col)}catch(e){}}
- V45.pv=v;inv.style.display='none';msg('🚗 '+vname(r.k)+' chegou perto de você',2200)}
+ V45.pv=v;V45.lastSp=performance.now();inv.style.display='none';msg('🚗 '+vname(r.k)+' chegou perto de você',2200)}
 V45.findSpawn=findSpawn;V45.spawnPersonal=spawnPersonal;
 // ---------------------------------------------------------------- 4) garagem grande (6 vagas) dos apartamentos de luxo
 const PR=XP.PR,G6={doors:{},inHall:false,pid:null,hv:[]};V45.G6=G6;
@@ -6604,7 +6615,56 @@ const _u=update;update=function(dt){_u(dt);if(PAUSED)return;
    // jogo carregado dentro do salão (ou saiu sem botão): volta para a porta
    if(!G6.inHall&&inHallArea()){const d=Object.values(G6.doors).find(q=>isOwned(q.p.id));if(d){G6.pid=d.p.id;leaveHall(null)}}
    curCtx=ctx();const w=curCtx?'block':'none';if(b6.style.display!==w)b6.style.display=w;if(curCtx&&b6.textContent!==curCtx.t)b6.textContent=curCtx.t}}catch(e){console.log('v45 g6',e)}
- if(inv.style.display=='block'&&(P.veh||window.MGACT)){}};
+ if(inv.style.display=='block'){try{if((V45._rt=(V45._rt||0)-dt)<=0){V45._rt=.5;render()}}catch(e){}}};
+})();
+
+</script><script type='text/game' class='gb'>
+// ===== v46: casas e prédios ao longo da avenida norte/sul (depois dos imóveis, só em lotes livres) =====
+(function(){
+const V43=window.V43||{};if(!window.AVE||!V43.mergeStatic){console.log('v46: sem avenida');return}
+const rnd=(()=>{let s=4242;return()=>{s=(s*1103515245+12345)>>>0;return((s>>>8)&0xffff)/65536}})();// sorteio próprio e fixo: mapa sempre igual
+const pick=a=>a[(rnd()*a.length)|0];
+const WALL=[0xf2e6d0,0xe8d3a0,0xd9c9a8,0xcfe0d0,0xf4ecd8,0xe6e8ee,0xf0d9c8,0xdfe8f2],ROOF=[0x9a4a3a,0x7a4a3a,0x5a2a22,0x2b2f36,0x4a6a5a,0x8a3b2c],BLD=[0xc8ccd2,0xd9c9a8,0xb7c4cf,0xe0d6c2,0xa9b3bd];
+const roads=()=>(window.XTERR&&XTERR.roadsR)||[];
+const MKS=()=>[...((window.XSHOP_API&&XSHOP_API.MK)||[]),...((window.MG&&MG.mk)||[])];
+function free(x0,x1,z0,z1){
+ for(const b of solids)if(b.h>.25&&b.x1>x0-1&&b.x0<x1+1&&b.z1>z0-1&&b.z0<z1+1)return false;
+ for(const r of roads())if(r[1]>x0-1&&r[0]<x1+1&&r[3]>z0-1&&r[2]<z1+1)return false;
+ for(const q of(window.PONDS||[]))if(q[1]>x0-3&&q[0]<x1+3&&q[3]>z0-3&&q[2]<z1+3)return false;
+ for(const m of MKS())if(m.x>x0-9&&m.x<x1+9&&m.z>z0-9&&m.z<z1+9)return false;
+ for(const v of vehs)if(v.x>x0-2&&v.x<x1+2&&v.z>z0-2&&v.z<z1+2)return false;
+ for(const o of(V43.OBST||[]))if(o[1]>x0&&o[0]<x1&&o[3]>z0&&o[2]<z1)return false;
+ try{for(const[x,z]of[[x0,z0],[x1,z1],[x0,z1],[x1,z0]])if(Math.abs(GRH(x,z))>.35||XVEH.wat(x,z))return false}catch(e){}
+ return true}
+const ROOFG=(()=>{const g=new T.ConeGeometry(.7071,1,4,1);g.rotateY(Math.PI/4);return g})();
+function house(G,x,z,s,w,d){const c=pick(WALL),r=pick(ROOF),h=3.2;
+ const M=(geo,sx,sy,sz,col,px,py,pz)=>{const m=new T.Mesh(geo,mat(col));m.scale.set(sx,sy,sz);m.position.set(px,py,pz);G.add(m);if(geo===BG){const o=new T.Mesh(BG,OLM);o.scale.set(1.04,1.04,1.04);m.add(o)}return m};
+ M(BG,w,h,d,c,x,h/2,z);M(ROOFG,w*1.12,2.2,d*1.12,r,x,h+1.1,z);
+ const fz=z-s*(d/2+.04);M(BG,1.3,2.2,.1,0x5a3a22,x-w*.2,1.1,fz);M(BG,1.4,1.1,.1,0x9fcfe6,x+w*.22,1.8,fz);
+ M(BG,2.6,.06,4,0x9a9a96,x-w*.2,.03,z-s*(d/2+2));// calçada da entrada
+ solids.push({x0:x-w/2,x1:x+w/2,z0:z-d/2,z1:z+d/2,h,v46:1})}
+function bldg(G,x,z,s,w,d){const c=pick(BLD),fl=2+((rnd()*3)|0),h=fl*3.1+.6;
+ const M=(sx,sy,sz,col,px,py,pz)=>{const m=new T.Mesh(BG,mat(col));m.scale.set(sx,sy,sz);m.position.set(px,py,pz);G.add(m);const o=new T.Mesh(BG,OLM);o.scale.set(1.03,1.03,1.03);m.add(o);return m};
+ M(w,h,d,c,x,h/2,z);M(w+.4,.3,d+.4,0x555a64,x,h+.15,z);
+ const fz=z-s*(d/2+.04);for(let f=0;f<fl;f++)for(const k of[-.3,0,.3])M(w*.18,1.2,.1,0x9fcfe6,x+w*k,1.9+f*3.1,fz);M(BG?2:2,2.4,.12,0x3a4652,x,1.2,fz);
+ solids.push({x0:x-w/2,x1:x+w/2,z0:z-d/2,z1:z+d/2,h,v46:1})}
+function tree(G,x,z){const t=new T.Mesh(new T.CylinderGeometry(.22,.3,2.2,7),mat(0x6b4a2a));t.position.set(x,1.1,z);G.add(t);const c=new T.Mesh(new T.IcosahedronGeometry(1.6,0),mat(pick([0x2f8a3a,0x3b9a45,0x2a7a35,0x4aa648])));c.position.set(x,3.2,z);c.scale.set(1,1.15,1);G.add(c);
+ solids.push({x0:x-.4,x1:x+.4,z0:z-.4,z1:z+.4,h:4,v46:1})}
+let nH=0,nB=0,nT=0;
+const lanes=L.slice();
+for(const zA of[-230,230]){const sg=Math.sign(zA);
+ for(let x0=-250;x0<250;x0+=100){const G=new T.Group();sc.add(G);
+  for(let x=x0+8;x<x0+100;x+=16){if(lanes.some(l=>Math.abs(l-x)<10))continue;
+   for(const side of[-1,1]){// side -1: entre a cidade e a avenida; +1: lado de fora
+    const outer=side>0,zc=zA+sg*side*(outer?14.5:13.2),s=sg*side;// s: para onde a frente aponta (-s = avenida)
+    const isB=outer&&rnd()<.3,w=isB?12:9,d=isB?11:7.5;
+    if(free(x-w/2-1,x+w/2+1,zc-d/2-1,zc+d/2+1)){if(isB){bldg(G,x,zc,s,w,d);nB++}else{house(G,x,zc,s,w,d);nH++}try{rc(x-w/2,x+w/2,zc-d/2,zc+d/2,isB?'#8e8e8e':'#b98f6a')}catch(e){}}
+    else continue;
+    // árvore no quintal ao lado
+    const tx=x+8,tz=zc+s*1.5;if(rnd()<.6&&free(tx-1.2,tx+1.2,tz-1.2,tz+1.2)){tree(G,tx,tz);nT++}}}
+  try{V43.mergeStatic(G)}catch(e){console.log('v46 merge',e)}}}
+console.log('v46 avenida: casas',nH,'prédios',nB,'árvores',nT);
+window.V46={nH,nB,nT};
 })();
 
 </script><script type='text/game' class='gb'>
