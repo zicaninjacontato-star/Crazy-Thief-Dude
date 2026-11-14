@@ -86,12 +86,24 @@ Medido (Chromium headless PC, mesmas 8 posições do mapa, jogo rodando): **draw
 
 Atribuição dos ~250 draw calls que sobram (vista inicial): instanced 61 · jogador 35 · mundo solto 44 (meshes enormes ≥100 m, `frustumCulled=false`, transparentes) · chunks 40 · veículos 27 · pedestres 16 · aninhados 18. **Pico de destruição ainda chega a ~1.000**: cada explosão cria dezenas de caixas de destroço individuais (`parts[]`) — isso é o Passo 5 (FX com pool/instancing).
 
+## Efeitos transitórios em pool/instancing (Passo 5, feito)
+
+Perfil de alocação em combate pesado (antes): ~2.800 meshes por explosões, ~1.600 por destroços de prédio, ~750 de sangue, mais rastros e foguetes — todas `box()` criadas e removidas por evento (cada uma viva = 1 draw call). **Não havia vazamento de GPU por evento** (geometria `BG` e materiais já eram compartilhados desde o Passo 2); o custo era draw calls e churn de `Mesh`/`sc.add`/`sc.remove`.
+
+- **`dbr(w,h,d,cor,x,y,z)`** (logo depois de `box()`, 1º bloco) devolve um **proxy `Object3D`** reaproveitado de um pool (`DBF`), com o mesmo contrato de uma mesh (`position`, `scale`, `rotation`, `lookAt`). Todos os proxies vivos (`DBA`) são desenhados por **um único `InstancedMesh`** (`DBM`, 1.024 instâncias, cor por instância, `MeshToonMaterial`). `dbrFlush()` (chamado em `lod()`, 1×/frame) grava matrizes e cores. Se o pool encher, `dbr` devolve um proxy morto (efeito descartado, sem erro).
+- Usam `dbr`: destroços de explosão (`boom`) e de prédio (`hitB`), respingos (`splash`, 2 definições), destroços de barreira, sangue (partículas e decalques `BL`), rastros de tiro (`tracer`, `tracer3`, `tr3`) e granadas/foguetes/tanque/helicóptero (`gren`). **Código novo que cria efeito temporário deve usar `dbr`, nunca `box()`.** `parts/trc/gren/BL` e seus laços de atualização não mudaram: eles chamam `sc.remove(proxy)`, e o wrapper de `sc.remove` devolve o slot ao pool.
+- **Fumaça/fogo (`fx()`, bloco v11b):** as 130 meshes com 130 materiais transparentes viraram 1 `InstancedMesh` (`fxI`) com cor por instância e **opacidade por instância** (atributo `iOp` injetado via `onBeforeCompile`). Cada slot é um `Object3D` com `material.{color,opacity}` falso, então `fx()`/`fxTick0()` ficaram iguais (mesma sequência de `R()`); `fxTick` empacota os puffs ativos. A ordem de desenho é a do índice (antes: z), com diferença visual mínima na sobreposição da transparência.
+- **Dispose:** `uq()` marca clones como `_own`; o wrapper de `sc.remove` (1º bloco, o mais interno da cadeia) percorre o objeto removido e chama `.dispose()` nos materiais `_own`. Geometrias/materiais compartilhados (`BG`, `mat()`, `OLM`...) **nunca** devem ser descartados. Os únicos recursos de geometria criados em tempo de jogo são as geometrias mescladas dos Passos 6 e 7, que já são descartadas.
+- Depuração: `window.FXD={fxm,fxI,fxTick,fx,fxTick0}`; `DBA/DBF/DBN` ficam globais (`DBA.length` = efeitos vivos).
+
+Medido (Chromium headless PC, cenário de combate: tiros, granadas, foguetes, ~130 explosões, mortes, carros destruídos, prédios caindo; 3 rodadas): **pico de draw calls 1.093/1.230/977 → 713/816/682** (o que sobra são pedestres/cops próximos e prédios danificados fora do chunk); meshes criadas por efeitos 5.000+ → 0 (o pool cresce uma vez e reaproveita); geometrias/texturas na GPU estáveis nas 3 rodadas; ao fim do combate o pool devolve tudo (sobram só os 22 decalques de sangue); CPU do `update()` inalterada (p50 ≈ 2,5 ms, p99 5–10 ms nas duas versões, dentro do ruído; o ganho do Passo 5 é em draw calls e criação de objetos, não em CPU de lógica). Fidelidade: 150 destroços pelo pool × meshes reais = **idêntico** (diferença máx. 1/255); fumaça/fogo ≈ igual (0,8% dos pixels, só sobreposição de transparência).
+
 ## Gargalos conhecidos (ordem de gravidade)
 
-1. Draw calls ~250–330 em passeio normal (alvo no celular: 150–300), mas **picos de ~1.000 em explosões/destruição**.
+1. Draw calls ~250–330 em passeio normal (alvo no celular: 150–300); **picos em combate ~700–800** (era ~1.000–1.200), agora dominados por **pedestres/cops próximos (~20 meshes cada, ~400 calls com uma multidão a <24 m)** e por prédios danificados (saem do chunk). → mesclar o modelo *de perto* (Passos 7b/9).
 2. ~~Contornos~~ e ~~mundo não mesclado~~ (resolvidos: Passos 7 e 6).
 3. Modelos de carro/ped *de perto* ainda têm ~12–22 meshes; instanced (61 calls: postes/placas etc.); jogador 35 calls.
-4. **Rastros de bala, partículas, destroços e explosões criam meshes/materiais por evento** (picos acima); 47 `sc.remove` e quase nenhum `dispose()` → Passo 5.
+4. ~~Rastros/partículas/destroços por evento~~ (resolvido: Passo 5). Restam entidades que ainda são criadas/destruídas por spawn (pedestres/veículos; ~25 meshes cada) → Passo 9 (pool de entidades).
 5. Cadeia de `update` (acima); IA de todos os NPCs todo frame; colisão carro×carro O(n²); varreduras lineares em `solids` (1.800 itens) fora do `push()` (que já usa grade).
 6. HUD escreve no DOM todo frame.
 - Não são problema: sombras (desligadas), luzes (2), pixelRatio (0,9).
@@ -105,7 +117,7 @@ Estrutura-alvo: `/src/core` (Game, Renderer, Input, EventBus, Assets, Pool, rng)
 - [x] **2. Cache de materiais** — `mat`/`tmat`/`wallM` + `uq`.
 - [ ] **3. Loop único** — achatar as ~40 camadas de `update` numa lista explícita `systems[]`, preservando a ordem.
 - [ ] **4. `ui/HUD` e `Minimap`** — só escrever no DOM quando o valor mudar.
-- [ ] **5. `FXSystem` com pool** — rastros, partículas, sangue, granadas via `InstancedMesh`; acabar com vazamentos.
+- [x] **5. Pool/instancing de efeitos** (`dbr`/`DBM`, `fxI`) + dispose de materiais próprios (ver seção acima; ainda dentro do `game.html`, sem módulo `FXSystem`).
 - [x] **6a. Chunks mesclados do mundo estático** (ver seção acima; feito dentro do `game.html`).
 - [ ] **6b. `SpatialGrid`** substituindo as varreduras lineares em `solids[]` (o `push()` já usa grade; faltam spawn/`los`/outros).
 - [x] **7. LOD mesclado de carro/pedestre + contornos do mundo só perto** (feito como LOD por distância; modelo de perto continua com várias meshes por ter textura por face).
