@@ -50,11 +50,30 @@ Linha de base (Chromium headless, PC), depois do carregamento:
 | Meshes | ~5.550 (2.050 são contornos `OLM`) | igual |
 | Meshes por carro / pedestre | 22–28 / 22 | igual |
 
+## LOD mesclado e contornos (Passo 7, feito) — dentro de `lod()` (bloco "LOD", ~linha 2140)
+
+- `LODC` (global `window.LODC`): `po`/`vo` = contorno some de ped/veículo; **`pm:24` / `vm:38`** = ped/carro/moto acima dessa distância vira **1 mesh mesclada** (cor por vértice = cor do material × média da textura da face); **`wo:40`** = contornos do mundo (prédios/props) somem acima de 40 m da fachada. Histerese: volta ao modelo detalhado em `pm-4` / `vm-6`. `LODC.pm=LODC.vm=1e9` desliga a mesclagem.
+- `lmOn(o)/lmOff(o)` (também em `window.LMX`): escondem as meshes originais (guardando quais estavam visíveis) e adicionam/removem a mesh mesclada como último filho de `o.g`. Membros (grupos filhos diretos de `g`) entram na pose de repouso. Perto da câmera o modelo é exatamente o original (rosto, janelas, rodas).
+- A geometria mesclada é descartada em `lmOff` e em `sc.remove(g)` (wrapper em `sc.remove`). Se mexer em como entidades são removidas, mantenha isso, senão vaza GPU.
+- Cuidados: o que mudar em `visible`/cor/material de uma entidade *enquanto ela está longe* só aparece quando ela volta ao modelo detalhado (ex.: arma sacada, pintura). `darken()` já funciona (a mesh mesclada também vira carvão). Ped em ragdoll nunca é mesclado.
+- Só `t=='car'|'moto'` são mesclados; ônibus, avião, heli, tanque, barco, trem não.
+- **Correção de diagnóstico:** o "contornos = ~40% dos draw calls" da primeira análise estava errado (foi medido com o jogo pausado, antes de o `lod()` rodar). Em jogo, o LOD antigo já escondia os contornos de ped/veículo; os do mundo eram ~5%.
+
+Atribuição de draw calls medida (Chromium headless, jogo rodando, antes do Passo 7 → depois):
+
+| Origem | Antes | Depois |
+|---|---|---|
+| Mundo (prédios etc., caixas com 6 materiais = 6 calls) | ~600 + 52 contorno | ~606 + 1 |
+| Pedestres | ~304 | ~33 |
+| Veículos | ~111 | ~28 |
+| Instanced + jogador | ~96 | ~96 |
+| **Total** | **~1.170 (picos 1.450–1.510)** | **~780 (picos ~900)** |
+
 ## Gargalos conhecidos (ordem de gravidade)
 
-1. ~1.300+ draw calls (alvo no celular: 150–300). Gargalo é CPU enviando comandos WebGL.
-2. Contornos: cada `box(...,p)` cria 2ª mesh `BackSide` (`OLM`) — ~40% dos draw calls.
-3. Carros/pedestres feitos de ~22 caixas soltas; cidade não mesclada em chunks.
+1. Draw calls ainda ~800–900 (alvo no celular: 150–300). **O mundo é agora ~78% do total**: prédios são `Mesh` com array de 6 materiais (`bld()`/`B()`), cada um custa até 6 draw calls. Próximo grande ganho = Passo 6 (chunks mesclados) ou, antes, prédios com 1 material/atlas.
+2. ~~Contornos~~ (resolvido/pequeno, ver acima).
+3. Cidade não mesclada em chunks; modelos de carro/ped *de perto* ainda têm ~12–22 meshes.
 4. Rastros de bala, partículas, explosões criam meshes por evento; 47 `sc.remove` e nenhum `dispose()`.
 5. Cadeia de `update` (acima); IA de todos os NPCs todo frame; colisão carro×carro O(n²); varreduras lineares em `solids` (1.800 itens) fora do `push()` (que já usa grade).
 6. HUD escreve no DOM todo frame.
@@ -71,7 +90,7 @@ Estrutura-alvo: `/src/core` (Game, Renderer, Input, EventBus, Assets, Pool, rng)
 - [ ] **4. `ui/HUD` e `Minimap`** — só escrever no DOM quando o valor mudar.
 - [ ] **5. `FXSystem` com pool** — rastros, partículas, sangue, granadas via `InstancedMesh`; acabar com vazamentos.
 - [ ] **6. `world/` em chunks mesclados + `SpatialGrid`** substituindo `solids[]` (API compatível).
-- [ ] **7. Modelos mesclados** — carro/pedestre de ~22 meshes para 1–7; contorno só perto.
+- [x] **7. LOD mesclado de carro/pedestre + contornos do mundo só perto** (feito como LOD por distância; modelo de perto continua com várias meshes por ter textura por face).
 - [ ] **8. `PhysicsSystem`** — colisão via grade, timestep fixo.
 - [ ] **9. IA** — Traffic/Ped/Police com LOD por distância e pool de entidades.
 - [ ] **10. Player e veículos especiais** (avião, heli, tanque, barco, trem; modos `FZ.mode`).

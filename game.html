@@ -2136,15 +2136,44 @@ los=function(a,b,ya=1.3,yb=1.3){if(solids.length!==GN)gridBuild();const dx=b.x-a
 try{cam.far=235;cam.updateProjectionMatrix();sc.fog.near=60;sc.fog.far=215}catch(e){}
 // LOD: esconde pedestres/veículos distantes e tira contornos de longe
 const olOf=o=>{if(!o._ol){const a=[];o.g.traverse(m=>{if(m.isMesh&&m.material===OLM)a.push(m)});o._ol=a}return o._ol};
-const LODC=window.LODC={ph:95,vh:150,po:26,vo:50};
+const LODC=window.LODC={ph:95,vh:150,po:26,vo:50,pm:24,vm:38,wo:40}; // pm/vm: distância a partir da qual ped/carro vira 1 mesh mesclada; wo: contornos do mundo
+// ===== PASSO 7: LOD mesclado — pedestre/carro distante vira 1 mesh (1 draw call) com cor por vértice =====
+// Cor de cada face = cor do material x média da textura. Peças móveis (membros) entram na pose de repouso.
+// Perto da câmera o modelo detalhado volta exatamente como era. LODC.pm/vm=1e9 desliga.
+const LM=new T.MeshToonMaterial({vertexColors:true,gradientMap:GM}),TAV=new WeakMap(),_m3=new T.Matrix3(),_v3=new T.Vector3(),_q0=new T.Quaternion();
+function texAvg(t){let a=TAV.get(t);if(a)return a;a=[1,1,1];try{const c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.drawImage(t.image,0,0,1,1);const d=x.getImageData(0,0,1,1).data;a=[d[0]/255,d[1]/255,d[2]/255]}catch(e){}TAV.set(t,a);return a}
+function lmCol(m){const c=m.color||{r:1,g:1,b:1},a=m.map?texAvg(m.map):[1,1,1];return[c.r*a[0],c.g*a[1],c.b*a[2]]}
+function relM(mesh,g){const M=new T.Matrix4(),L=new T.Matrix4();for(let n=mesh;n&&n!==g;n=n.parent){if(n.parent===g&&n.isGroup)L.compose(n.position,_q0,n.scale);else{n.updateMatrix();L.copy(n.matrix)}M.premultiply(L)}return M}
+function lmCollect(g){const a=[];g.traverse(m=>{if(!m.isMesh||m.isInstancedMesh||m.userData.lodm||m.material===OLM||!m.material)return;for(let q=m;q&&q!==g;q=q.parent)if(!q.visible)return;const ge=m.geometry;if(ge&&ge.attributes.position&&ge.attributes.normal)a.push(m)});return a}
+function lmBuild(g,ms){let nv=0,ni=0;for(const m of ms){const ge=m.geometry,n=ge.attributes.position.count;nv+=n;ni+=ge.index?ge.index.count:n}if(!nv||nv>65000)return null;
+ const PA=new Float32Array(nv*3),NA=new Float32Array(nv*3),CA=new Float32Array(nv*3),IA=new Uint16Array(ni);let vo=0,io=0;
+ for(const m of ms){const ge=m.geometry,pa=ge.attributes.position,na=ge.attributes.normal,n=pa.count,ix=ge.index,M=relM(m,g),arr=Array.isArray(m.material),cols=(arr?m.material:[m.material]).map(lmCol),vm=new Uint8Array(n);_m3.getNormalMatrix(M);
+  if(arr&&ge.groups.length)for(const q of ge.groups)for(let k=q.start,e=Math.min(q.start+q.count,ix?ix.count:n);k<e;k++)vm[ix?ix.getX(k):k]=q.materialIndex;
+  for(let i=0;i<n;i++){const o=(vo+i)*3,c=cols[vm[i]]||cols[0];_v3.fromBufferAttribute(pa,i).applyMatrix4(M);PA[o]=_v3.x;PA[o+1]=_v3.y;PA[o+2]=_v3.z;
+   _v3.fromBufferAttribute(na,i).applyMatrix3(_m3).normalize();NA[o]=_v3.x;NA[o+1]=_v3.y;NA[o+2]=_v3.z;CA[o]=c[0];CA[o+1]=c[1];CA[o+2]=c[2]}
+  if(ix)for(let k=0;k<ix.count;k++)IA[io++]=ix.getX(k)+vo;else for(let k=0;k<n;k++)IA[io++]=vo+k;vo+=n}
+ const geo=new T.BufferGeometry();geo.setAttribute('position',new T.BufferAttribute(PA,3));geo.setAttribute('normal',new T.BufferAttribute(NA,3));geo.setAttribute('color',new T.BufferAttribute(CA,3));geo.setIndex(new T.BufferAttribute(IA,1));geo.computeBoundingSphere();
+ const mm=new T.Mesh(geo,LM);mm.userData.lodm=1;mm.matrixAutoUpdate=false;return mm}
+function lmOn(o){if(o._lm)return;const ms=lmCollect(o.g),mm=lmBuild(o.g,ms);if(!mm)return;o._lmh=ms;for(const m of ms)m.visible=false;o.g.add(mm);o._lm=mm}
+function lmOff(o){if(!o._lm)return;for(const m of o._lmh)m.visible=true;o.g.remove(o._lm);o._lm.geometry.dispose();o._lm=o._lmh=null}
+window.LMX={lmOn,lmOff};
+// entidade removida da cena com sc.remove(g): libera a geometria mesclada (senão vaza memória de GPU)
+const _scr=sc.remove;sc.remove=function(...a){for(const o of a)if(o&&o.children)for(const c of o.children)if(c.userData&&c.userData.lodm)c.geometry.dispose();return _scr.apply(this,a)};
+// contornos do mundo (prédios/props): só perto. Lista refeita quando a cena muda (no máx. a cada 4 s)
+let WOL=[],wolN=-1,wolT=0;
+function wolScan(){const ent=new Set([P.g]);vehs.forEach(v=>ent.add(v.g));peds.forEach(p=>ent.add(p.g));const a=[];for(const o of sc.children){if(ent.has(o))continue;o.traverse(c=>{if(c.isMesh&&c.material===OLM)a.push(c)})}WOL=a;wolN=sc.children.length}
 let fc=0;
 function lod(){fc++;const px=P.x,pz=P.z;
  for(let i=fc&3;i<peds.length;i+=4){const p=peds[i];if(!p||!p.g)continue;const d=Math.hypot(p.x-px,p.z-pz);
   if(p._hid){if(d<=LODC.ph-10||p.sm){p.g.visible=true;p._hid=0}}else if(d>LODC.ph&&p.g.visible&&!p.sm&&!p.rag){p.g.visible=false;p._hid=1}
-  const far=d>LODC.po;if(p._of!==far){p._of=far;for(const m of olOf(p))m.visible=!far}}
- for(let i=fc&3;i<vehs.length;i+=4){const v=vehs[i];if(!v||!v.g||v===P.veh)continue;const d=Math.hypot(v.x-px,v.z-pz);
+  const far=d>LODC.po;if(p._of!==far){p._of=far;for(const m of olOf(p))m.visible=!far}
+  if(p._lm){if(d<=LODC.pm-4||p.rag||!p.g.visible)lmOff(p)}else if(d>LODC.pm&&!p.rag&&p.g.visible)lmOn(p)}
+ for(let i=fc&3;i<vehs.length;i+=4){const v=vehs[i];if(!v||!v.g)continue;if(v===P.veh){if(v._lm)lmOff(v);continue}const d=Math.hypot(v.x-px,v.z-pz);
   if(v._hid){if(d<=LODC.vh-15){v.g.visible=true;v._hid=0}}else if(d>LODC.vh&&v.g.visible&&!v.ev){v.g.visible=false;v._hid=1}
-  const far=d>LODC.vo;if(v._of!==far){v._of=far;for(const m of olOf(v))m.visible=!far}}}
+  const far=d>LODC.vo;if(v._of!==far){v._of=far;for(const m of olOf(v))m.visible=!far}
+  if(v._lm){if(d<=LODC.vm-6||!v.g.visible)lmOff(v)}else if(d>LODC.vm&&v.g.visible&&(v.t=='car'||v.t=='moto'))lmOn(v)}
+ if(!wolT||(fc-wolT>240&&sc.children.length!==wolN)){wolT=fc;wolScan()}
+ for(let i=fc&3;i<WOL.length;i+=4){const c=WOL[i],e=c.matrixWorld.elements,r=c.parent?Math.max(c.parent.scale.x,c.parent.scale.z)*.5:0,far=Math.hypot(e[12]-px,e[14]-pz)-r>LODC.wo;if(c._wf!==far){c._wf=far;c.visible=!far}}}
 // resolução dinâmica + sem render parado na pausa
 let pr=Math.min(devicePixelRatio||1,.9),sk=0;try{rd.setPixelRatio(pr);rd.setSize(innerWidth,innerHeight)}catch(e){}
 window.setPR=r=>{pr=Math.min(devicePixelRatio||1,r);try{rd.setPixelRatio(pr);rd.setSize(innerWidth,innerHeight)}catch(e){}};
