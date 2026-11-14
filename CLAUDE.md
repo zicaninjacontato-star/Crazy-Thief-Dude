@@ -69,12 +69,29 @@ Atribuição de draw calls medida (Chromium headless, jogo rodando, antes do Pas
 | Instanced + jogador | ~96 | ~96 |
 | **Total** | **~1.170 (picos 1.450–1.510)** | **~780 (picos ~900)** |
 
+## Chunks do mundo estático (Passo 6, feito) — último bloco `gb` antes do script de boot
+
+Meshes estáticas soltas na cena (`parent===sc`, `matrixAutoUpdate===false` = as que o bloco v12c congelou, Toon opaco, sem `userData.on`) são fundidas em **chunks de 64×64 m** (`CS`), com os contornos (`OLM`) filhos delas num mesh de contorno por chunk. Resultado: 1 draw call por chunk (+1 de contorno) em vez de 1 por caixa e 6 por prédio.
+
+- **As meshes originais NÃO saem da cena.** Ficam escondidas com `m.layers.set(31)` (a câmera só vê a layer 0), então `m.visible` continua sendo o que o jogo quer. Todo código antigo (`b.ms`, `takeSnap/restoreWorld`, `removeB`, `sc.remove(m)`...) continua valendo. **Nunca use `layers` para outra coisa em meshes do mundo.**
+- **Material único dos chunks** (`kmat`): `MeshToonMaterial{map:WT, vertexColors:true}`. Cor de cada face = cor do material (vira cor de vértice); repetição da textura de janela vai embutida nos UVs (`wallM` marca `q._wt=1` nas texturas de janela); faces sem textura apontam para um pixel branco da `WT` (uv .05,.05). Outras texturas (casas, placas) ganham 1 material por textura.
+- **A prova de falha:** se um membro muda (`sigSet/sigEq`: posição, escala, rotação, cor; troca de material; `visible`; saiu da cena), ele é **liberado**: `layers`→0, `matrixAutoUpdate=true`, e o chunk é refeito sem ele (`rebuild`, na hora). Dano (`hitB`: `hp/k/fall`) é checado todo frame em `tick` (via `lod()` → `window.CKT`); o resto, 1/4 dos membros por frame. `sc.remove(m)` (wrapper) tira o membro do chunk. `restoreWorld` devolve o estado original → o membro é **reabsorvido** (checagem a cada 45 frames; trava anti vai-e-vem só se sair de novo em <120 frames, 3 vezes seguidas).
+- Prédio que cai fica individual (como antes). Chunk refeito reaproveita as geometrias já "assadas" por membro (`r.pc`), então reconstruir custa ~1 ms. Geometria antiga é `dispose()`ada (testado: 7 ciclos de destruir/restaurar sem crescer).
+- Contorno dos chunks: ligado quando a **caixa do chunk** está a < `LODC.wo` (40 m) do jogador — granularidade de chunk, não de prédio (diferença visual só em linhas finas).
+- API de depuração: `CKX.off()` (tudo individual, para comparar), `CKX.on()`, `CKX.stats()`. `CS` fixo em 64 (testado 40/64/96: draw calls ≈ iguais; 64 é o equilíbrio).
+- Armadilhas: no **r128 `Texture` não tem `userData`**; `Object3D.layers` oculta o objeto mas **não** seus filhos (por isso os contornos filhos também vão para a layer 31); `wolScan` ignora meshes `userData.ckm`; mesh nova do mundo criada *depois* do carregamento fica individual (não entra no chunk).
+- O registro inicial roda uma vez ao fim do carregamento (~70 ms no PC).
+
+Medido (Chromium headless PC, mesmas 8 posições do mapa, jogo rodando): **draw calls médios 757 → 313 (pico 1.031 → 509); CPU de `render()` 6,1 → 4,2 ms; triângulos ~100 mil (iguais)**. Comparação de pixels chunks ligados × desligados: corpo, janelas e cores idênticos (só diferem linhas de contorno); testado intacto, danificado, caindo, desabado, `restoreWorld` e `sc.remove` (diferença <0,01% da imagem).
+
+Atribuição dos ~250 draw calls que sobram (vista inicial): instanced 61 · jogador 35 · mundo solto 44 (meshes enormes ≥100 m, `frustumCulled=false`, transparentes) · chunks 40 · veículos 27 · pedestres 16 · aninhados 18. **Pico de destruição ainda chega a ~1.000**: cada explosão cria dezenas de caixas de destroço individuais (`parts[]`) — isso é o Passo 5 (FX com pool/instancing).
+
 ## Gargalos conhecidos (ordem de gravidade)
 
-1. Draw calls ainda ~800–900 (alvo no celular: 150–300). **O mundo é agora ~78% do total**: prédios são `Mesh` com array de 6 materiais (`bld()`/`B()`), cada um custa até 6 draw calls. Próximo grande ganho = Passo 6 (chunks mesclados) ou, antes, prédios com 1 material/atlas.
-2. ~~Contornos~~ (resolvido/pequeno, ver acima).
-3. Cidade não mesclada em chunks; modelos de carro/ped *de perto* ainda têm ~12–22 meshes.
-4. Rastros de bala, partículas, explosões criam meshes por evento; 47 `sc.remove` e nenhum `dispose()`.
+1. Draw calls ~250–330 em passeio normal (alvo no celular: 150–300), mas **picos de ~1.000 em explosões/destruição**.
+2. ~~Contornos~~ e ~~mundo não mesclado~~ (resolvidos: Passos 7 e 6).
+3. Modelos de carro/ped *de perto* ainda têm ~12–22 meshes; instanced (61 calls: postes/placas etc.); jogador 35 calls.
+4. **Rastros de bala, partículas, destroços e explosões criam meshes/materiais por evento** (picos acima); 47 `sc.remove` e quase nenhum `dispose()` → Passo 5.
 5. Cadeia de `update` (acima); IA de todos os NPCs todo frame; colisão carro×carro O(n²); varreduras lineares em `solids` (1.800 itens) fora do `push()` (que já usa grade).
 6. HUD escreve no DOM todo frame.
 - Não são problema: sombras (desligadas), luzes (2), pixelRatio (0,9).
@@ -89,7 +106,8 @@ Estrutura-alvo: `/src/core` (Game, Renderer, Input, EventBus, Assets, Pool, rng)
 - [ ] **3. Loop único** — achatar as ~40 camadas de `update` numa lista explícita `systems[]`, preservando a ordem.
 - [ ] **4. `ui/HUD` e `Minimap`** — só escrever no DOM quando o valor mudar.
 - [ ] **5. `FXSystem` com pool** — rastros, partículas, sangue, granadas via `InstancedMesh`; acabar com vazamentos.
-- [ ] **6. `world/` em chunks mesclados + `SpatialGrid`** substituindo `solids[]` (API compatível).
+- [x] **6a. Chunks mesclados do mundo estático** (ver seção acima; feito dentro do `game.html`).
+- [ ] **6b. `SpatialGrid`** substituindo as varreduras lineares em `solids[]` (o `push()` já usa grade; faltam spawn/`los`/outros).
 - [x] **7. LOD mesclado de carro/pedestre + contornos do mundo só perto** (feito como LOD por distância; modelo de perto continua com várias meshes por ter textura por face).
 - [ ] **8. `PhysicsSystem`** — colisão via grade, timestep fixo.
 - [ ] **9. IA** — Traffic/Ped/Police com LOD por distância e pool de entidades.
