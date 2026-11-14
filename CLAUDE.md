@@ -21,7 +21,9 @@ Servir `game.html` com `three.min.js` r128 (`npm pack three@0.128.0`; cdnjs é b
 4. **Gore e sangue:** matar pedestres com `hurt()` e com tiro de espingarda (`shoot(W.shot)`) com Gore desligado/ligado cria os objetos esperados (pool + cena).
 5. **Sem contaminação de material:** nenhum material do cache (`MC`/`WMC`/`TMC`) com cor/opacidade/transparência/shader diferentes do original, e nenhum `InstancedMesh` com material do cache.
 6. **Comparação de pixels com o Remaster** (mesmos pontos de vista, LOD de entidades desligado: `LODC.pm=LODC.vm=1e9`): < 1% dos pixels com diferença >24.
-7. Só então medir draw calls (mesmas 8 posições do mapa) e atualizar as tabelas.
+7. **Perseguição → morte → hospital:** `crime(6,P.x,P.z)`, `J.y=1`, ~600 frames com `boom()` perto, esperar a morte e o respawn (o jogo chama `restoreWorld` sozinho). Depois do respawn: **prédios desanexados do v36 = ~0** (`[...OPT36.items.values()].filter(r=>r.det).length`), draw calls ≈ os de antes da perseguição, materiais únicos ≈ 1,1 mil, nenhum veículo "fantasma" (`_lm` obsoleto).
+8. **Multidão:** 14 policiais + 8 viaturas a 6–24 m na frente da câmera com 3+ estrelas: draw calls devem ficar < ~700 (sem o orçamento de LOD eram ~990).
+9. Só então medir draw calls (mesmas 8 posições do mapa) e atualizar as tabelas.
 
 ## Mapa fixo — não quebre (aprendido do jeito difícil)
 
@@ -147,13 +149,33 @@ Perfil de alocação em combate pesado (antes): ~2.800 meshes por explosões, ~1
 
 Medido (Chromium headless PC, cenário de combate: tiros, granadas, foguetes, ~130 explosões, mortes, carros destruídos, prédios caindo; 3 rodadas): **pico de draw calls 1.093/1.230/977 → 713/816/682** (o que sobra são pedestres/cops próximos e prédios danificados fora do chunk); meshes criadas por efeitos 5.000+ → 0 (o pool cresce uma vez e reaproveita); geometrias/texturas na GPU estáveis nas 3 rodadas; ao fim do combate o pool devolve tudo (sobram só os 22 decalques de sangue); CPU do `update()` inalterada (p50 ≈ 2,5 ms, p99 5–10 ms nas duas versões, dentro do ruído; o ganho do Passo 5 é em draw calls e criação de objetos, não em CPU de lógica). Fidelidade: 150 destroços pelo pool × meshes reais = **idêntico** (diferença máx. 1/255); fumaça/fogo ≈ igual (0,8% dos pixels, só sobreposição de transparência).
 
+## Perseguição, morte e hospital — causas medidas e correções (Passo 5b)
+
+Relato do celular: FPS 12 e ~940 draw calls ao acordar no hospital, ~2.640 materiais únicos, e centenas de draw calls em perseguição. Reproduzido no headless e medido:
+
+1. **Hospital = `restoreWorld` × `v36` (o grande culpado, já existia no Remaster).** O `restoreWorld` (bloco v18) chamava `m.updateMatrix()` em **todos** os 198 prédios/telhados do snapshot; o guarda do `v36` (`guard()` sobrescreve `updateMatrix`/`material`/`geometry`/`visible`) trata isso como "objeto movido" e **desanexa todos do agrupamento para sempre** → +~220 draw calls permanentes (prédio solto = até 6 calls) a cada morte. Correção: (a) `restoreWorld` só chama `updateMatrix()` se `scale.y`/`position.y`/`matrixAutoUpdate` realmente mudaram; (b) `OPT36.reattach(m)` (fila `OPT36.rq`, **10 por quadro**, em `reTick()` dentro do update do v36) devolve ao setor os prédios restaurados, **só se `pristine(rec)`**: matriz local == a do agrupamento (`rec.m0`), cores == originais (`rec.c0`), visível, congelado, opaco, e o motivo do destacamento foi `dano|updateMatrix|material` (nunca `moveu`/`cor`). Resultado: desanexados depois do respawn 198 → 0; draw calls pós-hospital ~400 → ~155; 1ª renderização depois de acordar 14 → 8 ms.
+   - **Regra:** nunca chame `updateMatrix()`, nem troque `material`/`geometry`/`visible`, numa mesh do mundo agrupada pelo v36 sem querer destacá-la. Se restaurar estado, chame `OPT36.reattach(m)` depois.
+2. **`restoreWorld` poda `v.g.children` além do snapshot** — o meu LOD mesclado é um filho a mais e era arrancado sem `lmOff` (veículo com `_lm` obsoleto = invisível ao longe). Agora `LMX.lmOff(v)` roda antes da poda (reproduzido: 1 veículo obsoleto → 0).
+3. **Materiais ~2.640 não vêm do spawn** (+15 em toda a perseguição): vinham do fix do v30 (modo realista), que dava uma cópia de material a **cada** mesh de topo. Agora `wsh(m)` dá **uma cópia worldificada por material de origem** (`WCL`, `_sh=1`, criada em `QUIET`), compartilhada entre as meshes de topo. O clone do dano (`uq`/`cq`) agora **preserva o shader** (`onBeforeCompile`, `customProgramCacheKey`, `userData`), senão prédio danificado perderia o shader de mundo. Materiais únicos: ~2.620 → ~1.120.
+4. **Perseguição = multidão perto.** Cada policial completo custa ~27 draw calls e cada viatura ~34 (cabeça/tronco têm 6 texturas distintas; não dá para fundir sem atlas). **Orçamento de detalhe** em `lod()` (`lodBudget`): dentro de `pm`/`vm`, só os `LODC.bp`=6 pedestres e `LODC.bv`=3 carros/motos **mais próximos e à frente da câmera** mantêm o modelo completo; os demais usam o mesclado. `pmin`=9 m/`vmin`=12 m é o piso. Com poucas entidades perto nada muda. Multidão de 14 policiais + 8 viaturas: ~975 → ~635 draw calls.
+5. **`anim`:** pedestre mesclado (`_lm`) ou escondido (`g.visible===false`: >95 m, no trem) não precisa animar membros. Wrapper mais externo da cadeia de 11 camadas, no último bloco (ragdoll e jogador sempre animam). `anim` 0,26 → <0,08 ms/frame; `update()` médio 2,0 → 1,65 ms.
+
+**Decisões tomadas com dados (não repetir a discussão):**
+- **Sem pooling de entidades.** Criar um pedestre/policial/carro custa **0,05–0,065 ms** (materiais já são cache). Pooling economizaria centésimos de ms e arriscaria quebrar ragdoll, gore, roupas/skins e estado de veículo. Os materiais já são reaproveitados.
+- **IA e colisão já estavam otimizadas pelo Remaster** (`VPAIRS` por grade no v40, unidades distantes com menos frequência no v44; `trafAI` roda em ~16 de 89 veículos por frame; cada peça < 0,15 ms). Não mexa nelas sem medir.
+- O custo do respawn é pequeno em CPU (`restoreWorld` ~3 ms, `respawn()` <1 ms); o que doía era o **estado permanente** (prédios soltos), não um engasgo de lógica. A fila de 10/quadro já espalha o resto.
+
 ## Medição sobre o Remaster (estado atual) — Chromium headless PC, 8 posições do mapa, jogo rodando
 
 | | Remaster puro | Remaster + otimizações (esta `main`) |
 |---|---|---|
-| Draw calls médios / pico — **realista** (padrão) | 562 / 875 | **305 / 453** |
-| Draw calls médios / pico — **cartoon** | 588 / 870 | **303 / 459** |
-| CPU de `render()` (realista) | 4,6 ms | 3,4 ms |
+| Draw calls médios / pico — **realista** (padrão), passeio | 561 / 876 | **298 / 430** |
+| Draw calls médios / pico — **cartoon**, passeio | 576 / 891 | **297 / 398** |
+| CPU de `render()` / `update()` (realista) | 6,1 / 1,9 ms | 3,6 / 1,4 ms |
+| Multidão (14 policiais + 8 viaturas a 6–24 m, 3 estrelas) | ~975 DC | **~635 DC** |
+| Depois de morrer e acordar no hospital (DC; prédios desanexados do v36) | ~400 DC; 198 desanexados (permanente) | **~155 DC; 0 desanexados** |
+| Materiais únicos na cena (contador do HUD, realista) | ~4.000 (Remaster) / ~2.620 (antes do Passo 5b) | **~1.120** |
+| `update()` médio com perseguição | 2,0 ms | 1,65 ms |
 | Mapa, menu, música, configurações, gore | referência | **idênticos** (hash do mapa igual; 56/63 campos iguais, os 7 restantes são o contador de FPS e o pool de sangue) |
 | Diferença de pixels vs. Remaster (LOD de entidades off) | — | 0,01–0,18% (realista), 0,05–0,78% (cartoon) |
 

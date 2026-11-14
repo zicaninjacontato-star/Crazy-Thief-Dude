@@ -122,11 +122,14 @@ sc.add(new T.HemisphereLight(0xffffff,0x667766,.55));const sun=new T.Directional
 const BURN=n=>{if(window.__sd)for(let i=0;i<n;i++)T.MathUtils.generateUUID()},QUIET=f=>{const s=window.__sd;window.__sd=0;try{return f()}finally{window.__sd=s}};
 const GM=(()=>{const t=new T.DataTexture(new Uint8Array([90,170,255]),3,1,T.LuminanceFormat);t.minFilter=t.magFilter=T.NearestFilter;t.needsUpdate=true;return t})(),OLM=new T.MeshBasicMaterial({color:0x111111,side:T.BackSide}),MC=new Map(),mat=c=>{let m=MC.get(c);if(!m){m=new T.MeshToonMaterial({color:c,gradientMap:GM});m._sh=1;MC.set(c,m)}else BURN(1);return m},BG=new T.BoxGeometry(1,1,1);
 // PERF: mat() devolve material COMPARTILHADO (cache por cor). Antes de alterar cor/opacidade de uma mesh, chame uq(mesh) (clona se for compartilhado).
-function uq(m){const a=m.material,cq=q=>{const c=QUIET(()=>q.clone());c._own=1;return c};if(Array.isArray(a)){if(a.some(q=>q&&q._sh))m.material=a.map(q=>q&&q._sh?cq(q):q)}else if(a&&a._sh)m.material=cq(a);return m}
+function uq(m){const a=m.material,cq=q=>{const c=QUIET(()=>q.clone());c._own=1;if(q.onBeforeCompile&&q.onBeforeCompile!==T.Material.prototype.onBeforeCompile){c.onBeforeCompile=q.onBeforeCompile;c.customProgramCacheKey=q.customProgramCacheKey}if(q.userData)c.userData=Object.assign({},q.userData);return c};if(Array.isArray(a)){if(a.some(q=>q&&q._sh))m.material=a.map(q=>q&&q._sh?cq(q):q)}else if(a&&a._sh)m.material=cq(a);return m}
 // REGRA: material do cache NUNCA é usado por InstancedMesh. No r128, um material usado ao mesmo tempo por uma mesh instanciada com cor por instância
 // (USE_INSTANCING_COLOR) e por meshes comuns fica sem o atributo de cor num dos usos e a cor é multiplicada por zero (tudo preto).
 // O clone sai de QUIET: no Remaster esse material já era um objeto novo (1 UUID, gasto pelo BURN do cache), então não pode gastar sorteio de novo.
 {const _IM=T.InstancedMesh;T.InstancedMesh=class extends _IM{constructor(g,m,n){if(m&&!Array.isArray(m)&&m._sh)m=QUIET(()=>m.clone());super(g,m,n)}}}
+// v30 (realista): meshes de topo recebem uma cópia por MATERIAL DE ORIGEM (compartilhada entre elas), não uma por mesh: o shader de mundo não vaza para quem usa o original,
+// e o contador de materiais não explode (~2.600 -> ~1.000). A cópia é _sh: o dano (uq) ainda clona em cima dela, preservando o shader.
+const WCL=new Map();function wsh(m){if(!m||!m._sh)return m;let c=WCL.get(m);if(!c){c=QUIET(()=>m.clone());if(m.onBeforeCompile&&m.onBeforeCompile!==T.Material.prototype.onBeforeCompile){c.onBeforeCompile=m.onBeforeCompile;c.customProgramCacheKey=m.customProgramCacheKey}c._sh=1;WCL.set(m,c)}return c}
 // PERF: textura de janela e material de parede compartilhados por (cor, repetição) em vez de WT.clone() por prédio
 const WTC=new Map(),WMC=new Map();function wallM(c,a,b){const rx=Math.max(1,Math.round(a/4)),ry=Math.max(1,Math.round(b/4)),tk=rx+'x'+ry,k=c+'|'+tk;let m=WMC.get(k);if(!m){let q=WTC.get(tk);if(!q){q=WT.clone();q.needsUpdate=true;q.repeat.set(rx,ry);q._wt=1;WTC.set(tk,q)}m=new T.MeshToonMaterial({color:c,map:q,gradientMap:GM});m._sh=1;WMC.set(k,m)}else BURN(1);return m}
 // PERF: material texturizado compartilhado por (cor, textura) — usado pelas fábricas tm() de veículos/pedestres/armas
@@ -2255,11 +2258,13 @@ function restoreWorld(){if(!SNAP)return;
  for(const s of SNAP.v){const v=s.v;if(v===P.veh||v._dm)continue;if(!have.has(v)){sc.add(v.g);vehs.push(v)}
   for(const k of Object.keys(v)){if(k==='ai'||k==='g'||k==='rd')continue;if(!(k in s.o)&&prim(v[k]))delete v[k]}
   Object.assign(v,s.o);
+  try{if(v._lm&&window.LMX)LMX.lmOff(v)}catch(e){}/* o LOD mesclado é um filho a mais: desfaz antes de podar, senão o carro some */
   while(v.g.children.length>s.nc)v.g.remove(v.g.children[v.g.children.length-1]);
   s.ms.forEach(([m,mt])=>{m.material=mt});v.g.visible=true;v.sp=0;v.g.position.set(v.x,v.y||0,v.z);v.g.rotation.set(0,v.yaw||0,0);if(v.rd)v.rd.visible=false}
  for(const s of SNAP.b){const b=s.b;b.hp=s.hp;b.k=s.k;b.h=s.h;b.fall=0;b.dyn=0;
   try{const mt=Array.isArray(b.ms[0].material)?b.ms[0].material:[b.ms[0].material];mt.forEach((q,i)=>{if(s.mc[i]!==undefined)q.color.setHex(s.mc[i])})}catch(e){}
-  s.ms.forEach(([m,sy,py,au])=>{m.scale.y=sy;m.position.y=py;m.matrixAutoUpdate=au;m.updateMatrix()})}
+  s.ms.forEach(([m,sy,py,au])=>{const ch=m.scale.y!==sy||m.position.y!==py||m.matrixAutoUpdate!==au;m.scale.y=sy;m.position.y=py;m.matrixAutoUpdate=au;if(ch)m.updateMatrix();/* updateMatrix em prédio intacto o desanexava do agrupamento */
+   try{window.OPT36&&OPT36.reattach&&OPT36.reattach(m)}catch(e){}})}
  try{const L=window.TLH;for(const h of L.heads){if(h.br){h.br=0;h.t=0;L.applyFall(h,0)}}L.fall.length=0;L.rs()}catch(e){console.log('heads',e)}
  DR.br=0;DR.k=0;DR.msgd=0;DR.g.visible=true;DR.rot=0;DR.sol.h=3;
  try{cash.length&&0}catch(e){}}
@@ -2325,7 +2330,7 @@ los=function(a,b,ya=1.3,yb=1.3){if(solids.length!==GN)gridBuild();const dx=b.x-a
 try{cam.far=235;cam.updateProjectionMatrix();sc.fog.near=60;sc.fog.far=215}catch(e){}
 // LOD: esconde pedestres/veículos distantes e tira contornos de longe
 const olOf=o=>{if(!o._ol){const a=[];o.g.traverse(m=>{if(m.isMesh&&m.material===OLM)a.push(m)});o._ol=a}return o._ol};
-const LODC=window.LODC={ph:95,vh:150,po:26,vo:50,pm:24,vm:38,wo:40}; // pm/vm: distância a partir da qual ped/carro vira 1 mesh mesclada; wo: contornos do mundo
+const LODC=window.LODC={ph:95,vh:150,po:26,vo:50,pm:24,vm:38,wo:40,bp:6,bv:3,pmin:9,vmin:12}; // pm/vm: distância a partir da qual ped/carro vira 1 mesh mesclada; wo: contornos do mundo
 // ===== PASSO 7: LOD mesclado — pedestre/carro distante vira 1 mesh (1 draw call) com cor por vértice =====
 // Cor de cada face = cor do material x média da textura. Peças móveis (membros) entram na pose de repouso.
 // Perto da câmera o modelo detalhado volta exatamente como era. LODC.pm/vm=1e9 desliga.
@@ -2352,15 +2357,23 @@ const _scr=sc.remove;sc.remove=function(...a){for(const o of a)if(o&&o.children)
 let WOL=[],wolN=-1,wolT=0;
 function wolScan(){const ent=new Set([P.g]);vehs.forEach(v=>ent.add(v.g));peds.forEach(p=>ent.add(p.g));const a=[];for(const o of sc.children){if(ent.has(o))continue;o.traverse(c=>{if(c.isMesh&&c.material===OLM&&!c.userData.ckm&&!c.userData.opt36)a.push(c)})}WOL=a;wolN=sc.children.length}
 let fc=0;
-function lod(){fc++;const px=P.x,pz=P.z;
+// ORÇAMENTO DE DETALHE: dentro de pm/vm, só os bp pedestres e bv carros/motos mais próximos E à frente da câmera mantêm o modelo completo (~27 draw calls cada);
+// o resto usa o mesclado (1 draw call). Com poucas entidades perto nada muda. Perseguição com 14 policiais + 8 viaturas = ~650 DC de modelos completos.
+const BDP=[],BDV=[],CDIR=new T.Vector3();let bPM=24,bVM=38;
+function lodBudget(px,pz){BDP.length=BDV.length=0;cam.getWorldDirection(CDIR);const cx=cam.position.x,cz=cam.position.z,dx=CDIR.x,dz=CDIR.z;
+ for(let i=0;i<peds.length;i++){const p=peds[i];if(!p||!p.g||!p.g.visible||p.rag)continue;const d=Math.hypot(p.x-px,p.z-pz);if(d>LODC.pm||(p.x-cx)*dx+(p.z-cz)*dz<-4)continue;BDP.push(d)}
+ for(let i=0;i<vehs.length;i++){const v=vehs[i];if(!v||!v.g||!v.g.visible||v===P.veh||!(v.t=='car'||v.t=='moto'))continue;const d=Math.hypot(v.x-px,v.z-pz);if(d>LODC.vm||(v.x-cx)*dx+(v.z-cz)*dz<-4)continue;BDV.push(d)}
+ BDP.sort((a,b)=>a-b);BDV.sort((a,b)=>a-b);
+ bPM=BDP.length>LODC.bp?Math.max(LODC.pmin,(BDP[LODC.bp-1]+BDP[LODC.bp])/2):LODC.pm;bVM=BDV.length>LODC.bv?Math.max(LODC.vmin,(BDV[LODC.bv-1]+BDV[LODC.bv])/2):LODC.vm}
+function lod(){fc++;const px=P.x,pz=P.z;lodBudget(px,pz);const pmE=Math.min(LODC.pm,bPM),vmE=Math.min(LODC.vm,bVM);
  for(let i=fc&3;i<peds.length;i+=4){const p=peds[i];if(!p||!p.g)continue;const d=Math.hypot(p.x-px,p.z-pz);
   if(p._hid){if(d<=LODC.ph-10||p.sm){p.g.visible=true;p._hid=0}}else if(d>LODC.ph&&p.g.visible&&!p.sm&&!p.rag){p.g.visible=false;p._hid=1}
   const far=d>LODC.po;if(p._of!==far){p._of=far;for(const m of olOf(p))m.visible=!far}
-  if(p._lm){if(d<=LODC.pm-4||p.rag||!p.g.visible)lmOff(p)}else if(d>LODC.pm&&!p.rag&&p.g.visible)lmOn(p)}
+  if(p._lm){if(d<=Math.min(LODC.pm-4,pmE-2)||p.rag||!p.g.visible)lmOff(p)}else if(d>pmE&&!p.rag&&p.g.visible)lmOn(p)}
  for(let i=fc&3;i<vehs.length;i+=4){const v=vehs[i];if(!v||!v.g)continue;if(v===P.veh){if(v._lm)lmOff(v);continue}const d=Math.hypot(v.x-px,v.z-pz);
   if(v._hid){if(d<=LODC.vh-15){v.g.visible=true;v._hid=0}}else if(d>LODC.vh&&v.g.visible&&!v.ev){v.g.visible=false;v._hid=1}
   const far=d>LODC.vo;if(v._of!==far){v._of=far;for(const m of olOf(v))m.visible=!far}
-  if(v._lm){if(d<=LODC.vm-6||!v.g.visible)lmOff(v)}else if(d>LODC.vm&&v.g.visible&&(v.t=='car'||v.t=='moto'))lmOn(v)}
+  if(v._lm){if(d<=Math.min(LODC.vm-6,vmE-2)||!v.g.visible)lmOff(v)}else if(d>vmE&&v.g.visible&&(v.t=='car'||v.t=='moto'))lmOn(v)}
  if(!wolT||(fc-wolT>240&&sc.children.length!==wolN)){wolT=fc;wolScan()}
  for(let i=fc&3;i<WOL.length;i+=4){const c=WOL[i],e=c.matrixWorld.elements,r=c.parent?Math.max(c.parent.scale.x,c.parent.scale.z)*.5:0,far=Math.hypot(e[12]-px,e[14]-pz)-r>LODC.wo;if(c._wf!==far){c._wf=far;c.visible=!far}}
  if(window.CKT)CKT(fc);dbrFlush()}
@@ -4977,7 +4990,7 @@ function worldify(m){if(!m||m.userData.gx||!(m.isMeshLambertMaterial))return;m.u
  m.customProgramCacheKey=WKEY;m.needsUpdate=true}
 // água: os planos azuis translúcidos (rio) e o mar viram Lambert com o shader de água
 const isWaterCol=c=>c&&c.b>c.r*1.45&&c.b>c.g*1.04&&(c.b-c.r)/c.b>.38;
-try{sc.children.forEach(o=>{if(!o.isMesh||o.isSkinnedMesh)return;try{uq(o)}catch(e){}/* material compartilhado (cache) -> cópia própria: o shader de mundo não pode vazar para outros usuários do mesmo material */let m=o.material;
+try{sc.children.forEach(o=>{if(!o.isMesh||o.isSkinnedMesh)return;try{o.material=Array.isArray(o.material)?o.material.map(wsh):wsh(o.material)}catch(e){}/* cópia compartilhada por material de origem: o shader de mundo não pode vazar para outros usuários do original */let m=o.material;
  if(m&&!Array.isArray(m)&&m.isMeshBasicMaterial&&m!==OLM&&isWaterCol(m.color)&&o.geometry&&o.geometry.type=='PlaneGeometry'){o.material=new T.MeshLambertMaterial({color:m.color,transparent:m.transparent,opacity:Math.max(.86,m.opacity)});m=o.material}
  (Array.isArray(m)?m:[m]).forEach(worldify)})}catch(e){console.log('mundo',e)}
 // ---------- árvores: copa arredondada no lugar do cone ----------
@@ -5797,7 +5810,7 @@ function addPart(o,mat,start,count,b,rec,sharedOL){const g=o.geometry,pa=g.attri
   if(b.uvOn){if(ua)b.uv.push(ua.getX(vi)*rx+ox,ua.getY(vi)*ry+oy);else b.uv.push(0,0)}
   b.col.push(c.r,c.g,c.b)}
  const it={b,v0,n:count,o};b.items.push(it);rec.parts.push(it)}
-function addMesh(o){const rec={o,parts:[],det:false,lv:true,ol:[]};const g=o.geometry,mats=Array.isArray(o.material)?o.material:[o.material];
+function addMesh(o){const rec={o,parts:[],det:false,lv:true,ol:[],m0:o.matrix.elements.slice()};const g=o.geometry,mats=Array.isArray(o.material)?o.material:[o.material];rec.c0=mats.map(m=>m&&m.color?m.color.getHex():-1);
  // centro do objeto define o setor (objetos grandes também cabem: o setor recebe o volume real no bounding sphere)
  V3.set(0,0,0).applyMatrix4(o.matrixWorld);const sx=Math.floor(V3.x/SEC),sz=Math.floor(V3.z/SEC);
  const parts=[];const total=g.index?g.index.count:g.attributes.position.count;
@@ -5819,8 +5832,15 @@ const attached=o=>{let p=o;while(p){if(p===sc)return true;p=p.parent}return fals
 const effVis=o=>{let p=o.parent;while(p&&p!==sc){if(!p.visible)return false;p=p.parent}return true};
 function sync(rec){setParts(rec,rec.lv&&rec.ev!==false&&!rec.det&&attached(rec.o))}
 // destaca de vez: o objeto original volta a ser desenhado sozinho (dano, material trocado, movido)
-function detach(o,why){const rec=OPT.items.get(o);if(!rec||rec.det)return;const W=OPT.why||(OPT.why={});W[why||'?']=(W[why||'?']||0)+1;rec.det=true;sync(rec);o.layers.set(0);rec.ol.forEach(c=>c.layers.set(0));OPT.stats.detached=(OPT.stats.detached||0)+1}
+function detach(o,why){const rec=OPT.items.get(o);if(!rec||rec.det)return;const W=OPT.why||(OPT.why={});W[why||'?']=(W[why||'?']||0)+1;rec.det=true;rec.why=why||'?';sync(rec);o.layers.set(0);rec.ol.forEach(c=>c.layers.set(0));OPT.stats.detached=(OPT.stats.detached||0)+1}
 OPT.detach=detach;
+// REANEXAR: depois do restoreWorld (morte/hospital) os prédios voltam ao estado original; sem isto o guarda os deixava desanexados para sempre
+// (cada prédio voltava a custar até 6 draw calls). Entram numa fila e voltam ao setor poucos por quadro, só se estiverem realmente idênticos ao original.
+OPT.rq=[];
+OPT.reattach=o=>{const rec=OPT.items.get(o);if(!rec||!rec.det||rec.q||rec.mw)return false;if(!(rec.why==='dano'||rec.why==='updateMatrix'||rec.why==='material'))return false;rec.q=1;OPT.rq.push(rec);return true};
+function pristine(rec){const o=rec.o;if(!o.visible||o.matrixAutoUpdate!==false||!attached(o))return false;const e=o.matrix.elements,m=rec.m0;for(let i=0;i<16;i++)if(Math.abs(e[i]-m[i])>1e-5)return false;
+ const mats=Array.isArray(o.material)?o.material:[o.material];for(let i=0;i<mats.length;i++){const q=mats[i];if(!q||!q.color||q.color.getHex()!==rec.c0[i]||q.transparent||q.opacity!==1)return false}return true}
+function reTick(){let n=0;while(n<10&&OPT.rq.length){const rec=OPT.rq.shift();rec.q=0;if(!rec.det||!pristine(rec))continue;rec.det=false;rec.why=null;rec.o.layers.set(HIDE);rec.ol.forEach(c=>c.layers.set(HIDE));sync(rec);OPT.stats.detached=Math.max(0,(OPT.stats.detached||1)-1);n++}}
 function guard(o,rec){let vis=o.visible,mt=o.material;
  Object.defineProperty(o,'visible',{configurable:true,get(){return vis},set(v){v=!!v;if(v===vis)return;vis=v;rec.lv=v;if(!rec.det)sync(rec)}});
  Object.defineProperty(o,'material',{configurable:true,get(){return mt},set(v){mt=v;if(v!==undefined)detach(o,'material')}});
@@ -5875,7 +5895,7 @@ OPT.run=()=>{runStatic();runGroups()};OPT._dbg={GSNAP,stableG,msig,effVis,eligib
 try{if(OPT.on){snapGroups();runStatic()}}catch(e){console.log('OPT36 erro',e);OPT.on=false}
 let tt=0,wt=0;OPT.groups=OPT.groups||[];const _u=update;update=function(dt){_u(dt);if(PAUSED)return;
  if(OPT.done){if(!OPT.gdone){tt+=dt;if(tt>3.6){try{runGroups()}catch(e){console.log('OPT36g',e);OPT.gdone=true}}}for(const G of OPT.groups){for(const rec of G.its){if(rec.det)continue;const o=rec.o,ev=effVis(o)&&attached(o);if(ev!==rec.ev){rec.ev=ev;sync(rec)}const e=o.matrixWorld.elements,m=rec.mw;for(let i=0;i<16;i++)if(e[i]!==m[i]){detach(o,'moveu');break}}}
-  watchTick();return}};
+  reTick();watchTick();return}};
 })();
 
 </script><script type='text/game' class='gb'>
@@ -7118,6 +7138,8 @@ window.MUS={stop(){try{setMode(null);dead=true;if(A)A.close()}catch(e){}},pause(
 poll();
 })();
 </script><script type='text/game' class='gb'>
+// ===== anim: pedestre mesclado (LOD) ou escondido (>95 m / no trem) não mostra os membros; animá-los é custo sem efeito visível. Wrapper mais externo da cadeia (11 camadas). Ragdoll e o jogador sempre animam. =====
+(function(){try{const _anF=anim;anim=function(o,sp,dt,h){if(o!==P&&!o.rag&&o.g&&(o._lm||o.g.visible===false))return;return _anF.apply(this,arguments)}}catch(e){console.log('anim lod',e)}})();
 // ===== PERF HUD (Passo 0): FPS · draw calls · materiais — window.PERFHUD(0) oculta =====
 (function(){try{
 const el=document.createElement('div');el.id='perf';el.style.cssText='position:fixed;left:50%;top:calc(2px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:50;pointer-events:none;font:10px/1.2 monospace;color:#cfc;background:#0008;padding:2px 6px;border-radius:4px;white-space:nowrap';document.body.appendChild(el);
