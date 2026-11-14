@@ -17,6 +17,8 @@ jobs:
           mv ic_fg.xml app/src/main/res/drawable/ic_fg.xml
           mv ic_launcher.xml app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
           mv app-build.gradle app/build.gradle
+      - name: Carimbar o hash do commit no contador de desempenho
+        run: sed -i "s/@@BUILD@@/${GITHUB_SHA::7}/" app/src/main/assets/game.html
       - name: Baixar three.js para funcionar offline
         run: |
           curl -fL --retry 3 https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js -o app/src/main/assets/three.min.js

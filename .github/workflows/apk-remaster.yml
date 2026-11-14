@@ -17,6 +17,8 @@ jobs:
           mv ic_fg.xml app/src/main/res/drawable/ic_fg.xml
           mv ic_launcher.xml app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
           mv app-build.gradle app/build.gradle
+      - name: Carimbar o hash do commit no contador de desempenho
+        run: sed -i "s/@@BUILD@@/${GITHUB_SHA::7}/" app/src/main/assets/game.html
       - name: Transformar em Remaster (nome e pacote próprios, instala ao lado do original)
         run: |
           sed -i 's/android:label="Crazy Thief Dude"/android:label="Crazy Thief Dude (Remaster)"/' app/src/main/AndroidManifest.xml

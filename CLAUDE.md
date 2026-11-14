@@ -15,6 +15,7 @@
 
 Servir `game.html` com `three.min.js` r128 (`npm pack three@0.128.0`; cdnjs é bloqueado no sandbox) e rodar no Chromium/Playwright (`--use-gl=swiftshader`), clicar `#bj`, esperar ~26 s. Comparar **sempre** com o Remaster puro (`git show origin/ccr-58105d15-gky879:game.html`), nos dois estilos (`localStorage.maua_cfg='{"gfx":0}'` = cartoon; padrão = realista):
 
+0. **Contador:** `UPD`/`RND`/`ESP`, resolução e `b<hash>` aparecem; num celular, confira que o `b<hash>` é o do último commit antes de medir qualquer coisa.
 1. **Mapa idêntico:** hash de `solids` (x0,x1,z0,z1,h ×100, ordenado), posições de `peds` e `vehs` logo após carregar. Tem que bater com o Remaster. (Ver "Mapa fixo" abaixo.)
 2. **Zero `pageerror`** no carregamento e em ~900 frames de combate (tiros, granadas, foguetes, explosões, mortes, carros destruídos, prédios caindo, `V18.restoreWorld()`).
 3. **Menu e configurações:** `CFGUI.open()` lista 8 linhas e 19 opções (Textura, Resolução, Renderização, **Sangue**, **Gore**, Densidade, **Estilo Gráfico Cartoon/Realista**, Cheats); clicar cada opção altera `CFG` e grava `maua_cfg`; `#mnew`/`#mlod` visíveis; `MUS.mode==='menu'` e contexto de áudio `running`.
@@ -164,6 +165,28 @@ Relato do celular: FPS 12 e ~940 draw calls ao acordar no hospital, ~2.640 mater
 - **Sem pooling de entidades.** Criar um pedestre/policial/carro custa **0,05–0,065 ms** (materiais já são cache). Pooling economizaria centésimos de ms e arriscaria quebrar ragdoll, gore, roupas/skins e estado de veículo. Os materiais já são reaproveitados.
 - **IA e colisão já estavam otimizadas pelo Remaster** (`VPAIRS` por grade no v40, unidades distantes com menos frequência no v44; `trafAI` roda em ~16 de 89 veículos por frame; cada peça < 0,15 ms). Não mexa nelas sem medir.
 - O custo do respawn é pequeno em CPU (`restoreWorld` ~3 ms, `respawn()` <1 ms); o que doía era o **estado permanente** (prédios soltos), não um engasgo de lógica. A fila de 10/quadro já espalha o resto.
+
+## Contador de desempenho no celular (UPD / RND / ESP / build) e o que foi medido sobre fogo, explosões e 3 estrelas (Passo 5c)
+
+O pill no topo da tela agora tem 2 linhas (3 quando há alerta):
+- Linha 1: `FPS · DC · mat · geo · tex` (draw calls, materiais únicos na cena, geometrias e texturas na GPU).
+- Linha 2: `UPD a/m · RND a/m · ESP e · L×A · b<hash>`.
+  - **UPD** = ms do `update()` (lógica, física, IA), média/pior da última meia segundo. **UPD alto = gargalo de CPU de lógica.**
+  - **RND** = ms do `rd.render()` **no JS** (montagem e envio dos draw calls, matrizes). **RND alto = draw calls/objetos demais.** *Não inclui a GPU* (o WebGL é assíncrono).
+  - **ESP** = ms do quadro que não foram nem UPD nem RND = a GPU desenhando / vsync. **ESP alto com UPD e RND baixos = gargalo é a GPU** (preenchimento de pixels / shaders do modo realista / resolução). É o número que separa "CPU" de "GPU" no celular.
+  - `L×A` = resolução real do canvas; `b<hash>` = **hash do commit do APK** (o workflow troca o marcador `@@BUILD@@` por `${GITHUB_SHA::7}`; `bdev` = rodando o `game.html` direto).
+- Linha 3 `⚠ +N mat ← Tipo<função×qtd`: quando os materiais únicos saltam ≥150 entre duas medições (a cada 3 s), mostra por 30 s quem criou (`T.Mesh*Material` e `Material.clone` são contados depois do carregamento, sem custo relevante). Se disser `(sem criação: já estavam na cena)` os materiais não foram criados: entraram na cena (ex.: veículos re-adicionados).
+- Os construtores `T.Mesh{Lambert,Phong,Basic,Toon,Standard}Material` e `Material.prototype.clone` são **embrulhados no fim do carregamento** (bloco do contador); não compare `constructor` por identidade.
+
+**Medido (Chromium headless; profiler de CPU do CDP, 420 frames de perseguição 3★ + RPG + carros em chamas + explosões):**
+- **Não existe nenhuma `PointLight`/`SpotLight`/sombra** no jogo (só 3 luzes fixas: hemisférica, direcional, ambiente). Explosão/fogo **não criam luz**. Descartado.
+- Tempo de JS por quadro em perseguição: ~2 ms de `update()` e ~3,5 ms de `render()`; nenhuma função do jogo passa de ~0,1 ms/frame; GC 0,16 ms/frame. Não há laço O(n²) relevante (colisão por grade `VPAIRS`).
+- **Maior custo de JS = atualização de matrizes da cena da própria Three.js** (`updateMatrixWorld`+`compose`+`multiplyMatrices`+`updateMatrix` ≈ 1,2 ms/frame no PC, ~4.700 nós: cada pedestre/veículo tem 13–23 filhos, mesmo escondido ou mesclado). Candidato futuro (não feito): congelar `matrixAutoUpdate` das subárvores de entidades escondidas/mescladas.
+- Fumaça/fogo: 130 puffs de 4 m na frente da câmera derrubam a vazão só ~10–15% no renderizador por software (2,6 → 2,2 fps); **não é o gargalo de preenchimento**. O modo realista (shader de mundo + céu procedural com ruído fbm por pixel + água) é pesado por pixel na GPU: no celular o `ESP` alto é o sinal.
+- Um programa de shader novo foi compilado durante toda a sequência de combate (compilação de 1ª vez; custa 100–500 ms num celular e aparece como "5 FPS" naquela janela de 0,5 s). Não foi reproduzido de forma isolada.
+
+**Salto de materiais "após o hospital" (1.179 → 2.637) — NÃO reproduzido:** na simulação (perseguição + RPG + carros em chamas + morte + hospital, e também com o tráfego original já substituído) os materiais ficaram em ~1.120–1.200 e **nada é criado no respawn** (instrumentado: 0 materiais criados na fase do hospital). O `2.637` é exatamente o patamar do build `ae69330` (2.618–2.637) e os dois APKs de um mesmo commit são apps diferentes (`.game` e `.remaster`, com `localStorage` separado). **O `app-build.gradle` não fixa assinatura**: cada build do Actions usa um keystore de debug novo, então o Android só atualiza por cima se o app antigo for desinstalado antes (e `apk.yml` mantém `versionCode 1`). Se o contador mostrar um `b<hash>` diferente do último commit, o celular está rodando um APK antigo. (Desinstalar apaga o save do WebView.)
+- Único crescimento real ligado ao respawn: o `restoreWorld` re-adiciona **todos** os veículos do snapshot inicial que não estão mais em `vehs`; numa sessão longa o tráfego original já foi trocado, então a população passa de ~62 para ~151 veículos (+~230 materiais). É limitado (não cresce a cada morte) e **foi deixado como está**: limitar isso mudaria quais carros "voltam" depois de morrer (mecânica do Remaster). Se for preciso, a alternativa segura é despachar só tráfego comum (`v.tr`, sem `ai/own/mg/rc/ev`) a >80 m depois do restore.
 
 ## Medição sobre o Remaster (estado atual) — Chromium headless PC, 8 posições do mapa, jogo rodando
 

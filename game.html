@@ -7140,17 +7140,39 @@ poll();
 </script><script type='text/game' class='gb'>
 // ===== anim: pedestre mesclado (LOD) ou escondido (>95 m / no trem) não mostra os membros; animá-los é custo sem efeito visível. Wrapper mais externo da cadeia (11 camadas). Ragdoll e o jogador sempre animam. =====
 (function(){try{const _anF=anim;anim=function(o,sp,dt,h){if(o!==P&&!o.rag&&o.g&&(o._lm||o.g.visible===false))return;return _anF.apply(this,arguments)}}catch(e){console.log('anim lod',e)}})();
-// ===== PERF HUD (Passo 0): FPS · draw calls · materiais — window.PERFHUD(0) oculta =====
+// ===== PERF HUD (Passo 0): FPS · DC · materiais + tempos UPD/RND/ESP + build — window.PERFHUD(0) oculta =====
+// Linha 1: FPS · draw calls · materiais únicos · geometrias · texturas na GPU
+// Linha 2: UPD = ms do update() (lógica/física/IA) média/pior | RND = ms do rd.render() no JS (envio dos draw calls) média/pior |
+//          ESP = ms do quadro que NÃO foram nem update nem render (GPU desenhando / vsync) | resolução do canvas | build (hash do commit)
+//   UPD alto = CPU de lógica · RND alto = muitos draw calls/matrizes · ESP alto com UPD e RND baixos = GPU (preenchimento/shaders) é o gargalo.
+// Linha 3 (só quando os materiais únicos saltam >=150 entre duas medições): quem os criou (construtor<função), para achar vazamentos no celular.
 (function(){try{
-const el=document.createElement('div');el.id='perf';el.style.cssText='position:fixed;left:50%;top:calc(2px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:50;pointer-events:none;font:10px/1.2 monospace;color:#cfc;background:#0008;padding:2px 6px;border-radius:4px;white-space:nowrap';document.body.appendChild(el);
-let fr=0,t0=performance.now(),tm=0,nm=0,bad=0,on=1;
+const BLD='@@BUILD@@',BID=BLD.charAt(0)==='@'?'dev':BLD; // o workflow troca esse marcador pelo hash curto do commit
+const el=document.createElement('div');el.id='perf';el.style.cssText='position:fixed;left:50%;top:calc(2px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:50;pointer-events:none;font:10px/1.25 monospace;color:#cfc;background:#0008;padding:2px 6px;border-radius:4px;white-space:pre;text-align:center';document.body.appendChild(el);
+let fr=0,t0=performance.now(),tm=0,nm=0,pnm=0,bad=0,on=1,uS=0,uM=0,uN=0,rS=0,rM=0,rN=0,jump=null;
+// tempo do update() e do rd.render() (wrappers mais externos; custo = 4 performance.now() por quadro)
+const _upd=update;update=function(dt){const a=performance.now();try{return _upd(dt)}finally{const d=performance.now()-a;uS+=d;uN++;if(d>uM)uM=d}};
+const _rr=rd.render;rd.render=function(sc_,cam_){const a=performance.now();try{return _rr.call(this,sc_,cam_)}finally{const d=performance.now()-a;rS+=d;rN++;if(d>rM)rM=d}};
+// quem cria material em tempo de jogo (só conta; custo desprezível: material novo é raro)
+const MLOG=new Map();let burst=0,bt=0;
+const note=k=>{const now=performance.now();if(now-bt>1000){bt=now;burst=0}if(++burst>300){MLOG.set('(rajada)',(MLOG.get('(rajada)')||0)+1);return}
+ const st=new Error().stack.split('\n');let f='?';for(let i=3;i<st.length;i++){const m=st[i].match(/at (\S+)/);if(m&&!/^(new|note|Object\.|Array\.|Map\.|Set\.|<anonymous>|Material\.)/.test(m[1])){f=m[1];break}}
+ const key=k+'<'+f;MLOG.set(key,(MLOG.get(key)||0)+1)};
+for(const n of ['MeshLambertMaterial','MeshPhongMaterial','MeshBasicMaterial','MeshToonMaterial','MeshStandardMaterial']){const O=T[n];if(!O)continue;T[n]=class extends O{constructor(...a){super(...a);note(n.replace('Mesh','').replace('Material',''))}}}
+const _cl=T.Material.prototype.clone;T.Material.prototype.clone=function(){note('clone');return _cl.apply(this,arguments)};
 // materiais únicos na cena (varredura a cada 3 s — rd.info.memory só traz geometrias/texturas)
-const count=()=>{const S=new Set();sc.traverse(o=>{const m=o.material;if(!m)return;if(Array.isArray(m))for(const q of m)S.add(q);else S.add(m)});nm=S.size;
- bad=0;MC.forEach((m,c)=>{if(typeof c=='number'&&(m.color.getHex()!==c||m.transparent||m.opacity!==1))bad++})};
-window.PERFHUD=v=>{on=v;el.style.display=v?'':'none'};window.PERF={fps:0,calls:0,tris:0,mats:0};
-const _lp=loop;loop=function(n){_lp(n);if(!on)return;fr++;const d=n-t0;if(d<500)return;const fps=Math.round(fr*1000/d);fr=0;t0=n;
- if(n-tm>3000||!nm){tm=n;count()}const i=rd.info;PERF.fps=fps;PERF.calls=i.render.calls;PERF.tris=i.render.triangles;PERF.mats=nm;
- el.textContent=fps+' FPS · '+i.render.calls+' DC · '+nm+' mat · '+i.memory.geometries+' geo · '+i.memory.textures+' tex'+(bad?' · ⚠'+bad:'');el.style.color=fps>=50?'#cfc':fps>=30?'#fe8':'#f88'};
+const count=()=>{const S=new Set();sc.traverse(o=>{const m=o.material;if(!m)return;if(Array.isArray(m))for(const q of m)S.add(q);else S.add(m)});pnm=nm;nm=S.size;
+ if(pnm&&nm-pnm>=150){jump={n:nm-pnm,t:performance.now(),why:[...MLOG.entries()].sort((a,b)=>b[1]-a[1]).slice(0,3).map(([k,v])=>k+'×'+v).join(' ')||'(sem criação: já estavam na cena)'}}
+ MLOG.clear();bad=0;MC.forEach((m,c)=>{if(typeof c=='number'&&(m.color.getHex()!==c||m.transparent||m.opacity!==1))bad++})};
+window.PERFHUD=v=>{on=v;el.style.display=v?'':'none'};window.PERF={fps:0,calls:0,tris:0,mats:0,upd:0,rnd:0,esp:0,build:BID};
+const _lp=loop;loop=function(n){_lp(n);if(!on)return;fr++;const d=n-t0;if(d<500)return;const fps=Math.round(fr*1000/d);
+ const ua=uN?uS/uN:0,ra=rN?rS/rN:0,fi=d/fr,esp=Math.max(0,fi-(uS+rS)/fr);
+ fr=0;t0=n;if(n-tm>3000||!nm){tm=n;count()}const i=rd.info;PERF.fps=fps;PERF.calls=i.render.calls;PERF.tris=i.render.triangles;PERF.mats=nm;PERF.upd=ua;PERF.rnd=ra;PERF.esp=esp;
+ const cv=rd.domElement,q=x=>x<10?x.toFixed(1):Math.round(x);
+ let t=fps+' FPS · '+i.render.calls+' DC · '+nm+' mat · '+i.memory.geometries+' geo · '+i.memory.textures+' tex'+(bad?' · ⚠'+bad:'')+
+  '\nUPD '+q(ua)+'/'+q(uM)+' · RND '+q(ra)+'/'+q(rM)+' · ESP '+q(esp)+' · '+cv.width+'×'+cv.height+' · b'+BID;
+ if(jump&&performance.now()-jump.t<30000)t+='\n⚠ +'+jump.n+' mat ← '+jump.why;
+ el.textContent=t;el.style.color=fps>=50?'#cfc':fps>=30?'#fe8':'#f88';uS=uM=uN=rS=rM=rN=0};
 }catch(e){console.log('perf',e)}})();
 </script><script type='text/game' class='gb'>
 // ===== PASSO 6: chunks espaciais do mundo estático (mesh mesclada por chunk) =====
