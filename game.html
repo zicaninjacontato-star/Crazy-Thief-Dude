@@ -2295,10 +2295,10 @@ const _u=update;update=function(dt){
    const dx=q.x-p.x,dz=q.z-p.z;if(dx>.7||dx<-.7||dz>.7||dz<-.7)continue;const d=Math.hypot(dx,dz);
    if(d<.6){const pu=(.6-d)/2,nx=d>.01?dx/d:R()-.5,nz=d>.01?dz/d:R()-.5;p.x-=nx*pu;p.z-=nz*pu;q.x+=nx*pu;q.z+=nz*pu;
     p.ov=(p.ov||0)+dt;if(p.ov>2.5){p.ov=0;if(p.ax){p.dir*=-1}}}}}
- for(const p of peds){if(p.rag||p.sm||p.swm||p.evw||p.fl>0||p.cop||p.rx)continue;
+ for(const p of peds){if(p.rag||p.sm||p.swm||p.evw||p.fl>0||p.cop||p.rx){lastP.delete(p);continue}/* v46: sem posição velha guardada, senão o NPC que fugiu volta ao lugar de antes (teletransporte) */
   const l=lastP.get(p);if(l){const dx=p.x-l[0],dz=p.z-l[1],d=Math.hypot(dx,dz),mx=dt*9+.35;if(d>mx){p.x=l[0]+dx/d*mx;p.z=l[1]+dz/d*mx;p.g.position.x=p.x;p.g.position.z=p.z}}
   lastP.set(p,[p.x,p.z])}
- for(const v of vehs){if(!v.tr||v.ai||v.ev||v===P.veh||v.dead||v.t!='car')continue;
+ for(const v of vehs){if(!v.tr||v.ai||v.ev||v===P.veh||v.dead||v.t!='car'){lastP.delete(v);continue}
   const l=lastP.get(v);if(l){const dx=v.x-l[0],dz=v.z-l[1],d=Math.hypot(dx,dz),mx=dt*(Math.abs(v.sp)*1.2+14)+.4;if(d>mx){v.x=l[0]+dx/d*mx;v.z=l[1]+dz/d*mx;v.g.position.set(v.x,v.g.position.y,v.z)}}
   lastP.set(v,[v.x,v.z])}
 };
@@ -5999,7 +5999,9 @@ function hideDiscs(){sc.traverse(o=>{if(!o.isMesh||o.userData.noDisc)return;cons
  if((r===4.2||r===4.5)&&g.parameters.height<=.15&&o.material&&o.material.isMeshBasicMaterial&&o.material.transparent){o.visible=false;o.userData.noDisc=1}})}
 hideDiscs();
 // ---------- 3) telhados: aeronaves e o personagem podem ficar em cima dos prédios ----------
-const RQ=[];function roofAt(x,z,r){let h=0,b=null;const L=window.SGQ?SGQ(x-r,x+r,z-r,z+r,RQ):solids;for(const s of L){if(!(s.h>1.5))continue;if(x>s.x0-r*.3&&x<s.x1+r*.3&&z>s.z0-r*.3&&z<s.z1+r*.3&&s.h>h){h=s.h;b=s}}return[h,b]}
+const RQ=[];function roofAt(x,z,r){let h=0,b=null;const L=window.SGQ?SGQ(x-r,x+r,z-r,z+r,RQ):solids;for(const s of L){if(!(s.h>1.5))continue;if(x>s.x0-r*.3&&x<s.x1+r*.3&&z>s.z0-r*.3&&z<s.z1+r*.3&&s.h>h){h=s.h;b=s}}
+ if(b&&b.isH&&!b.fall&&!b.ruin&&b.hp>0&&b.ms&&b.ms[1]&&b.ms[1].scale){/* v46: telhado em pirâmide com física: o piso sobe pela inclinação */const m=b.ms[1],k=Math.max(Math.abs(x-m.position.x)/(m.scale.x/2),Math.abs(z-m.position.z)/(m.scale.z/2));if(k<1){const bs=m.position.y-.1*m.scale.y,ap=m.position.y+.9*m.scale.y;h=Math.max(h,bs+(ap-bs)*(1-k))}}
+ return[h,b]}
 window.AIRFLOOR=v=>{const r=v.hv?1.6:2.2,[h,b]=roofAt(v.x,v.z,r);if(h>0&&(v.y||0)>=h-.35){v._roof=b;return h}v._roof=null;return 0};
 window.ROOFAT=roofAt;
 // prédio destruído: quem está em cima escorrega para a borda e cai
@@ -6815,7 +6817,7 @@ function beachLook(p,fem){const g=p.g,c=g.children;if(c.length<6)return;const sk
  [c[0],c[1]].forEach(l=>box(.28,fem?.16:.34,.28,col,0,fem?-.08:-.17,0,l));
  if(fem){box(.62,.13,.43,col,0,.48,0,g);box(.36,.42,.08,[0x3b2314,0x17110c,0xdcbc6a][(RR()*3)|0],0,.74,-.2,g)}else box(.62,.12,.42,col,0,-.06,0,g)}
 // andando ao longo da praia (trechos longos, cada um no seu)
-function beachWalk(p,dt){const b=p.bch;if(p.fl>0){p.bch=null;p.grp=null;return}
+function beachWalk(p,dt){const b=p.bch;if(p.fl>0){p.fl-=dt;p.grp=null;p.btx=null;const dx=p.x-P.x,dz=p.z-P.z,d=Math.hypot(dx,dz)||1;p.yaw=Math.atan2(dx,dz);p.x=Math.max(b.x0+2,Math.min(b.x1-2,p.x+dx/d*5.2*dt));p.z=Math.max(b.z0+2,Math.min(b.z1-2,p.z+dz/d*5.2*dt));return}
  if(p.grp){const g=p.grp;p.yaw=Math.atan2(g.x-p.x,g.z-p.z);return}
  if(p.btx==null||Math.hypot(p.btx-p.x,p.btz-p.z)<1){p.btx=Math.max(b.x0+4,Math.min(b.x1-4,p.x+(RR()<.5?-1:1)*(25+RR()*50)));p.btz=b.z0+5+RR()*(b.z1-b.z0-8)}
  const dx=p.btx-p.x,dz=p.btz-p.z;const want=Math.atan2(dx,dz);let df=want-p.yaw;df=Math.atan2(Math.sin(df),Math.cos(df));p.yaw+=Math.max(-2*dt,Math.min(2*dt,df));
@@ -6827,7 +6829,7 @@ function clearSand(x0,x1,z0,z1){const big=BIG().map(b=>[b.x0-3,b.x1+3,b.z0-3,b.z
  sc.traverse(o=>{if(!o.isInstancedMesh)return;let ch=false;for(let i=0;i<o.count;i++){o.getMatrixAt(i,M);M.decompose(pv,q,sv);if(pv.x>x0&&pv.x<x1&&pv.z>z0&&pv.z<z1&&pv.y>.25&&Math.max(sv.x,sv.z)<7&&!inBig(pv.x,pv.z)){o.setMatrixAt(i,Z);ch=true}}if(ch)o.instanceMatrix.needsUpdate=true})}
 try{clearSand(B.x0,B.x1,B.z0,B.z1);
  // lagos colados na praia: viram gramado
- const PD=window.PONDS||[];for(let i=PD.length-1;i>=0;i--){const q=PD[i];if(q[3]>B.z0-45){box(q[1]-q[0]+4,.1,q[3]-q[2]+4,0x48773c,(q[0]+q[1])/2,.09,(q[2]+q[3])/2);try{rc(q[0]-2,q[1]+2,q[2]-2,q[3]+2,'#4f8a45')}catch(e){}PD.splice(i,1)}}
+ const PD=window.PONDS||[];for(let i=PD.length-1;i>=0;i--){const q=PD[i];if(q[3]>B.z0-45){sc.remove(box(q[1]-q[0]+4,.1,q[3]-q[2]+4,0x48773c,(q[0]+q[1])/2,.09,(q[2]+q[3])/2))}}/* v46: o gramado que cobria os lagos da praia (e o minimapa) saiu; os lagos voltam */
  const G=new T.Group();sc.add(G);const S=(geo,col,x,y,z,sx,sy,sz)=>{const m=new T.Mesh(geo,mat(col));m.position.set(x,y,z);m.scale.set(sx,sy,sz);G.add(m);return m};
  for(let x=B.x0;x<B.x1;x+=30){const w=Math.min(30,B.x1-x);let h=0;try{h=Math.max(0,GRH(x+w/2,(B.z0+B.z1)/2))}catch(e){}S(BG,0xcfb27a,x+w/2,h+.05,(B.z0+B.z1)/2,w+.2,.1,B.z1-B.z0)}
  const cone=new T.ConeGeometry(1.6,.9,10),cyl=new T.CylinderGeometry(.06,.06,2.6,6);
@@ -7440,6 +7442,14 @@ function evChaseCar(){const ax=Math.random()<.5?'z':'x';let best=null;
   if(ev.t>1&&(Math.abs(ev.a)>215||(dist(po,P)>130&&(ev.a-along0)*dir>0))||ev.t>45)return false;return true};
  ev.abort=()=>{rmCar(cr);rmCar(po)};ev.end=ev.abort;ev.name='chasecar';return ev}
 
+
+// ---------------- braços para cima só quando está no ar (não quando está apoiado num telhado/morro) ----------------
+const _anP=anim;anim=function(o,sp,dt,h){_anP.apply(this,arguments);
+ if(o!==P||o.rag||!o.g||P.veh)return;const u=o.g.userData;
+ if(u&&u.aL&&u.aL.rotation.x===-2.6&&u.aR.rotation.x===-2.6&&P.y>1.2&&Math.abs(P.vy||0)<.6&&FZ.mode=='gnd'){const s=sp>.2?Math.sin(o.ph)*.8:0;u.aL.rotation.x=-s*.8;u.aR.rotation.x=s*.8}};
+// ---------------- bazuca: o foguete sai quase reto (antes herdava o ângulo da câmera, que olha de cima, e mergulhava no chão aos pés) ----------------
+const _lnR=launch;launch=function(k){_lnR(k);
+ if(k!='rpg'||!AIM)return;try{const g=gren[gren.length-1];if(g&&g.rk)g.vy=38*Math.tan(AP>0?AP:AP*.12)}catch(e){}};
 // ---------------- agendador: eventos raros, um por vez ----------------
 const KINDS=[['fight',evFight,1],['chat',evChat,1.3],['house',evHouse,1.6],['park',evPark,1],['chasefoot',evChaseFoot,1],['chasecar',evChaseCar,1]];
 function canRun(){if(PAUSED||P.dead>0||stars()>0||FZ.mode!='gnd'||(P.veh&&(P.veh.t=='plane'||P.veh.t=='heli'||P.veh.t=='boat'||P.veh.t=='tank'||P.veh.t=='train')))return false;try{if(inHouse(P)||(window.IN&&IN.prop!=null&&IN.in))return false}catch(e){}if(window.SH&&SH.on)return false;return true}
