@@ -204,6 +204,17 @@ O pill no topo da tela agora tem 2 linhas (3 quando há alerta):
 
 Os ganhos sobre o Remaster vêm do **LOD mesclado de carros/pedestres (Passo 7)**, do **pool/instancing de efeitos (Passo 5)** e do **cache de materiais (Passo 2)**; o agrupamento do mundo já era do v36.
 
+## v46 — vida na cidade (último bloco `gb`, `window.LIFE`)
+
+Pedido do usuário (jogabilidade, não otimização). Tudo no último bloco antes do boot; não altera o mapa (hash igual) nem o consumo de RNG semeado.
+
+- **Táxi:** `taxiTick` foi redefinido. Passageiro e destino saem de `LIFE.pickSW()` = ponto de **calçada** (linha `l±7,5`, `±10,5` na avenida z=0) em frente a um prédio (`front(b)`: porta na fachada, nunca no meio da rua nem em trecho de cruzamento, nunca dentro de `solids`). Raio de embarque/entrega 9,5 m.
+- **Motoristas veem você a pé:** o Remaster tinha "motorista distraído" (`_ds`, 40% de chance de ignorar o jogador a pé, bloco "ignora"/`DBG.dis`). Agora só existe por cheat (`DBG.dis`). O wrapper de `trafAI` no v46 freia, e se você não sair em ~2 s o carro **contorna** pelo lado (deslocamento lateral `_pb`, igual ao `_ov`; esconde `P` com `P.x=1e5` só durante a chamada interna). Folga lateral mínima ~2,8 m (menos que isso o carro "bate" no jogador e recebe impulso de `playerHit`).
+- **Pedestres desviam de você:** wrapper de `pedWalk` projeta o NPC para fora de um raio de 1,3 m do jogador com um pequeno passo tangencial (contorna em vez de empurrar). Ignora NPCs em reação (`rx/fl/ar/arg/evw/ctl/sm/swm/mg`), policiais hostis e o jogador em veículo.
+- **Evento de batida (EVC, bloco v21):** sem avisos na tela (os 3 `msg` foram removidos) e bem raro (primeiro 8–15 min; intervalos de 12–22 min).
+- **Eventos raros novos (`LIFE.force('nome')` para testar):** `fight` (briga), `chat` (conversa), `house` (NPC entra/sai de casa que **não** está à venda: `XPROP.PR[].m` a <30 m = à venda), `park` (carro estaciona junto à loja, motorista entra, volta e vai embora), `chasefoot` (polícia persegue NPC a pé), `chasecar` (viatura persegue carro). Um por vez, intervalo 130–320 s entre eventos, só com 0 estrela, jogador a pé/carro no chão e fora de casa. NPCs de evento são peds comuns com `p.lf=ev` (o wrapper de `pedWalk` chama `ev.drive`), removidos no fim sem repor (`kill`); se alguém sofre crime/tiro (`rag`/`fl`/`hp<=0`) o evento se dissolve e os NPCs voltam ao comportamento normal. Carros de evento têm `ev=1` (o `trafAI` os ignora) e se movem por cinemática própria.
+- **Câmera no parkour:** `fy` (altura de foco) só seguia o jogador acima de 2,4 m. Agora acompanha desde o início (`FZ.mode` `pk`/`climb`, ou em pé em altura >1,25 m), com suavização (9/s subindo, 3,5/s descendo). `FZ` não é global: use `window.TRAINDBG.FZ`.
+
 ## Gargalos conhecidos (ordem de gravidade)
 
 1. Draw calls ~250–330 em passeio normal (alvo no celular: 150–300); **picos em combate ~700–800** (era ~1.000–1.200), agora dominados por **pedestres/cops próximos (~20 meshes cada, ~400 calls com uma multidão a <24 m)** e por prédios danificados (saem do chunk). → mesclar o modelo *de perto* (Passos 7b/9).
