@@ -18,7 +18,7 @@ Servir `game.html` com `three.min.js` r128 (`npm pack three@0.128.0`; cdnjs é b
 0. **Contador:** `UPD`/`RND`/`ESP`, resolução e `b<hash>` aparecem; num celular, confira que o `b<hash>` é o do último commit antes de medir qualquer coisa.
 1. **Mapa idêntico:** hash de `solids` (x0,x1,z0,z1,h ×100, ordenado), posições de `peds` e `vehs` logo após carregar. Tem que bater com o Remaster. (Ver "Mapa fixo" abaixo.)
 2. **Zero `pageerror`** no carregamento e em ~900 frames de combate (tiros, granadas, foguetes, explosões, mortes, carros destruídos, prédios caindo, `V18.restoreWorld()`).
-3. **Menu e configurações:** `CFGUI.open()` lista 8 linhas e 19 opções (Textura, Resolução, Renderização, **Sangue**, **Gore**, Densidade, **Estilo Gráfico Cartoon/Realista**, Cheats); clicar cada opção altera `CFG` e grava `maua_cfg`; `#mnew`/`#mlod` visíveis; `MUS.mode==='menu'` e contexto de áudio `running`.
+3. **Menu e configurações:** `CFGUI.open()` lista 9 linhas e 21 opções (Textura, Resolução, Renderização, **Sangue**, **Gore**, Densidade, **Estilo Gráfico Cartoon/Realista**, **Contador de desempenho**, Cheats); clicar cada opção altera `CFG` e grava `maua_cfg`; `#mnew`/`#mlod` visíveis; `MUS.mode==='menu'` e contexto de áudio `running`.
 4. **Gore e sangue:** matar pedestres com `hurt()` e com tiro de espingarda (`shoot(W.shot)`) com Gore desligado/ligado cria os objetos esperados (pool + cena).
 5. **Sem contaminação de material:** nenhum material do cache (`MC`/`WMC`/`TMC`) com cor/opacidade/transparência/shader diferentes do original, e nenhum `InstancedMesh` com material do cache.
 6. **Comparação de pixels com o Remaster** (mesmos pontos de vista, LOD de entidades desligado: `LODC.pm=LODC.vm=1e9`): < 1% dos pixels com diferença >24.
@@ -221,6 +221,17 @@ Pedido do usuário (jogabilidade, não otimização). Tudo no último bloco ante
   - **Telhado das casas:** `roofAt` (bloco v42) devolvia só o topo da parede; casas `isH` têm telhado em pirâmide (`b.ms[1]`, cone de 4 lados). Agora o piso sobe pela inclinação (`base→ápice`), valendo também para helicóptero (`AIRFLOOR`).
   - **Braços para cima em telhado/morro:** o `anim` base levanta os braços se `o.y>1.2`; o wrapper do v46 desfaz quando o jogador está apoiado (`FZ.mode=='gnd'`, `|P.vy|<.6`).
   - **Bazuca:** em mira, o foguete herdava `tan(AP)` da câmera (que olha de cima) e mergulhava aos pés; agora sai quase reto (`AP>0` sobe; `AP<0` desce só 12%).
+
+- **3ª rodada de ajustes (v46):**
+  - **Contador de desempenho opcional:** nova linha em Configurações (`CFG.perf`, padrão **desligado**); `PERFHUD(0/1)` é aplicado ao carregar e ao clicar. Para medir no celular, ative a opção.
+  - **Mira manual:** `pickLock()` só trava helicóptero (alvos de solo não são mais travados); no modo mira e no drive-by `window.__NOAS=1` faz o `shoot` base acertar só o que está na linha do tiro (distância lateral < raio do alvo). Drive-by atira para onde a câmera aponta (`camAng()`). A bazuca em mira sai quase reta (sobe com `AP>0`).
+  - **Polícia:** helicóptero do mar nasce na delegacia (`-125,-67`) e voa até você; piloto tem vida (`h.ph`=170, `HELIAPPLY`); policial na água não atira (`copAI` wrapper e elite); a 3 estrelas as viaturas despachadas são pretas (`0x14161b`) ou o caminhão `swat` (que desce **4** policiais); entrar numa viatura sem motorista não faz sair outro policial (`takeover` ignora `nodrv/_out`); policiais e NPCs em fuga podem ir até a areia (limite de 320 → 460 no laço de peds).
+  - **Granada:** NPCs e policiais num raio de 17 m de uma granada no ar fogem dela (`p._gf`).
+  - **Aeronaves:** sem parede invisível (limites antigos ±365/±420 e teto 90/100 removidos). Fora de |x|,|z|>400 ou y>150 o motor falha (`v._fl`), a aeronave cai girando e explode no chão/água; aviso a 375 m / 130 m.
+  - **Tubarão:** só ataca a >130 m da costa (antes 70); o jogador a nado pode ir até ±600 (antes ±450).
+  - **Lagos da praia:** os lagos perto da areia (`PONDS` com `z>283`) saem de verdade (decalques do `XINST` zerados, minimapa repintado, física removida) e até 6 deles são recriados em outro canto do mapa (`PONDMOVE`, fora da cidade e longe de prédios/pista).
+  - **Placas:** cada plano de texto em canvas com `DoubleSide` vira `FrontSide` + uma cópia virada para trás (não aparece mais espelhado).
+  - **Áudio:** `scream`/`snd('scream')` agora são vozes com formantes, vibrato e respiração (grito e "ai"); sirene `wail2` suave (triângulo/senoide com curva de frequência e reverb); `blip` não usa mais onda quadrada; sirene da ambulância e `chime/fanfare` sem quadrada.
 
 ## Gargalos conhecidos (ordem de gravidade)
 
