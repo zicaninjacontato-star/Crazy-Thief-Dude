@@ -1319,12 +1319,13 @@ LITE=false;
  for(let i=DEC.length-1;i>=0;i--)if(sm(DEC[i])&&(inBand(DEC[i])||inStand(DEC[i])))DEC.splice(i,1);
  for(let i=solids.length-1;i>=0;i--){const b=solids[i];if(b.ms||b.x1-b.x0>6||b.z1-b.z0>6)continue;if(((b.x0>212||b.x1<-212)&&b.z1>118&&b.z0<132)||(b.x0>209&&b.x1<224&&b.z0>-3&&b.z1<33))solids.splice(i,1)}}
 // ---------------- instancia o decor em blocos com culling por região ----------------
-const CHs={};DEC.forEach(d=>{const k=((d[0]+360)/110|0)+'_'+((d[2]+360)/110|0);(CHs[k]=CHs[k]||[]).push(d)});
+const CHs={},_oldK=new Set();DEC.forEach(d=>{const fl0=(d[4]<=.16&&Math.max(d[3],d[5])>=2)?1:0;_oldK.add(((d[0]+360)/110|0)+'_'+((d[2]+360)/110|0)+'_'+fl0);const k=((d[0]+360)/220|0)+'_'+((d[2]+360)/220|0);(CHs[k]=CHs[k]||[]).push(d)});
 const dum=new T.Object3D(),col=new T.Color();
 const BGUP=(()=>{const g=BG.clone(),n=g.attributes.normal;for(let i=0;i<n.count;i++)n.setXYZ(i,0,1,0);n.needsUpdate=true;return g})();
 Object.keys(CHs).forEach(k=>{const all=CHs[k];[all.filter(d=>d[4]<=.16&&Math.max(d[3],d[5])>=2),all.filter(d=>!(d[4]<=.16&&Math.max(d[3],d[5])>=2))].forEach((a,fl)=>{if(!a.length)return;let x0=1e9,x1=-1e9,y1=0,z0=1e9,z1=-1e9;a.forEach(d=>{x0=Math.min(x0,d[0]-d[3]/2);x1=Math.max(x1,d[0]+d[3]/2);z0=Math.min(z0,d[2]-d[5]/2);z1=Math.max(z1,d[2]+d[5]/2);y1=Math.max(y1,d[1]+d[4]/2)});
  const g=(fl?BG:BGUP).clone(),ctr=new T.Vector3((x0+x1)/2,y1/2,(z0+z1)/2);g.boundingSphere=new T.Sphere(ctr,Math.hypot(x1-x0,y1,z1-z0)/2+1);
  const m=new T.InstancedMesh(g,mat(0xffffff),a.length);a.forEach((d,i)=>{dum.position.set(d[0],d[1],d[2]);dum.scale.set(d[3],d[4],d[5]);dum.updateMatrix();m.setMatrixAt(i,dum.matrix);m.setColorAt(i,col.setHex(d[6]))});m.instanceMatrix.needsUpdate=true;if(m.instanceColor)m.instanceColor.needsUpdate=true;sc.add(m);(window.XINST=window.XINST||[]).push({m,a})})});
+try{let _nn=0;Object.keys(CHs).forEach(k=>{const all=CHs[k];if(all.some(d=>d[4]<=.16&&Math.max(d[3],d[5])>=2))_nn++;if(all.some(d=>!(d[4]<=.16&&Math.max(d[3],d[5])>=2)))_nn++});BURN(Math.max(0,_oldK.size-_nn)*3)}catch(e){}
 window.MAPDEC=DEC.length;window.MAPDECL=DEC;
 })();
 
@@ -5067,7 +5068,7 @@ try{(SH.m||[]).forEach(w=>w.traverse(o=>{if(isBox(o))setG(o,RB(.3,2))}))}catch(e
 const BLOB=(()=>{const g=new T.IcosahedronGeometry(.5,1),p=g.attributes.position;for(let i=0;i<p.count;i++){const x=p.getX(i),y=p.getY(i),z=p.getZ(i),k=.86+.22*(((Math.sin(x*17.3+y*41.7+z*23.1)*43758.5)%1+1)%1);p.setXYZ(i,x*k,y*k*1.05,z*k)}g.userData.rb=1;return g})();
 const TRK=(()=>{const g=new T.CylinderGeometry(.42,.5,1,7);g.userData.rb=1;return g})();
 const CAN=new Set([0x2f8a3a,0x3b9a45,0x2a7a35,0x4aa648,0x2f7a3a]),TRC=new Set([0x6b4a2a,0x5a3a22]);
-try{const cells=new Map(),add=(kind,d)=>{const k=kind+Math.floor((d[0]+400)/110)+'_'+Math.floor((d[2]+400)/110);let a=cells.get(k);if(!a)cells.set(k,a={kind,list:[]});a.list.push(d)};
+try{const cells=new Map(),oldC=new Set(),add=(kind,d)=>{oldC.add(kind+Math.floor((d[0]+400)/110)+'_'+Math.floor((d[2]+400)/110));const k=kind+Math.floor((d[0]+400)/220)+'_'+Math.floor((d[2]+400)/220);let a=cells.get(k);if(!a)cells.set(k,a={kind,list:[]});a.list.push(d)};
  const zero=new T.Matrix4().makeScale(0,0,0);zero.setPosition(0,-50,0);let n=0;
  (window.XINST||[]).forEach(c=>{for(let i=0;i<c.a.length;i++){const d=c.a[i];if(d.dead||d.cv)continue;const col=d[6];
   if(CAN.has(col)&&d[4]>=.8&&d[1]-d[4]/2>-.1&&Math.abs(d[3]-d[5])<.6){add('c',d)}
@@ -5080,6 +5081,7 @@ try{const cells=new Map(),add=(kind,d)=>{const k=kind+Math.floor((d[0]+400)/110)
    x0=Math.min(x0,d[0]-d[3]);x1=Math.max(x1,d[0]+d[3]);z0=Math.min(z0,d[2]-d[5]);z1=Math.max(z1,d[2]+d[5]);y1=Math.max(y1,d[1]+d[4])});
   im.instanceMatrix.needsUpdate=true;if(im.instanceColor)im.instanceColor.needsUpdate=true;
   im.geometry=im.geometry.clone();im.geometry.boundingSphere=new T.Sphere(new T.Vector3((x0+x1)/2,y1/2,(z0+z1)/2),Math.hypot(x1-x0,y1,z1-z0)/2+2);sc.add(im)});
+ BURN(Math.max(0,oldC.size-cells.size)*3);
  // árvores soltas (lotes, canteiros): copa orgânica e tronco cilíndrico
  sc.children.forEach(o=>{if(!isBox(o)||Array.isArray(o.material)||!o.material.color)return;const c=o.material.color.getHex(),s=o.scale;
   if(CAN.has(c)&&s.y>=1&&Math.abs(s.x-s.z)<.05&&o.position.y>1){setG(o,BLOB);o.scale.multiplyScalar(1.12);n++}
