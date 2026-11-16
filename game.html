@@ -7597,13 +7597,13 @@ try{const KEEP=[[-125,27],[175,-75]],P2=window.PONDS||[],XI=window.XINST||[],rm=
    const th=2.8+Math.random()*1.4,cw=3.4+Math.random()*1.4;box(.9,th,.9,0x6b4a2a,x,th/2,z);box(cw,cw*.9,cw,[0x2f8a3a,0x3b9a45,0x2a7a35,0x4aa648][k&3],x,th+cw*.4,z);solids.push({x0:x-.5,x1:x+.5,z0:z-.5,z1:z+.5,h:th});nt++}}
  // piscinas pequenas em algumas casas
  const hs=solids.filter(b=>b.isH&&b.ms&&b.hp>0&&!b.fall&&b.x1-b.x0>=7).sort(()=>Math.random()-.5);let np=0;
- const okPool=(sx,sz,w,d)=>{if(Math.abs(sx)>335||Math.abs(sz)>335)return false;try{if(inLK(sx,sz,6))return false}catch(e){}
-  if(Math.min(...L.map(l=>Math.abs(sx-l)))<w/2+9||Math.min(...L.map(l=>Math.abs(sz-l)))<d/2+9)return false;
-  const Q=window.SGQ?SGQ(sx-w/2-1.5,sx+w/2+1.5,sz-d/2-1.5,sz+d/2+1.5,SQ3):solids;for(const b of Q)if(b.h>.3&&b.x1>sx-w/2-1.5&&b.x0<sx+w/2+1.5&&b.z1>sz-d/2-1.5&&b.z0<sz+d/2+1.5)return false;
+ const gOK=(sx,sz,w,d)=>{try{const m=1.8,x0=Math.floor(350-(sx+w/2+m)),z0=Math.floor(350-(sz+d/2+m)),ww=Math.ceil(w+2*m)+1,hh=Math.ceil(d+2*m)+1;if(x0<0||z0<0||x0+ww>700||z0+hh>700)return false;const im=bgc.getContext('2d').getImageData(x0,z0,ww,hh).data;for(let i=0;i<im.length;i+=4){const r=im[i],g=im[i+1],bb=im[i+2];if(!(g>r+12&&g>bb+22))return false}return true}catch(e){return false}};
+ const okPool=(sx,sz,w,d)=>{if(Math.abs(sx)>215||Math.abs(sz)>215||!gOK(sx,sz,w,d))return false;if(Math.min(...L.map(l=>Math.abs(sx-l)))<w/2+8||Math.min(...L.map(l=>Math.abs(sz-l)))<d/2+8)return false;try{if(inLK(sx,sz,6))return false}catch(e){}
+  const Q=window.SGQ?SGQ(sx-w/2-.6,sx+w/2+.6,sz-d/2-.6,sz+d/2+.6,SQ3):solids;for(const b of Q)if(b.h>.3&&b.x1>sx-w/2-.6&&b.x0<sx+w/2+.6&&b.z1>sz-d/2-.6&&b.z0<sz+d/2+.6)return false;
   for(const c of XI)for(const e of c.a){if(e.dead||e[4]<.25)continue;if(e[0]>sx-w/2-1&&e[0]<sx+w/2+1&&e[2]>sz-d/2-1&&e[2]<sz+d/2+1)return false}
   if(P2.some(r=>sx>r[0]-3&&sx<r[1]+3&&sz>r[2]-3&&sz<r[3]+3))return false;return true};
- for(const b of hs){if(np>=8)break;const cx=(b.x0+b.x1)/2,cz=(b.z0+b.z1)/2,w=5.8,d=3.4;
-  for(const[sx,sz]of[[b.x1+2.5+w/2,cz],[b.x0-2.5-w/2,cz],[cx,b.z1+2.5+d/2],[cx,b.z0-2.5-d/2]]){if(!okPool(sx,sz,w,d))continue;
+ for(const b of hs){if(np>=8)break;const cx=(b.x0+b.x1)/2,cz=(b.z0+b.z1)/2,g0=2.3;
+  for(const[sx,sz,w,d]of[...[3.4,-3.4].flatMap(o=>[[b.x1+g0+1.5,cz+o,3,3.8],[b.x0-g0-1.5,cz+o,3,3.8],[cx+o,b.z1+g0+1.5,3.8,3],[cx+o,b.z0-g0-1.5,3.8,3]])]){if(!okPool(sx,sz,w,d))continue;
    box(w+1.2,.1,d+1.2,0xe8e8e8,sx,.05,sz);box(w,.12,d,0x45b0e8,sx,.07,sz);P2.push([sx-w/2,sx+w/2,sz-d/2,sz+d/2]);try{rc(sx-w/2-.5,sx+w/2+.5,sz-d/2-.5,sz+d/2+.5,'#45b0e8')}catch(e){}np++;break}}
  console.log('v46 lagos: removidos',rm.length,'árvores plantadas',nt,'piscinas',np,'lagoas mantidas',P2.filter(r=>r[3]<250).length)}catch(e){console.log('v46 lagos2',e)}
 // ---------------- ilha selvagem no mar (leste): 4 áreas, cada uma com um tipo de animal ----------------
@@ -7707,7 +7707,16 @@ const _miniI=mini;mini=function(){_miniI();try{if(Math.hypot(P.x-ISL.x,P.z-ISL.z
   const zcol={bear:'#2f5a3a',jag:'#2f8a3a',pig:'#8fb04a',deer:'#4aa648'};for(const k in ZN){const q=ZN[k];mc.fillStyle=zcol[k];mc.beginPath();mc.arc(350-(ISL.x+q.dx),350-(ISL.z+q.dz),q.r,0,7);mc.fill()}
   mc.fillStyle='#3a8fd0';for(const q of(window.PONDS||[])){if(Math.hypot((q[0]+q[1])/2-ISL.x,(q[2]+q[3])/2-ISL.z)<ISL.r)mc.fillRect(350-q[1],350-q[3],q[1]-q[0],q[3]-q[2])}
   mc.fillStyle='#fff';mc.font='bold 14px sans-serif';mc.textAlign='center';mc.fillText('🐻',350-(ISL.x+ZN.bear.dx),350-(ISL.z+ZN.bear.dz)+5);mc.fillText('🐆',350-(ISL.x+ZN.jag.dx),350-(ISL.z+ZN.jag.dz)+5);mc.fillText('🐖',350-(ISL.x+ZN.pig.dx),350-(ISL.z+ZN.pig.dz)+5);mc.fillText('🦌',350-(ISL.x+ZN.deer.dx),350-(ISL.z+ZN.deer.dz)+5);
-  mc.restore()}catch(e){try{mc.restore()}catch(e2){}}};
+  mc.restore();mc.fillStyle='#fff';mc.beginPath();mc.moveTo(55,47);mc.lineTo(60,62);mc.lineTo(50,62);mc.fill()}catch(e){try{mc.restore()}catch(e2){}}};
+// ---------------- trem: começa parado na 1ª estação (antes nascia no campo, x=-300) ----------------
+try{const TN=window.TRAINDBG.TN,ST=window.TRAINDBG.STN;if(TN&&ST&&TN.mode=='run'&&TN.si==0&&TN.x<=-299){TN.x=ST[0].x;TN.v=0;TN.mode='dwell';TN.st=0;TN.t=12;TN.doors=false}}catch(e){console.log('v46 trem',e)}
+// ---------------- ilha no mapa do menu de pausa (por baixo da seta do jogador) ----------------
+const _dmI=drawMap;drawMap=function(){_dmI();try{const c=mx2;c.save();c.translate(mcv.width/2,mcv.height/2);c.scale(msc,msc);c.translate(-(350-mxv),-(350-mzv));
+  const X=350-ISL.x,Z=350-ISL.z;c.fillStyle='#2f7fc4';c.fillRect(-900,-420,900-0,1540);c.beginPath();c.arc(X,Z,ISL.r+70,0,7);c.fill();c.fillStyle='#d9c08a';c.beginPath();c.arc(X,Z,ISL.r,0,7);c.fill();c.fillStyle='#4f8a45';c.beginPath();c.arc(X,Z,ISL.r*.8,0,7);c.fill();
+  const zcol={bear:'#2f5a3a',jag:'#2f8a3a',pig:'#8fb04a',deer:'#4aa648'};for(const k in ZN){const q=ZN[k];c.fillStyle=zcol[k];c.beginPath();c.arc(350-(ISL.x+q.dx),350-(ISL.z+q.dz),q.r,0,7);c.fill()}
+  c.fillStyle='#3a8fd0';for(const q of(window.PONDS||[])){if(Math.hypot((q[0]+q[1])/2-ISL.x,(q[2]+q[3])/2-ISL.z)<ISL.r)c.fillRect(350-q[1],350-q[3],q[1]-q[0],q[3]-q[2])}
+  c.font=(24/msc)+'px sans-serif';c.textAlign='center';c.fillStyle='#fff';for(const[k,e]of[['bear','🐻'],['jag','🐆'],['pig','🐖'],['deer','🦌']])c.fillText(e,350-(ISL.x+ZN[k].dx),350-(ISL.z+ZN[k].dz)+8/msc);
+  c.translate(350-P.x,350-P.z);c.rotate(-P.yaw);c.fillStyle='#fff';c.beginPath();c.moveTo(0,-12/msc);c.lineTo(8/msc,9/msc);c.lineTo(-8/msc,9/msc);c.fill();c.restore()}catch(e){try{mx2.restore()}catch(e2){}}};
 // ---------------- agendador: eventos raros, um por vez ----------------
 const KINDS=[['fight',evFight,1],['chat',evChat,1.3],['house',evHouse,1.6],['park',evPark,1],['chasefoot',evChaseFoot,1],['chasecar',evChaseCar,1]];
 function canRun(){if(PAUSED||P.dead>0||stars()>0||FZ.mode!='gnd'||(P.veh&&(P.veh.t=='plane'||P.veh.t=='heli'||P.veh.t=='boat'||P.veh.t=='tank'||P.veh.t=='train')))return false;try{if(inHouse(P)||inZone())return false}catch(e){}if(window.SH&&SH.on)return false;return true}

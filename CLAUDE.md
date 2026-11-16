@@ -252,6 +252,8 @@ Pedido do usuário (jogabilidade, não otimização). Tudo no último bloco ante
   - **Aeronave que cai** mata o jogador (`hurtP(500)`, ejetado; com cheat `GOD` ele sobrevive de propósito).
   - Não foi reproduzido: aeronave atropelando NPCs em voo (o código base exclui `t=='plane'`).
 
+- **6ª rodada (v46):** ilha também no mapa do menu de pausa (`drawMap` wrapper, sem tocar `bgc`; mar azul à direita de x=350) e seta do jogador redesenhada por cima da ilha no minimapa e no mapa. Piscinas só dentro da cidade (|x|,|z|<215), longe das linhas `L`, e só onde o `bgc` ao redor é gramado (`gOK`: ruas externas **não** estão no `bgc`, por isso nada fora da grade); ao lado do muro da casa, deslocadas do centro (porta). Trem agora nasce parado na 1ª estação (antes em x=-300); a lógica já ia só de Porto Moll (-280) a Vila Moll (125) e voltava (conferido por simulação de 33 min).
+
 ## Gargalos conhecidos (ordem de gravidade)
 
 1. Draw calls ~250–330 em passeio normal (alvo no celular: 150–300); **picos em combate ~700–800** (era ~1.000–1.200), agora dominados por **pedestres/cops próximos (~20 meshes cada, ~400 calls com uma multidão a <24 m)** e por prédios danificados (saem do chunk). → mesclar o modelo *de perto* (Passos 7b/9).
