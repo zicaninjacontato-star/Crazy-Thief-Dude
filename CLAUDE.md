@@ -16,7 +16,7 @@
 Servir `game.html` com `three.min.js` r128 (`npm pack three@0.128.0`; cdnjs é bloqueado no sandbox) e rodar no Chromium/Playwright (`--use-gl=swiftshader`), clicar `#bj`, esperar ~26 s. Comparar **sempre** com o Remaster puro (`git show origin/ccr-58105d15-gky879:game.html`), nos dois estilos (`localStorage.maua_cfg='{"gfx":0}'` = cartoon; padrão = realista):
 
 0. **Contador:** `UPD`/`RND`/`ESP`, resolução e `b<hash>` aparecem; num celular, confira que o `b<hash>` é o do último commit antes de medir qualquer coisa.
-1. **Mapa idêntico:** hash de `solids` (x0,x1,z0,z1,h ×100, ordenado), posições de `peds` e `vehs` logo após carregar. Tem que bater com o Remaster **fora das mudanças pedidas pelo usuário** (parque no lugar da montanha com estrada, ilha dos animais, lagos recolocados e árvores/solids a elas ligados): compare excluindo `peds.an` e os solids a <75 m da ilha (560,-110) e do parque (150,-294); o resto (`vehs`, `peds`, ~1.590 de 1.605 solids) tem que ser igual. (Ver "Mapa fixo" abaixo.)
+1. **Mapa idêntico:** hash de `solids` (x0,x1,z0,z1,h ×100, ordenado), posições de `peds` e `vehs` logo após carregar. Tem que bater com o Remaster **fora das mudanças pedidas pelo usuário** (parque no lugar da montanha com estrada, ilha dos animais, lagos recolocados e árvores/solids a elas ligados): compare excluindo `peds.an`, os solids a <135 m da ilha (560,-110), do parque (150,-294) e as árvores/piscinas plantadas no lugar dos lagos; o resto (`vehs`, `peds`, ~1.590 de 1.605 solids) tem que ser igual. (Ver "Mapa fixo" abaixo.)
 2. **Zero `pageerror`** no carregamento e em ~900 frames de combate (tiros, granadas, foguetes, explosões, mortes, carros destruídos, prédios caindo, `V18.restoreWorld()`).
 3. **Menu e configurações:** `CFGUI.open()` lista 9 linhas e 21 opções (Textura, Resolução, Renderização, **Sangue**, **Gore**, Densidade, **Estilo Gráfico Cartoon/Realista**, **Contador de desempenho**, Cheats); clicar cada opção altera `CFG` e grava `maua_cfg`; `#mnew`/`#mlod` visíveis; `MUS.mode==='menu'` e contexto de áudio `running`.
 4. **Gore e sangue:** matar pedestres com `hurt()` e com tiro de espingarda (`shoot(W.shot)`) com Gore desligado/ligado cria os objetos esperados (pool + cena).
@@ -244,6 +244,13 @@ Pedido do usuário (jogabilidade, não otimização). Tudo no último bloco ante
   - **Montanha com estrada:** `F.mts` com `road` ganham `H=0,crag=0,flat=1` (o RNG continua igual); no lugar fica um parque (praça, fonte, árvores com colisão) e 2 prédios `bld()`. Sobrou 1 montanha livre sem estrada quando existir.
   - **Ilha selvagem (`window.ISL`, x 560, z −110, r 58):** disco de areia/grama + 45 árvores + pedras; a física de terra firme vem de faixas em `ARN` (`isl=1`). Animais são peds (`p.an`: urso, onça, porco, veado) com modelo de caixas (`mkAnimal`) e IA própria (`anDrive`); urso/onça atacam a pé na ilha, porco/veado fogem; `crime()` é ignorado a <98 m da ilha; `civ()` (densidade) ignora `p.an/p.lf`; limite do laço de peds 720; o jogador a pé vai até ±720 perto da ilha; o tubarão não ataca a <128 m dela. Reposição de animais quando o jogador está a >148 m.
   - **Futebol:** cada tempo tem 1:50 (`FB.t=110`).
+
+- **5ª rodada (v46):**
+  - **Fuga de motoristas** (tiroteio): `vrxTick` limita `S[t].m` a 58% enquanto foge; `_vfl` usa 1,05×/0,72× em vez de 1,7×/1,2×.
+  - **Lagos:** só 2 lagoas (parques em lotes `lagoon`, em (−125,27) e (175,−75)) sobraram; os outros `PONDS` perderam decalques (`XINST`), física e minimapa e viraram árvores com colisão; 8 casas (`isH`) ganharam piscina pequena (5,8×3,4, nadável). O recoloca-lagos da rodada anterior foi desligado (`PM=[]`).
+  - **Ilha (r=125):** 4 áreas (`ZN`): ursos (caverna, lago, pinheiros), onças (selva, troncos, pedras), porcos (pasto, cercado, feno, poça), veados (campo e lago). Animais ficam na própria área ao vagar; sem parede invisível (limite só na borda real da ilha); ao perseguir têm coleira (`leash`: urso 50 m, onça 62 m da área, ou 14 s) e depois voltam e ignoram o jogador por 12 s. Ilha aparece no minimapa (`mini` wrapper). Animais usam `p.mg=1`, `_wm=1` e `CFG.gore` é zerado durante o `hurt` deles (sem membros arrancados). Sons próprios (`asnd`: urso, onça, porco, veado); `scream()` ignora animais.
+  - **Aeronave que cai** mata o jogador (`hurtP(500)`, ejetado; com cheat `GOD` ele sobrevive de propósito).
+  - Não foi reproduzido: aeronave atropelando NPCs em voo (o código base exclui `t=='plane'`).
 
 ## Gargalos conhecidos (ordem de gravidade)
 
