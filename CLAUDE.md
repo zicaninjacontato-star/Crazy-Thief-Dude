@@ -16,7 +16,7 @@
 Servir `game.html` com `three.min.js` r128 (`npm pack three@0.128.0`; cdnjs é bloqueado no sandbox) e rodar no Chromium/Playwright (`--use-gl=swiftshader`), clicar `#bj`, esperar ~26 s. Comparar **sempre** com o Remaster puro (`git show origin/ccr-58105d15-gky879:game.html`), nos dois estilos (`localStorage.maua_cfg='{"gfx":0}'` = cartoon; padrão = realista):
 
 0. **Contador:** `UPD`/`RND`/`ESP`, resolução e `b<hash>` aparecem; num celular, confira que o `b<hash>` é o do último commit antes de medir qualquer coisa.
-1. **Mapa idêntico:** hash de `solids` (x0,x1,z0,z1,h ×100, ordenado), posições de `peds` e `vehs` logo após carregar. Tem que bater com o Remaster. (Ver "Mapa fixo" abaixo.)
+1. **Mapa idêntico:** hash de `solids` (x0,x1,z0,z1,h ×100, ordenado), posições de `peds` e `vehs` logo após carregar. Tem que bater com o Remaster **fora das mudanças pedidas pelo usuário** (parque no lugar da montanha com estrada, ilha dos animais, lagos recolocados e árvores/solids a elas ligados): compare excluindo `peds.an` e os solids a <75 m da ilha (560,-110) e do parque (150,-294); o resto (`vehs`, `peds`, ~1.590 de 1.605 solids) tem que ser igual. (Ver "Mapa fixo" abaixo.)
 2. **Zero `pageerror`** no carregamento e em ~900 frames de combate (tiros, granadas, foguetes, explosões, mortes, carros destruídos, prédios caindo, `V18.restoreWorld()`).
 3. **Menu e configurações:** `CFGUI.open()` lista 9 linhas e 21 opções (Textura, Resolução, Renderização, **Sangue**, **Gore**, Densidade, **Estilo Gráfico Cartoon/Realista**, **Contador de desempenho**, Cheats); clicar cada opção altera `CFG` e grava `maua_cfg`; `#mnew`/`#mlod` visíveis; `MUS.mode==='menu'` e contexto de áudio `running`.
 4. **Gore e sangue:** matar pedestres com `hurt()` e com tiro de espingarda (`shoot(W.shot)`) com Gore desligado/ligado cria os objetos esperados (pool + cena).
@@ -232,6 +232,18 @@ Pedido do usuário (jogabilidade, não otimização). Tudo no último bloco ante
   - **Lagos da praia:** os lagos perto da areia (`PONDS` com `z>283`) saem de verdade (decalques do `XINST` zerados, minimapa repintado, física removida) e até 6 deles são recriados em outro canto do mapa (`PONDMOVE`, fora da cidade e longe de prédios/pista).
   - **Placas:** cada plano de texto em canvas com `DoubleSide` vira `FrontSide` + uma cópia virada para trás (não aparece mais espelhado).
   - **Áudio:** `scream`/`snd('scream')` agora são vozes com formantes, vibrato e respiração (grito e "ai"); sirene `wail2` suave (triângulo/senoide com curva de frequência e reverb); `blip` não usa mais onda quadrada; sirene da ambulância e `chime/fanfare` sem quadrada.
+
+- **4ª rodada (v46):**
+  - **Armas:** `AIM`/`AP` são locais do bloco v11d — de fora use `window.AIMST()` e `window.CAMPITCH()` (um `ReferenceError` ali quebrava `launch`: o RPG não recarregava). A animação de recarga (v48 §9) zerava a posição do RPG (que é filho do corpo): agora `cur=='rpg'` volta a `(.32,.66,.1)`.
+  - **Drive-by:** a mira (`#ret`) aparece enquanto o botão 🔫 está pressionado e o tiro vai na direção real da câmera (`cam.getWorldDirection`).
+  - **Tiros no alto:** `tracer` global agora usa a altura do atirador (`P.y+.4`) e do alvo (`GRH+1.3`); erro = horizontal.
+  - **Natação:** `swimNoGun` força `cur='fist'` enquanto `FZ.mode=='swim'` e restaura a arma ao sair.
+  - **Barco da polícia:** ao entrar numa lancha policial com policial (`v.pboat && v.npcd`) começa um QTE (4 botões, 1,9 s cada, `#q46`); acertar derruba o policial (SINK: arco, splash, afunda e some), errar leva 18 de dano e joga o jogador na água.
+  - **Chão invisível no mar:** `window.ARN` (interiores dos imóveis a oeste, garagem, arenas de minigame) fazia `waterAt` virar "terra" em retângulos grandes do mar (ex.: x −460..−335, z −140..424). `ARN.some` agora só considera retângulos do mar quando `inZone()` (`MGACT`, `XPROP.IN.prop>=0` ou `V45.G6.inHall`); retângulos em terra e os da ilha (`a.isl`) valem sempre.
+  - **Aeronaves caindo:** `AIRFLOOR` inclui o terreno (`GRH`); com o cheat `GOD` o `dmgV` bloqueava a morte do veículo do jogador e a aeronave atravessava o chão — agora `GOD` é suspenso só durante a queda (`v._fl`) e há morte forçada.
+  - **Montanha com estrada:** `F.mts` com `road` ganham `H=0,crag=0,flat=1` (o RNG continua igual); no lugar fica um parque (praça, fonte, árvores com colisão) e 2 prédios `bld()`. Sobrou 1 montanha livre sem estrada quando existir.
+  - **Ilha selvagem (`window.ISL`, x 560, z −110, r 58):** disco de areia/grama + 45 árvores + pedras; a física de terra firme vem de faixas em `ARN` (`isl=1`). Animais são peds (`p.an`: urso, onça, porco, veado) com modelo de caixas (`mkAnimal`) e IA própria (`anDrive`); urso/onça atacam a pé na ilha, porco/veado fogem; `crime()` é ignorado a <98 m da ilha; `civ()` (densidade) ignora `p.an/p.lf`; limite do laço de peds 720; o jogador a pé vai até ±720 perto da ilha; o tubarão não ataca a <128 m dela. Reposição de animais quando o jogador está a >148 m.
+  - **Futebol:** cada tempo tem 1:50 (`FB.t=110`).
 
 ## Gargalos conhecidos (ordem de gravidade)
 
