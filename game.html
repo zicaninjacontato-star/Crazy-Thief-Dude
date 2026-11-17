@@ -6664,12 +6664,13 @@ function buildHall(){if(hallBuilt)return;hallBuilt=1;const g=new T.Group();sc.ad
  const sm=new T.Mesh(new T.PlaneGeometry(6,1.2),new T.MeshBasicMaterial({map:(()=>{const c=document.createElement('canvas');c.width=512;c.height=100;const x=c.getContext('2d');x.fillStyle='#1b2a3a';x.fillRect(0,0,512,100);x.fillStyle='#ffd23a';x.font='bold 56px system-ui';x.textAlign='center';x.fillText('🅿️ GARAGEM',256,70);return new T.CanvasTexture(c)})()}));sm.position.set(HX,4.3,HZ-HD+.45);g.add(sm)}
 // portas das garagens (fora): ao lado de cada apartamento de luxo
 function sideSpot(p){const e=p.ext;if(!e)return null;const fx=Math.sin(e.yaw||0),fz=Math.cos(e.yaw||0),rx=fz,rz=-fx;
- for(const bk of[4,8,0,12])for(const s of[1,-1])for(const off of[11,14,17,20,24,28]){const cx=e.x+rx*off*s-fx*bk,cz=e.z+rz*off*s-fz*bk;// recuado da rua
+ // v46: a porta da garagem olha para a RUA (fx,fz apontam da rua para a casa; antes a porta ficava virada para dentro do lote)
+ for(const bk of[4,8,0,12,-4,-8,-12])for(const s of[1,-1])for(const off of[11,14,17,20,24,28]){const cx=e.x+rx*off*s+fx*bk,cz=e.z+rz*off*s+fz*bk;// recuado em relação à rua
   const hw=Math.abs(rx)*4.5+Math.abs(fx)*4,hd=Math.abs(rz)*4.5+Math.abs(fz)*4;
   if(solids.some(b=>b.h>.25&&b.x1>cx-hw-1&&b.x0<cx+hw+1&&b.z1>cz-hd-1&&b.z0<cz+hd+1))continue;
   if((V43.OBST||[]).some(o=>o[1]>cx-hw&&o[0]<cx+hw&&o[3]>cz-hd&&o[2]<cz+hd))continue;
   try{if(XV.wat(cx,cz)||Math.abs(GRH(cx,cz))>.4)continue}catch(e){}
-  return{cx,cz,hw,hd,fx,fz,dx:cx+fx*5.2,dz:cz+fz*5.2,yaw:e.yaw||0}}return null}
+  return{cx,cz,hw,hd,fx,fz,dx:cx-fx*5.2,dz:cz-fz*5.2,yaw:(e.yaw||0)+Math.PI}}return null}
 for(const p of PR){if(p.k!='aptoL'||!p.m)continue;try{const s=sideSpot(p);if(!s){console.log('v45: sem lugar para garagem',p.id);continue}
   const g=new T.Group();g.position.set(s.cx,0,s.cz);g.rotation.y=s.yaw;const B=(w,h,d,c,x,y,z)=>box(w,h,d,c,x,y,z,g);
   B(9,4.2,8,0x6b7280,0,2.1,0);B(9.4,.35,8.4,0x20242c,0,4.35,0);B(6.4,3.4,.14,0xb9bec7,0,1.7,4.02);for(let i=0;i<5;i++)B(6.42,.08,.16,0x8a9099,0,.5+i*.65,4.04);
@@ -7573,17 +7574,35 @@ function sinkTick(dt){for(let i=SINK.length-1;i>=0;i--){const q=SINK[i];q.t+=dt;
 function boatQteTick(dt){const v=P.veh;
  if(LF.qte){const Q=LF.qte;if(!v||v!==Q.v||P.dead>0){qteEnd(false);return}v.sp=0;Q.t+=dt;q46bar.style.transform='scaleX('+Math.max(0,1-Q.t/Q.tl)+')';if(Q.t>Q.tl){qteEnd(false)}return}
  if(v&&v.pboat&&v.npcd&&!v._qd&&!v.dead)qteStart(v)}
-// ---------------- sem a montanha com estrada: parque e prédios no terreno plano ----------------
-try{const F=window.XTERR&&XTERR.F;if(F){F.mts.filter(m=>m.flat).forEach((m,mi)=>{const cx=m.x,cz=m.z;
-  box(64,.12,64,0x4fa046,cx,.06,cz);box(64,.14,4.2,0xbfbfbf,cx,.07,cz);box(4.2,.14,64,0xbfbfbf,cx,.07,cz);
-  box(11,.5,11,0x9aa0a8,cx,.25,cz);box(8.6,.55,8.6,0x3a8fd0,cx,.28,cz);solids.push({x0:cx-5.5,x1:cx+5.5,z0:cz-5.5,z1:cz+5.5,h:.6});
-  const bd=mi%2?[[cx-18,cz-20,26,16,16,0xd9c9a8],[cx+20,cz+19,14,12,7,0xe8c9a0]]:[[cx+17,cz-20,24,16,20,0xc9dbe8],[cx-20,cz+19,16,12,8,0xf0d0d0]];
-  bd.forEach(q=>{try{bld(q[0],q[1],q[2],q[3],q[4],q[5])}catch(e){console.log('bld',e)}});
-  for(let k=0;k<22;k++){const a=k/22*6.283+mi,rr=24+(k%3)*3.5,x=cx+Math.sin(a)*rr,z=cz+Math.cos(a)*rr;if(bd.some(q=>Math.abs(x-q[0])<q[2]/2+3&&Math.abs(z-q[1])<q[3]/2+3))continue;
-   box(.9,3.4,.9,0x6b4a2a,x,1.7,z);box(4.2,3.8,4.2,[0x2f8a3a,0x3b9a45,0x2a7a35][k%3],x,5,z);solids.push({x0:x-.5,x1:x+.5,z0:z-.5,z1:z+.5,h:4})}
-  for(const[dx,dz]of[[-9,-9],[9,-9],[-9,9],[9,9]]){box(2.6,.5,.8,0x6b4a2a,cx+dx,.35,cz+dz)}
-  try{rc(cx-32,cx+32,cz-32,cz+32,'#4fa046');rc(cx-32,cx+32,cz-2,cz+2,'#bfbfbf');rc(cx-2,cx+2,cz-32,cz+32,'#bfbfbf');rc(cx-5,cx+5,cz-5,cz+5,'#3a8fd0')}catch(e){}});
- console.log('v46 parque no lugar da montanha',F.mts.filter(m=>m.flat).length)}}catch(e){console.log('v46 parque',e)}
+// ---------------- 7ª rodada: sem rampas, sem retornos/canteiros, sem ruas soltas, sem parque da montanha (viram árvores); muros na frente das casas ----------------
+try{const X=window.XTERR,F=X&&X.F,AS0=0x38383d,Z0=new T.Matrix4().makeScale(0,0,0),rmd=[],kill=b=>{b.h=-1;b.x0=b.x1=b.z0=b.z1=1e6};
+ const hexOf=o=>{try{return o.material.color.getHex()}catch(e){return -1}};
+ // remove caixas (meshes comuns) cujo centro cai na janela e cuja cor está no conjunto; neutraliza colisores pequenos na janela
+ const rmBoxes=(x0,x1,z0,z1,cols,sol)=>{let n=0;for(const o of sc.children.slice()){try{if(!o.isMesh||o.isInstancedMesh||!o.scale||!o.material||Array.isArray(o.material))continue;const p=o.position;if(p.x<x0||p.x>x1||p.z<z0||p.z>z1)continue;if(o.geometry&&o.geometry.attributes&&o.geometry.attributes.color)continue;if(cols&&!cols.includes(hexOf(o)))continue;sc.remove(o);n++}catch(e){}}
+  if(sol)for(const b of solids){if(b.ms||b.isH||b.h<0||b.h>4.6)continue;const cx=(b.x0+b.x1)/2,cz=(b.z0+b.z1)/2;if(cx>x0&&cx<x1&&cz>z0&&cz<z1)kill(b)}return n};
+ // remove malhas de rua com vértices coloridos (estrada da montanha, rampas) pela caixa envolvente
+ const rmStrips=(x0,x1,z0,z1)=>{let n=0;for(const o of sc.children.slice()){try{if(!o.isMesh||o.isInstancedMesh||!o.geometry||!o.geometry.attributes||!o.geometry.attributes.color||o.geometry.attributes.uv)continue;o.geometry.computeBoundingBox();const bb=o.geometry.boundingBox;const cx=(bb.min.x+bb.max.x)/2,cz=(bb.min.z+bb.max.z)/2;if(cx<x0||cx>x1||cz<z0||cz>z1)continue;sc.remove(o);try{o.geometry.dispose()}catch(e){}n++}catch(e){}}return n};
+ const paint=(x0,x1,z0,z1,c)=>{try{rc(x0,x1,z0,z1,c)}catch(e){}};
+ // 1) rampas
+ let nr=0;if(X&&X.RAMPS){for(const q of X.RAMPS.slice())nr+=rmStrips(q.x0-3,q.x1+3,q.z0-3,q.z1+3);X.RAMPS.length=0}
+ // 2) ruas que saem da cidade para o nada (extensões ao sul, ponte, retorno com canteiro) e o anel viário solto
+ const AA=[AS0,0xe8c22a,0x8a8d94,0x7a7d84,0xd8d8d8,0x5a9e4b,0x6b4a2a,0x3b9a45],treeR=[];let nb=0;
+ if(F&&F.river){const Zr=F.river.z,w=F.river.w||10;for(const x of F.ext||[]){nb+=rmBoxes(x-12,x+12,226,Zr+60,AA,true);paint(x-13,x+13,224,Zr-w-1,'#4f9a45');paint(x-13,x+13,Zr+w+1,345,'#5a9e4b');paint(x-13,x+13,Zr-w,Zr+w,'#4f9a45');
+   treeR.push([x-6,x+6,228,Zr-w-3],[x-6,x+6,Zr+w+3,Zr+w+34])}}
+ if(F)for(const r of(F.ring||[])){nb+=rmBoxes(r[0]-1,r[1]+1,r[2]-1,r[3]+1,[AS0,0xe8c22a],false);paint(r[0],r[1],r[2],r[3],'#4f9a45');treeR.push(r)}
+ // 3) montanha: estrada, mirante e casinha (o parque foi retirado do código; no lugar ficam árvores)
+ if(F)for(const m of F.mts.filter(m=>m.road)){const x=m.road.x;nb+=rmStrips(x-8,x+8,m.z-14,-205);nb+=rmBoxes(x-15,x+15,m.z-15,m.z+15,[AS0,0xd8d8d8,0x8a5a2a,0x555555,0x2255aa,0xe8e0d0,0x8a3b2c],true);paint(x-14,x+14,m.z-14,-206,'#4f9a45');treeR.push([x-6,x+6,m.z+16,-228],[m.x-32,m.x+32,m.z-32,m.z+32])}
+ // árvores no lugar
+ const SQ4=[],clr=(x,z,m)=>{const Q=window.SGQ?SGQ(x-m-.5,x+m+.5,z-m-.5,z+m+.5,SQ4):solids;for(const b of Q)if(b.h>.3&&x>b.x0-m&&x<b.x1+m&&z>b.z0-m&&z<b.z1+m)return false;return true};
+ let nt=0;for(const q of treeR){const w=q[1]-q[0],d=q[3]-q[2];if(w<=0||d<=0)continue;const n=Math.round(w*d/70);
+  for(let k=0;k<n*3&&k<4000&&n>0;k++){if(nt>700)break;const x=q[0]+Math.random()*w,z=q[2]+Math.random()*d;if(!clr(x,z,2.4))continue;
+   const th=2.8+Math.random()*1.4,cw=3.4+Math.random()*1.4;box(.9,th,.9,0x6b4a2a,x,th/2,z);box(cw,cw*.9,cw,[0x2f8a3a,0x3b9a45,0x2a7a35,0x4aa648][k&3],x,th+cw*.4,z);solids.push({x0:x-.5,x1:x+.5,z0:z-.5,z1:z+.5,h:th});nt++}}
+ // 4) muros de lote (cinza 0x9a9a9a, fino e comprido) a menos de 11 m da porta de um imóvel: somem (colisor e desenho)
+ let nw=0;const PR=(window.XPROP&&XPROP.PR)||[];
+ for(const p of PR){const e=p.ext;if(!e)continue;const near=(x0,x1,z0,z1)=>Math.hypot(Math.max(x0-e.x,0,e.x-x1),Math.max(z0-e.z,0,e.z-z1))<11;
+  for(const c of(window.XINST||[])){let ch=false;c.a.forEach((d,i)=>{if(d.dead||d[6]!==0x9a9a9a||d[4]<1||Math.min(d[3],d[5])>.4||Math.max(d[3],d[5])<20)return;if(near(d[0]-d[3]/2,d[0]+d[3]/2,d[2]-d[5]/2,d[2]+d[5]/2)){d.dead=1;c.m.setMatrixAt(i,Z0);ch=true;nw++}});if(ch)c.m.instanceMatrix.needsUpdate=true}
+  for(const b of solids){if(b.ms||b.isH||b.h<1||b.h>3.6||b.x0>1e5)continue;if(Math.min(b.x1-b.x0,b.z1-b.z0)>.45||Math.max(b.x1-b.x0,b.z1-b.z0)<20)continue;if(near(b.x0,b.x1,b.z0,b.z1)&&!(b.g6)){const mid=Math.hypot((b.x0+b.x1)/2-e.x,(b.z0+b.z1)/2-e.z);if(mid<30){kill(b);nw++}}}}
+ console.log('v46 limpeza: rampas',nr,'ruas/retornos/anel/montanha',nb,'árvores',nt,'muros',nw)}catch(e){console.log('v46 limpeza',e)}
 // ---------------- lagos: só 2 parques com lagoa ficam; os outros viram árvores; piscinas pequenas em algumas casas ----------------
 try{const KEEP=[[-125,27],[175,-75]],P2=window.PONDS||[],XI=window.XINST||[],rm=[];
  for(let i=P2.length-1;i>=0;i--){const q=P2[i],cx=(q[0]+q[1])/2,cz=(q[2]+q[3])/2;if(KEEP.some(k=>Math.hypot(k[0]-cx,k[1]-cz)<8))continue;rm.push(q);P2.splice(i,1)}
