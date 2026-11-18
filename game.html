@@ -2345,7 +2345,7 @@ function lmBuild(g,ms){let nv=0,ni=0;for(const m of ms){const ge=m.geometry,n=ge
  const PA=new Float32Array(nv*3),NA=new Float32Array(nv*3),CA=new Float32Array(nv*3),IA=new Uint16Array(ni);let vo=0,io=0;
  for(const m of ms){const ge=m.geometry,pa=ge.attributes.position,na=ge.attributes.normal,n=pa.count,ix=ge.index,M=relM(m,g),arr=Array.isArray(m.material),cols=(arr?m.material:[m.material]).map(lmCol),vm=new Uint8Array(n);_m3.getNormalMatrix(M);
   if(arr&&ge.groups.length)for(const q of ge.groups)for(let k=q.start,e=Math.min(q.start+q.count,ix?ix.count:n);k<e;k++)vm[ix?ix.getX(k):k]=q.materialIndex;
-  for(let i=0;i<n;i++){const o=(vo+i)*3,c=cols[vm[i]]||cols[0];_v3.fromBufferAttribute(pa,i).applyMatrix4(M);PA[o]=_v3.x;PA[o+1]=_v3.y;PA[o+2]=_v3.z;
+  const ca=ge.attributes.color;for(let i=0;i<n;i++){const o=(vo+i)*3;let c=cols[vm[i]]||cols[0];if(ca)c=[ca.getX(i)*c[0],ca.getY(i)*c[1],ca.getZ(i)*c[2]];_v3.fromBufferAttribute(pa,i).applyMatrix4(M);PA[o]=_v3.x;PA[o+1]=_v3.y;PA[o+2]=_v3.z;
    _v3.fromBufferAttribute(na,i).applyMatrix3(_m3).normalize();NA[o]=_v3.x;NA[o+1]=_v3.y;NA[o+2]=_v3.z;CA[o]=c[0];CA[o+1]=c[1];CA[o+2]=c[2]}
   if(ix)for(let k=0;k<ix.count;k++)IA[io++]=ix.getX(k)+vo;else for(let k=0;k<n;k++)IA[io++]=vo+k;vo+=n}
  const geo=new T.BufferGeometry();geo.setAttribute('position',new T.BufferAttribute(PA,3));geo.setAttribute('normal',new T.BufferAttribute(NA,3));geo.setAttribute('color',new T.BufferAttribute(CA,3));geo.setIndex(new T.BufferAttribute(IA,1));geo.computeBoundingSphere();
@@ -8069,109 +8069,67 @@ const _uL2=update;update=function(dt){_uL2(dt);try{const ev=LF.ev;if(!ev||!ev.ps
 })();
 
 </script><script type='text/game' class='gb'>
-// ======================= HD: modelos GLB (Kenney Car Kit, CC0 — ver docs/CREDITOS.md) =======================
+// ======================= HD v2: carro realista (Car Concept, Khronos, CC-BY 4.0 — ver docs/CREDITOS.md) =======================
 (function(){'use strict';
-const T=THREE;
-if(!T.GLTFLoader||!window.GLBPACK){console.log('hd: sem GLTFLoader/pacote — modelos de caixas mantidos');return}
-const HD=window.HD={ready:0,tpl:{},list:[],n:0,on:true,stat:{up:0,fail:0}},PK=window.GLBPACK,K=window.VEHX&&window.VEHX.kit;
+const T=THREE,PK=window.GLBPACK;
+if(!T.GLTFLoader||!PK||!Object.keys(PK).length){console.log('hd: sem pacote — modelos de caixas mantidos');return}
+const HD=window.HD={ready:0,tpl:{},list:[],on:true,stat:{up:0,fail:0}};
 const loader=new T.GLTFLoader();
 const b2ab=b=>{const s=atob(b),a=new Uint8Array(s.length);for(let i=0;i<s.length;i++)a[i]=s.charCodeAt(i);return a.buffer};
-const RECOLOR={sedan:1,'sedan-sports':1,'hatchback-sports':1,suv:1,'suv-luxury':1,truck:1};
-const MAP_KD={comum:'sedan',basico:'sedan',suv:'suv',pickup:'truck',luxo:'suv-luxury',esportivo:'sedan-sports',rua:'hatchback-sports'};
-const TRAF=['sedan','hatchback-sports','suv','sedan','hatchback-sports'];
-function modelOf(v){const t=v.t;
- if(t=='car'){if(v.pol||v.disp)return'police';if(v.amb)return'ambulance';if(v.taxi)return'taxi';if(v.kd)return MAP_KD[v.kd]||null;if(v._hdr==null)v._hdr=Math.random()*5|0;return TRAF[v._hdr]}
- if(t=='truck'&&v.kd=='tpequeno')return'delivery';
- return null}
-// ---- atlas (colormap 512 -> 128 px), recolor e vidro ----
-let ATL=null;const TXC=new Map();
-function atlas(img){if(ATL)return ATL;const c=document.createElement('canvas');c.width=c.height=128;c.getContext('2d').drawImage(img,0,0,128,128);return ATL=c}
-const hex=n=>[(n>>16)&255,(n>>8)&255,n&255];
-function cellStat(cv,cx,cy){const d=cv.getContext('2d').getImageData(cx*16,cy*32,16,32).data;let r=0,g=0,b=0;for(let i=0;i<d.length;i+=4){r+=d[i];g+=d[i+1];b+=d[i+2]}const n=d.length/4;return[r/n,g/n,b/n]}
-function texFor(model,color,cut,paint){const key=model+'|'+color+'|'+cut;let t=TXC.get(key);if(t)return t;
- const cv=document.createElement('canvas');cv.width=cv.height=128;const x=cv.getContext('2d');x.drawImage(ATL,0,0);
- if(paint&&color!=null){const tg=hex(color);for(const cx of[paint[0],paint[0]^1]){const im=x.getImageData(cx*16,paint[1]*32,16,32),d=im.data,av=cellStat(ATL,paint[0],paint[1]),lv=.3*av[0]+.59*av[1]+.11*av[2]+1;
-  for(let i=0;i<d.length;i+=4){const r=Math.max(.35,Math.min(1.5,(.3*d[i]+.59*d[i+1]+.11*d[i+2])/lv));d[i]=Math.min(255,tg[0]*r);d[i+1]=Math.min(255,tg[1]*r);d[i+2]=Math.min(255,tg[2]*r)}x.putImageData(im,cx*16,paint[1]*32)}}
- for(const cx of[0,1]){if(cut)x.clearRect(cx*16,96,16,32);else{x.fillStyle=cx?'#1b2a38':'#2c4258';x.fillRect(cx*16,96,16,32)}}
- t=new T.CanvasTexture(cv);t.flipY=false;t.generateMipmaps=false;t.minFilter=t.magFilter=T.LinearFilter;TXC.set(key,t);return t}
-const MTC=new Map();
-function matFor(model,color,cut,paint){const key=model+'|'+color+'|'+cut;let m=MTC.get(key);if(m)return m;const map=texFor(model,color,cut,paint);
- m=window.GFX===0?new T.MeshLambertMaterial({map,side:T.DoubleSide,alphaTest:cut?.5:0}):new T.MeshPhongMaterial({map,side:T.DoubleSide,alphaTest:cut?.5:0,shininess:22,specular:0x161616});
- m._sh=1;MTC.set(key,m);return m}
-const GLASS=new T.MeshLambertMaterial({color:0x6f93ab,transparent:true,opacity:.3,depthWrite:false,side:T.DoubleSide});
-// ---- preparo do modelo ----
-function prep(name,gltf){const sc=gltf.scene;let body=null;const wh=[];
- sc.traverse(o=>{if(!o.isMesh)return;if(/^wheel/.test(o.name))wh.push(o);else if(o.name=='body')body=o});
- if(!body)body=sc.children.find(o=>o.isMesh);
- const img=body.material.map.image;atlas(img);
- const g=body.geometry,uv=g.attributes.uv,ps=g.attributes.position,nm=g.attributes.normal,ix=g.index;
- // célula de tinta dominante (saturada) e triângulos de vidro (células 0,3 / 1,3)
- const cnt={};for(let i=0;i<uv.count;i++){const cx=Math.min(7,uv.getX(i)*8|0),cy=Math.min(3,uv.getY(i)*4|0);const k=cx+','+cy;cnt[k]=(cnt[k]||0)+1}
- let paint=null,best=0;for(const k in cnt){const[cx,cy]=k.split(',').map(Number);if(cy==3&&cx<2)continue;const s=cellStat(ATL,cx,cy),mx=Math.max(...s),mn=Math.min(...s);if(mx>90&&(mx-mn)/mx>.3&&cnt[k]>best){best=cnt[k];paint=[cx,cy]}}
- const isG=i=>{const cx=Math.min(7,uv.getX(i)*8|0),cy=Math.min(3,uv.getY(i)*4|0);return cy==3&&cx<2};
- const gp=[],gn=[];let bb={x0:9,x1:-9,y0:9,y1:-9,z0:9,z1:-9};
- const tri=ix?ix.count/3:ps.count/3;for(let t=0;t<tri;t++){const a=ix?ix.getX(t*3):t*3,b=ix?ix.getX(t*3+1):t*3+1,c=ix?ix.getX(t*3+2):t*3+2;if(isG(a)&&isG(b)&&isG(c))for(const q of[a,b,c]){gp.push(ps.getX(q),ps.getY(q),ps.getZ(q));gn.push(nm.getX(q),nm.getY(q),nm.getZ(q));bb.x0=Math.min(bb.x0,ps.getX(q));bb.x1=Math.max(bb.x1,ps.getX(q));bb.y0=Math.min(bb.y0,ps.getY(q));bb.y1=Math.max(bb.y1,ps.getY(q));bb.z0=Math.min(bb.z0,ps.getZ(q));bb.z1=Math.max(bb.z1,ps.getZ(q))}}
- let gg=null;if(gp.length){gg=new T.BufferGeometry();gg.setAttribute('position',new T.Float32BufferAttribute(gp,3));gg.setAttribute('normal',new T.Float32BufferAttribute(gn,3))}
- sc.updateMatrixWorld(true);const box=new T.Box3().setFromObject(sc),sz=box.getSize(new T.Vector3());
- let fz=0;wh.forEach(w=>{if(/front/.test(w.name))fz+=w.position.z});const flip=wh.length&&fz<0;
- let wr=.3;if(wh[0]){wh[0].geometry.computeBoundingBox();wr=(wh[0].geometry.boundingBox.max.y-wh[0].geometry.boundingBox.min.y)/2}
- HD.tpl[name]={sc,paint:RECOLOR[name]?paint:null,gg,gbb:gg?bb:null,sz,box,flip,wr,ok:1}}
+function modelOf(v){return v.t=='car'&&v.kd=='esportivo'&&!v.pol&&!v.disp&&!v.amb&&!v.taxi?'esportivo':null}
+// ---- materiais compartilhados ----
+const lam=window.GFX===0;
+const DARK=lam?new T.MeshLambertMaterial({vertexColors:true}):new T.MeshPhongMaterial({vertexColors:true,shininess:35,specular:0x333333});
+const LIGHTS=new T.MeshBasicMaterial({vertexColors:true});
+const GLASS=new T.MeshPhongMaterial({color:0x0b1620,transparent:true,opacity:.42,depthWrite:false,specular:0xffffff,shininess:120});
+const PM=new Map();
+const paintMat=c=>{let m=PM.get(c);if(!m){m=lam?new T.MeshLambertMaterial({color:c}):new T.MeshPhongMaterial({color:c,shininess:80,specular:0x555555});m._sh=1;PM.set(c,m)}return m};
+DARK._sh=LIGHTS._sh=GLASS._sh=1;
+function prep(name,gltf){const sc=gltf.scene,by={};sc.traverse(o=>{if(o.name)by[o.name]=o});
+ const mesh=n=>{const o=by[n];if(!o)return null;let m=o.isMesh?o:null;if(!m)o.traverse(c=>{if(!m&&c.isMesh)m=c});return m};
+ const t={st:{p1:mesh('st_p1'),dark:mesh('st_dark'),glass:mesh('st_glass'),lights:mesh('st_lights')},wheels:{},seat:by.seat_driver?by.seat_driver.position.clone():new T.Vector3(0,.46,.34),roof:by.cabin_roof?by.cabin_roof.position.y:1.1,L:4.36,W:2.54,zc:.24,wr:.385};
+ for(const k of['fl','fr','rl','rr']){const o=by['wheel_'+k];t.wheels[k]={geo:mesh('wheel_'+k).geometry,pos:o.position.clone()}}
+ HD.tpl[name]=t}
 function loadAll(names,i){if(i>=names.length){HD.ready=1;if(!Object.keys(HD.tpl).length)HD.on=false;console.log('hd: modelos prontos',Object.keys(HD.tpl).length);return}
- const n=names[i];try{loader.parse(b2ab(PK[n]),'',g=>{try{prep(n,g)}catch(e){HD.stat.fail++;console.log('hd prep',n,e)}setTimeout(()=>loadAll(names,i+1),30)},e=>{HD.stat.fail++;console.log('hd parse',n,e);setTimeout(()=>loadAll(names,i+1),30)})}catch(e){HD.stat.fail++;console.log('hd',n,e);setTimeout(()=>loadAll(names,i+1),30)}}
+ const n=names[i],nx=()=>setTimeout(()=>loadAll(names,i+1),30);
+ try{loader.parse(b2ab(PK[n]),'',g=>{try{prep(n,g)}catch(e){HD.stat.fail++;console.log('hd prep',n,e)}nx()},e=>{HD.stat.fail++;console.log('hd parse',n,e);nx()})}catch(e){HD.stat.fail++;console.log('hd',n,e);nx()}}
 const colOf=m=>{const q=m&&m.material&&(Array.isArray(m.material)?m.material[0]:m.material);return q&&q.color?q.color.getHex():0xcccccc};
-// ---- instância ----
 function upgrade(v){const name=modelOf(v),tp=name&&HD.tpl[name];if(!tp)return false;
  if(v._intOn){try{window.VEHX.intOff(v)}catch(e){}}
  const ch=v.g.children,c0=ch[0];if(!c0)return false;
- const Lt=Math.max(c0.scale.z,2),Wt=Math.max(c0.scale.x,1.4);
- const sz=Lt*1.04/tp.sz.z,sx=Math.min(sz,Wt*1.1/tp.sz.x),sy=sz*.92;
- const col=colOf(c0),hd=new T.Group(),bp=new T.Group(),clone=tp.sc.clone(true);
- const mat=matFor(name,tp.paint?col:null,0,tp.paint);
- const wheels=[];let body=null;
- clone.traverse(o=>{if(o.isMesh){o.material=mat;if(/^wheel/.test(o.name))wheels.push(o);else body=o}});
- // corpo vai para o pivô de suspensão
- clone.children.slice().forEach(o=>{if(o.isMesh&&!/^wheel/.test(o.name)){clone.remove(o);bp.add(o)}else if(o.isMesh)o.rotation.order='YXZ'});
- clone.add(bp);hd.add(clone);hd.scale.set(sx,sy,sz);if(tp.flip)hd.rotation.y=Math.PI;
- hd.userData.hd=1;v.g.add(hd);
- // esconde o modelo de caixas (só o que existia)
+ const Lt=Math.max(c0.scale.z,2),Wt=Math.max(c0.scale.x,1.4),s=Math.min(Lt*1.05/tp.L,Wt*1.13/tp.W);
+ const hd=new T.Group(),bp=new T.Group(),col=colOf(c0),pm=paintMat(col);
+ const mk=(src,mat)=>{if(!src)return null;const m=new T.Mesh(src.geometry,mat);return m};
+ const a=mk(tp.st.p1,pm),b=mk(tp.st.dark,DARK),l=mk(tp.st.lights,LIGHTS),g=mk(tp.st.glass,GLASS);
+ const lo=HD.tpl[name+'_lo'],ent=[];[[a,'p1'],[b,'dark'],[l,'lights'],[g,'glass']].forEach(([m,k])=>{if(m)ent.push([m,tp.st[k].geometry,lo&&lo.st[k]?lo.st[k].geometry:null])});
+ for(const m of[a,b,l])if(m)bp.add(m);if(g){g.renderOrder=2;bp.add(g)}
+ hd.add(bp);const wh=[];
+ for(const k of['fl','fr','rl','rr']){const w=tp.wheels[k],wg=new T.Group();wg.position.copy(w.pos);wg.rotation.order='YXZ';wg.userData.front=k[0]=='f';const wm=new T.Mesh(w.geo,DARK);wg.add(wm);ent.push([wm,w.geo,lo&&lo.wheels[k]?lo.wheels[k].geo:null]);hd.add(wg);wh.push(wg)}
+ hd.scale.setScalar(s);hd.position.z=-tp.zc*s;v.g.add(hd);
  const hid=[];ch.forEach(o=>{if(o!==hd&&o.visible&&!o.userData.nolod&&!o.userData.lodm){o.visible=false;hid.push(o)}});
- v._hd=hd;v._hdH=hid;v._hdT=tp;v._hdN=name;v._hdB=bp;v._hdW=wheels;v._hdS=[sx,sy,sz];v._hdC=col;v._hdBody=body;v._hy=v.yaw;v._hs=v.sp||0;v._hp=0;v._hr=0;v._hsa=0;
- v._hw=tp.sz.x*sx/2;
- // vidro translúcido (só desenhado com o interior ligado)
- if(tp.gg){const gm=new T.Mesh(tp.gg,GLASS);gm.visible=false;gm.userData.nolod=1;gm.renderOrder=2;clone.add(gm);v._hdG=gm}
- // assento/ocupante coerentes com a cabine do modelo
- if(tp.gbb){const b=tp.gbb,dir=tp.flip?-1:1,zfg=(tp.flip?b.z0:b.z1)*dir*sz,zrg=(tp.flip?b.z1:b.z0)*dir*sz,L=zfg-zrg,ysill=b.y0*sy,ytop=b.y1*sy,old=v._seat,cab=old&&old.cab||c0;
-  v._seat={cab:{scale:{x:1,y:Math.max(.5,ytop-ysill+.1),z:1},position:cab.position,isMesh:1,visible:true,material:cab.material},x:Math.min(.5,tp.sz.x*sx*.2),y:ysill-.06*sy,z:zrg+L*.42,s:.7}}
+ v._hd=hd;v._hdH=hid;v._hdT=tp;v._hdN=name;v._hdB=bp;v._hdW=wh;v._hdG=g;v._hdE=ent;v._hdLo=0;v._hdS=s;v._hy=v.yaw;v._hs=v.sp||0;v._hp=0;v._hr=0;v._hsa=0;v._hw=tp.W*s*.46;
+ const ch2=Math.max(.5,(tp.roof-.4)*s)+.11,old=v._seat,cab=old&&old.cab||c0;
+ v._seat={cab:{scale:{x:1,y:ch2,z:1},position:cab.position,isMesh:1,visible:true,material:cab.material},x:tp.seat.x*s,y:(tp.seat.y-.1)*s,z:(tp.seat.z-tp.zc)*s,s:.42};
  HD.list.push(v);HD.stat.up++;return true}
-function downgrade(v){if(v._hd&&v._hd.parent)v._hd.parent.remove(v._hd);(v._hdH||[]).forEach(o=>o.visible=true);v._hd=null;v._hdH=null;v._hdG=null;v._hdI=null;const i=HD.list.indexOf(v);if(i>=0)HD.list.splice(i,1)}
+function downgrade(v){if(v._hd&&v._hd.parent)v._hd.parent.remove(v._hd);(v._hdH||[]).forEach(o=>o.visible=true);v._hd=null;v._hdH=null;v._hdG=null;const i=HD.list.indexOf(v);if(i>=0)HD.list.splice(i,1)}
 HD.up=upgrade;HD.down=downgrade;
-// ---- interior HD (opaco, 1 malha) + vidro ----
-function hdInterior(v){if(v._hdI!==undefined||!K)return v._hdI;const tp=v._hdT,b=tp.gbb;if(!b)return v._hdI=null;
- const B=K.B,TOR=K.TOR,P=[],dir=tp.flip?-1:1,zf=tp.flip?b.z0:b.z1,zr=tp.flip?b.z1:b.z0,L=Math.abs(zf-zr),fy=b.y0-.02,wx=(b.x1-b.x0)/2,sc=0x2a2d35,at=f=>zr+dir*L*f;
- P.push(B(wx*1.7,.02,L*.9,0,fy,at(.5),0x1c1c20));
- const seat=(x,f)=>{const z=at(f);P.push(B(.2,.05,.2,x,fy+.06,z,sc),B(.2,.2,.04,x,fy+.17,z-dir*.09,sc),B(.09,.05,.03,x,fy+.3,z-dir*.1,sc))};
- seat(-.17,.42);seat(.17,.42);seat(0,.12);
- const dz=zf-dir*.12;P.push(B(wx*1.6,.1,.18,0,fy+.1,dz,0x25252b),B(wx*1.6,.015,.19,0,fy+.15,dz,0x303037),B(.18,.05,.01,.17,fy+.14,dz-dir*.095,0x0e3a4a),B(.1,.06,.01,0,fy+.12,dz-dir*.095,0x2c7fa8),TOR(.075,.012,.17,fy+.2,dz-dir*.22,0x111114,-.5*dir),B(.08,.07,.2,0,fy+.05,at(.4),0x2a2a30));
- const g=K.bake(P),m=new T.Mesh(g,K.OCM);m.visible=false;m.userData.nolod=1;v._hdI=m;v._hd.children[0].add(m);return m}
-HD.intOn=v=>{const m=hdInterior(v);if(m)m.visible=true;if(v._hdG)v._hdG.visible=true;if(v._hdBody)v._hdBody.material=matFor(v._hdN,v._hdT.paint?v._hdC:null,1,v._hdT.paint);v._hdCut=1};
-HD.intOff=v=>{if(v._hdI)v._hdI.visible=false;if(v._hdG)v._hdG.visible=false;if(v._hdBody&&v._hdCut)v._hdBody.material=matFor(v._hdN,v._hdT.paint?v._hdC:null,0,v._hdT.paint);v._hdCut=0};
-// ---- varredura e animação ----
+HD.intOn=()=>{};HD.intOff=()=>{};
 let acc=0;const wrap=a=>{while(a>Math.PI)a-=2*Math.PI;while(a<-Math.PI)a+=2*Math.PI;return a};
 function scan(){if(!HD.ready||!HD.on)return;let n=0;
- for(const v of vehs){if(v.dead||v.g6||v.nodrv&&0)continue;
-  if(v._hd){if(!v._hd.parent||v._hd.parent!==v.g){downgrade(v)}else continue}
+ for(const v of vehs){if(v.dead||v.g6)continue;
+  if(v._hd){if(v._hd.parent!==v.g)downgrade(v);else continue}
   if(v._hdNo||!v.g.visible)continue;if(!modelOf(v)){v._hdNo=1;continue}
   const d=Math.hypot(v.x-P.x,v.z-P.z);if(d>70&&v!==P.veh)continue;
   try{upgrade(v)}catch(e){HD.stat.fail++;v._hdNo=1;console.log('hd up',e)}if(++n>=2)break}
- for(let i=HD.list.length-1;i>=0;i--){const v=HD.list[i];if(v.dead&&v._hd&&0)downgrade(v);if(!vehs.includes(v))downgrade(v)}}
-function anim(dt){if(dt<=0)return;for(const v of HD.list){const h=v._hd;if(!h||!h.parent)continue;const d=Math.hypot(v.x-P.x,v.z-P.z);if(d>48&&v!==P.veh)continue;
+ for(let i=HD.list.length-1;i>=0;i--)if(!vehs.includes(HD.list[i]))downgrade(HD.list[i])}
+function anim(dt){if(dt<=0)return;for(const v of HD.list){const h=v._hd;if(!h||!h.parent)continue;if(v._hdG)v._hdG.visible=!v._lm;const d=Math.hypot(v.x-P.x,v.z-P.z),wl=(d>(v._hdLo?13:16)||v._lm)&&v!==P.veh?1:0;if(wl!==v._hdLo){v._hdLo=wl;for(const e of v._hdE)if(e[2])e[0].geometry=wl?e[2]:e[1];if(v._lm&&window.LMX)try{window.LMX.lmOff(v)}catch(x){}}if(d>48&&v!==P.veh)continue;
   const sp=v.sp||0,dy=wrap((v.yaw||0)-v._hy)/dt,ac=(sp-v._hs)/dt;v._hy=v.yaw;v._hs=sp;
-  const st=Math.max(-.5,Math.min(.5,Math.atan2(2.2*dy,Math.max(1.5,Math.abs(sp))*Math.sign(sp||1))));v._hsa+=(st-v._hsa)*Math.min(1,dt*10);
+  const st=Math.max(-.5,Math.min(.5,Math.atan2(2.6*dy,Math.max(1.5,Math.abs(sp))*Math.sign(sp||1))));v._hsa+=(st-v._hsa)*Math.min(1,dt*10);
   const k=1-Math.exp(-dt*7),tp=Math.max(-.05,Math.min(.05,-ac*.0032)),tr=Math.max(-.07,Math.min(.07,dy*sp*.0008));v._hp+=(tp-v._hp)*k;v._hr+=(tr-v._hr)*k;
   const bp=v._hdB;if(bp){bp.rotation.x=v._hp;bp.rotation.z=v._hr}
-  const spin=sp*dt/(v._hdT.wr*v._hdS[1]);for(const w of v._hdW){w.rotation.x+=spin;if(/front/.test(w.name))w.rotation.y=v._hsa}}}
+  const spin=sp*dt/(v._hdT.wr*v._hdS);for(const w of v._hdW){w.rotation.x+=spin;if(w.userData.front)w.rotation.y=v._hsa}}}
 const _uHD=update;update=function(dt){_uHD(dt);if(PAUSED)return;try{if((acc-=dt)<=0){acc=.25;scan()}anim(dt)}catch(e){console.log('v46 hd',e)}};
-setTimeout(()=>QUIET(()=>loadAll(Object.keys(PK).filter(n=>n!='motorcycle'),0)),600);
+setTimeout(()=>QUIET(()=>loadAll(Object.keys(PK),0)),600);
 })();
 </script><script>
 (function(){const $b=i=>document.getElementById(i),CAP=['Perseguição policial','Customização','Caos na cidade','Trabalhe de táxi'];let t0=0,iv=0;$b('hud').style.display='none';

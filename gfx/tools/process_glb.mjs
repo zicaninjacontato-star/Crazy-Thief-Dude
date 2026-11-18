@@ -8,6 +8,6 @@ const ratio=parseFloat(process.argv[4]||'.12');
 await MeshoptSimplifier.ready;
 const stat=()=>{let t=0,v=0;for(const m of doc.getRoot().listMeshes())for(const p of m.listPrimitives()){const i=p.getIndices();t+=(i?i.getCount():p.getAttribute('POSITION').getCount())/3;v+=p.getAttribute('POSITION').getCount()}return [Math.round(t),v]};
 console.log('antes',stat(),'texturas',doc.getRoot().listTextures().map(t=>t.getSize()?.join('x')+':'+Math.round(t.getImage().length/1024)+'KB').join(' '));
-await doc.transform(weld(),simplify({simplifier:MeshoptSimplifier,ratio,error:0.01,lockBorder:false}),dedup(),prune());
+await doc.transform(weld(),simplify({simplifier:MeshoptSimplifier,ratio,error:parseFloat(process.argv[5]||"0.01"),lockBorder:false}),dedup(),prune());
 console.log('depois',stat());
 await io.write(process.argv[3],doc);

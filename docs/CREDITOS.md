@@ -13,7 +13,11 @@ Cada recurso é verificado individualmente (licença original conferida). Aceito
 ## Como registrar um modelo novo
 Para cada GLB: nome, autor, URL da página, licença exata (CC0 / CC-BY 4.0), data da verificação, alterações feitas e arquivo de licença/captura em `gfx/`.
 
-## Candidato em avaliação (NÃO integrado ao jogo)
+## Modelo integrado (kind `esportivo`)
 | Recurso | Autor | Licença | Origem |
 |---|---|---|---|
-| **Car Concept** (`CarConcept.glb`) | Khronos Group / Eric Chadwick, a partir do modelo de domínio público "Free Concept Car 004" de Unity Fan (CC0) | **CC-BY 4.0** (a licença exclui os logotipos/marcas Khronos presentes no modelo; precisam ser removidos antes de usar) | `github.com/KhronosGroup/glTF-Sample-Assets` → `Models/CarConcept` (LICENSE.md conferido). Processado com `gfx/tools/process_glb.mjs` (simplificação para ~38 mil triângulos). |
+| **Car Concept** (`CarConcept.glb`) | Khronos Group / Eric Chadwick, a partir do modelo de domínio público "Free Concept Car 004" de Unity Fan (CC0) | **CC-BY 4.0** (licença exclui logotipos/marcas Khronos) | `github.com/KhronosGroup/glTF-Sample-Assets` → `Models/CarConcept` (LICENSE.md conferido) |
+
+**Alterações feitas:** simplificação de malha (213 mil → 37,7 mil triângulos; versão distante 9,6 mil), remoção de **todas as texturas** (logotipos Khronos e placa saem junto; cores passam a vértice), união por material, 4 rodas separadas, espelhamento não necessário. Scripts: `gfx/tools/process_glb.mjs`, `gfx/tools/build_car.mjs`; saídas em `gfx/src/*.glb` (embutidas em `gfx/models.js`).
+
+Crédito exigido (CC-BY 4.0): "Car Concept" © Khronos Group / Eric Chadwick, derivado de "Free Concept Car 004" (Unity Fan, CC0); licença CC BY 4.0; modificado (simplificado e sem texturas).
