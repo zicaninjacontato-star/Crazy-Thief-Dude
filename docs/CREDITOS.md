@@ -12,3 +12,8 @@ Cada recurso é verificado individualmente (licença original conferida). Aceito
 
 ## Como registrar um modelo novo
 Para cada GLB: nome, autor, URL da página, licença exata (CC0 / CC-BY 4.0), data da verificação, alterações feitas e arquivo de licença/captura em `gfx/`.
+
+## Candidato em avaliação (NÃO integrado ao jogo)
+| Recurso | Autor | Licença | Origem |
+|---|---|---|---|
+| **Car Concept** (`CarConcept.glb`) | Khronos Group / Eric Chadwick, a partir do modelo de domínio público "Free Concept Car 004" de Unity Fan (CC0) | **CC-BY 4.0** (a licença exclui os logotipos/marcas Khronos presentes no modelo; precisam ser removidos antes de usar) | `github.com/KhronosGroup/glTF-Sample-Assets` → `Models/CarConcept` (LICENSE.md conferido). Processado com `gfx/tools/process_glb.mjs` (simplificação para ~38 mil triângulos). |

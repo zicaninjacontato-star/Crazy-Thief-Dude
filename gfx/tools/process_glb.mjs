@@ -1,0 +1,13 @@
+import {NodeIO} from '@gltf-transform/core';
+import {ALL_EXTENSIONS} from '@gltf-transform/extensions';
+import {dedup,prune,simplify,weld,flatten,join,textureCompress,resample,quantize} from '@gltf-transform/functions';
+import {MeshoptSimplifier} from 'meshoptimizer';
+const io=new NodeIO().registerExtensions(ALL_EXTENSIONS);
+const doc=await io.read(process.argv[2]);
+const ratio=parseFloat(process.argv[4]||'.12');
+await MeshoptSimplifier.ready;
+const stat=()=>{let t=0,v=0;for(const m of doc.getRoot().listMeshes())for(const p of m.listPrimitives()){const i=p.getIndices();t+=(i?i.getCount():p.getAttribute('POSITION').getCount())/3;v+=p.getAttribute('POSITION').getCount()}return [Math.round(t),v]};
+console.log('antes',stat(),'texturas',doc.getRoot().listTextures().map(t=>t.getSize()?.join('x')+':'+Math.round(t.getImage().length/1024)+'KB').join(' '));
+await doc.transform(weld(),simplify({simplifier:MeshoptSimplifier,ratio,error:0.01,lockBorder:false}),dedup(),prune());
+console.log('depois',stat());
+await io.write(process.argv[3],doc);
