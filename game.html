@@ -5242,7 +5242,7 @@ function crowdTick(q,dt){const c=q.cw,u=U(q),dx=c.tx-q.x,dz=c.tz-q.z,d=Math.hypo
  if(!sp){if(c.ph){u.aR.rotation.x=-2.5;u.aR.rotation.z=.3}else{u.aL.rotation.x=-.5;u.aR.rotation.x=-.5;u.aL.rotation.z=.5;u.aR.rotation.z=-.5}}}
 function ambulance(b){if(!peds.includes(b)||AMB.some(a=>Math.hypot(a.b.x-b.x,a.b.z-b.z)<40))return;const lx=nl(b.x);if(Math.abs(lx-b.x)>32)return;
  const dir=RR()<.5?1:-1,x=lx+(dir>0?3.5:-3.5);let z0=b.z-dir*85;z0=Math.max(-195,Math.min(195,z0));const v=spawnV('car',x,z0,dir>0?0:Math.PI,0xf4f4f4,0);
- v.hp=220;v.amb=1;v.tr=0;mk(2.06,.22,4.2,0xc81818,0,.95,0,v.g);const l1=mk(.6,.22,.5,0xff2222,-.35,2,0,v.g),l2=mk(.6,.22,.5,0x2244ff,.35,2,0,v.g);mk(1.4,.06,.32,0xc81818,0,1.86,1.2,v.g);
+ v.hp=220;v.amb=1;v.tr=0;let l1,l2;const VN=window.mkAmbVan?mkAmbVan(v):null;if(VN){l1=VN.l1;l2=VN.l2}else{mk(2.06,.22,4.2,0xc81818,0,.95,0,v.g);l1=mk(.6,.22,.5,0xff2222,-.35,2,0,v.g);l2=mk(.6,.22,.5,0x2244ff,.35,2,0,v.g);mk(1.4,.06,.32,0xc81818,0,1.86,1.2,v.g)}
  const a={v,b,dir,x,cz:z0,z:b.z-dir*6,st:'go',sp:15,t:0,l1,l2,sr:0,med:null};AMB.push(a);msg('🚑 Alguém chamou a ambulância',2200)}
 function siren(a,dt){if((a.sr-=dt)>0)return;a.sr=.42;const c=ctx();if(!c)return;const g0=vol(a.v.x,a.v.z,.16);if(g0<.02)return;const t=c.currentTime,o=c.createOscillator(),g=c.createGain();o.type='triangle';a.hi=!a.hi;o.frequency.setValueAtTime(a.hi?720:960,t);o.frequency.linearRampToValueAtTime(a.hi?960:720,t+.36);
  g.gain.setValueAtTime(g0,t);g.gain.linearRampToValueAtTime(0,t+.4);o.connect(g);g.connect(c.destination);o.start(t);o.stop(t+.41)}
@@ -7740,6 +7740,114 @@ let last=performance.now();const _uVQ=update;update=function(dt){_uVQ(dt);const 
  if(V.lo>4000&&V.lv>0){V.lv--;V.lo=0;V.apply()}else if(V.hi>12000&&V.lv<2){V.lv++;V.hi=0;V.apply()}};
 V.apply();
 })()}catch(e){console.log('v46 vq',e)}
+// ---------------- veículos vivos: ocupantes visíveis, roubo animado (com e sem ocupante), motorista baleado, ambulância-van ----------------
+try{(function(){
+const lowQ=()=>!(window.VQ&&VQ.on&&VQ.lv>=1);
+// ===== ocupante: 1 malha com cor por vértice (1 draw call) =====
+const OCM=new T.MeshLambertMaterial({vertexColors:true}),GC=new Map(),SHIRT=[0xd96c6c,0x6c9bd9,0xe0c46c,0x7fc98a,0xb08ad9,0xe8e8e8,0xd99a6c,0x3b3b44],SKIN=[0xe0b090,0x8d5524,0xc68642,0xf1c27d],HAIR=[0x241810,0x3b2314,0x6b4423,0xa8783a,0x111111];
+function occGeo(si,ki,hi,sh){const key=sh+'|'+si+'|'+ki+'|'+hi;let g=GC.get(key);if(g)return g;
+ const parts=[[.52,.58,.3,0,.32,0,sh!=null?sh:SHIRT[si]],[.32,.32,.32,0,.78,0,SKIN[ki]],[.34,.12,.34,0,.97,-.01,HAIR[hi]],[.13,.13,.46,-.3,.4,.26,sh!=null?sh:SHIRT[si]],[.13,.13,.46,.3,.4,.26,sh!=null?sh:SHIRT[si]],[.12,.12,.12,-.3,.4,.52,SKIN[ki]],[.12,.12,.12,.3,.4,.52,SKIN[ki]]];
+ const pos=[],nor=[],col=[],idx=[],c=new T.Color();
+ for(const[w,h,d,x,y,z,hx]of parts){const b=new T.BoxGeometry(w,h,d);b.translate(x,y,z);const p=b.attributes.position,n=b.attributes.normal,o=pos.length/3;c.setHex(hx);
+  for(let i=0;i<p.count;i++){pos.push(p.getX(i),p.getY(i),p.getZ(i));nor.push(n.getX(i),n.getY(i),n.getZ(i));col.push(c.r,c.g,c.b)}
+  for(let i=0;i<b.index.count;i++)idx.push(b.index.getX(i)+o);b.dispose()}
+ g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(pos,3));g.setAttribute('normal',new T.Float32BufferAttribute(nor,3));g.setAttribute('color',new T.Float32BufferAttribute(col,3));g.setIndex(idx);GC.set(key,g);return g}
+// posição do banco do motorista (volta e meia com cache por veículo)
+function seatOf(v){if(v._seat!==undefined)return v._seat;let s=null;const ch=v.g.children;
+ if(v.t=='car'||v.t=='junk'){const c=ch.find(m=>m.isMesh&&m.position.y>1&&m.position.y<1.8&&m.scale.y>.4&&m.scale.y<1&&m.scale.x>1.4&&m.scale.x<2.4&&m.scale.z>1.1&&m.scale.z<2.6);
+  if(c){const h=c.scale.y;s={cab:c,x:.45,y:c.position.y-h*.5+.02,z:c.position.z+c.scale.z*.08,s:Math.min(.74,h*1.0)}}}
+ else if(v.t=='truck'){const c=ch.find(m=>m.isMesh&&m.position.z>1.5&&m.scale.y>1.2&&m.scale.y<1.7&&m.scale.z>1.6&&m.scale.z<2.1&&m.scale.x>2);
+  if(c)s={cab:c,x:.55,y:c.position.y-.5,z:c.position.z-.1,s:.9}}
+ return v._seat=s}
+function glass(v,on){const s=v._seat;if(!s||!s.cab)return;const c=s.cab;if(on&&!v._gl){try{uq(c)}catch(e){return}v._gl=1;(Array.isArray(c.material)?c.material:[c.material]).forEach(q=>{q.userData._go=[q.opacity,q.transparent,q.depthWrite];q.transparent=true;q.opacity=.34;q.depthWrite=false})}
+ else if(!on&&v._gl){v._gl=0;(Array.isArray(c.material)?c.material:[c.material]).forEach(q=>{const o=q.userData._go;if(o){q.opacity=o[0];q.transparent=o[1];q.depthWrite=o[2]}})}}
+const eligible=v=>v!==P.veh&&!v.dead&&!v.nodrv&&!v.mg&&!v.dtv&&!v.g6&&!v.prev&&!v.parked&&(v.t=='car'||v.t=='truck'||v.t=='junk')&&(v._ocDead||v.tr||v.ai||v.pol||v.disp||(v.amb&&!v.parked));
+const CAND=[];let sct=0;
+function ocTick(dt){if((sct-=dt)>0)return;sct=.2;CAND.length=0;
+ for(const v of vehs){if(v.drv)v.drv.visible=false;const d=Math.hypot(v.x-P.x,v.z-P.z);
+  if(v._oc&&!v._ocKeep&&(d>34||!eligible(v))){v._oc.visible=false;glass(v,false);continue}
+  if(d<28&&eligible(v)&&seatOf(v))CAND.push(v)}
+ CAND.sort((a,b)=>Math.hypot(a.x-P.x,a.z-P.z)-Math.hypot(b.x-P.x,b.z-P.z));
+ for(let i=0;i<CAND.length;i++){const v=CAND[i];
+  if(i>=8){if(v._oc)v._oc.visible=false;glass(v,false);continue}
+  if(!v._oc){const s=v._seat,r=Math.random,pol=v.pol||v.disp,m=new T.Mesh(occGeo(r()*8|0,r()*4|0,r()*5|0,pol?0x2244aa:v.amb?0xf4f4f4:null),OCM);m.scale.setScalar(s.s);m.position.set(s.x,s.y,s.z);m.userData.nolod=1;v.g.add(m);v._oc=m}
+  v._oc.visible=true;if(!v._ocDead)glass(v,true)}}
+// ===== motorista baleado pelo vidro =====
+const DRVD=[];
+function killDriver(v){v._ocDead=1;const m=v._oc;if(m){m.rotation.x=.55;m.position.y-=.05;const w=new T.Vector3();m.getWorldPosition(w);try{blood({x:w.x,z:w.z,y:w.y-.4},true)}catch(e){}}
+ try{crime(v.pol?.8:.5,v.x,v.z)}catch(e){}v.tr=0;DRVD.push({v,t:0,m:2.2+Math.random()*1.6,s:(Math.random()-.5)*.25})}
+function drvdTick(dt){for(let i=DRVD.length-1;i>=0;i--){const d=DRVD[i],v=d.v;if(v.dead||v===P.veh||!vehs.includes(v)){DRVD.splice(i,1);continue}d.t+=dt;
+  try{if(d.t<d.m)drive(v,d.s,1,0,dt);else{drive(v,0,0,1,dt);if(Math.abs(v.sp)<.35){v.sp=0;DRVD.splice(i,1)}}}catch(e){DRVD.splice(i,1)}}}
+let SHT=0;const _shK=shoot;shoot=function(){SHT=1;try{return _shK.apply(this,arguments)}finally{SHT=0}};
+const _dvK=dmgV;dmgV=function(v,n){
+ try{if(SHT&&v&&v._oc&&v._oc.visible&&!v._ocDead&&v!==P.veh&&!v.dead&&n<=40&&Math.hypot(v.x-P.x,v.z-P.z)<45&&!v.pol&&!v.disp){v._ocHit=(v._ocHit||0)+1;if(Math.random()<.5||v._ocHit>=3){v._rxd=1;killDriver(v)}}}catch(e){}
+ return _dvK.apply(this,arguments)};
+// ===== roubo animado =====
+const EA={on:0};
+const HW={car:1.08,junk:1.08,sup:1.15,truck:1.4,swat:1.4,bus:1.45,moto:.5,smoto:.5,bike:.4,boat:1.15};
+function door(v,side,hz,len){let d=v._door;if(!d){const piv=new T.Group(),bc=(()=>{const c=v.g.children[0];const m=c&&c.material;const q=Array.isArray(m)?m[0]:m;return q&&q.color?q.color.getHex():0xcccccc})();
+  const body=new T.Mesh(BG,mat(bc)),gl=new T.Mesh(BG,mat(0x2a3340));piv.add(body);piv.add(gl);piv.visible=false;v.g.add(piv);d=v._door={piv,body,gl}}
+ d.body.scale.set(.07,.74,len);d.body.position.set(0,0,-len/2);d.gl.scale.set(.075,.3,len*.78);d.gl.position.set(0,.5,-len/2);d.piv.position.set(side*(HW[v.t]||1.1)+side*.02,.95,hz);return d}
+function startEA(v,px,pz,n0){if(lowQ())return;const t=v.t;const kind=(t=='car'||t=='junk'||t=='truck'||t=='swat'||t=='bus'||t=='sup')?'door':(t=='moto'||t=='smoto'||t=='bike')?'moto':t=='boat'?'boat':null;if(!kind)return;
+ const yaw=v.yaw,rx=Math.cos(yaw),rz=-Math.sin(yaw),fx=Math.sin(yaw),fz=Math.cos(yaw),lx=(px-v.x)*rx+(pz-v.z)*rz,hw=HW[t]||1.1;
+ let vic=peds.slice(n0).find(p=>Math.hypot(p.x-v.x,p.z-v.z)<3.6);
+ if(v._ocDead){v._ocDead=0;if(v._oc)v._oc.visible=false;const w0=Math.hypot(0,0),q=spawnPed(v.x+rx*(hw+1.3),v.z+rz*(hw+1.3),0);q.g.position.set(q.x,.9,q.z);try{hurt(q,99,v.x,v.z,3)}catch(e){}vic=null}
+ let side=lx>=0?1:-1;if(vic&&kind=='door')side=1;
+ const sd=seatOf(v),tall=t=='truck'||t=='bus'||t=='swat',seat=kind=='door'?(sd?{x:sd.x,y:sd.y+(sd.s*.3),z:sd.z}:{x:.45,y:tall?2.0:1.0,z:.1}):kind=='moto'?{x:0,y:1.0,z:-.15}:{x:0,y:.8,z:1.0};
+ const dz=kind=='door'?(sd?sd.z+.5:.5):0,W=(lx,lz,y)=>({x:v.x+rx*lx+fx*lz,z:v.z+rz*lx+fz*lz,y:(v.y||0)+y});
+ const D=W(side*(hw+(kind=='door'?.75:.85)),kind=='door'?dz-.5:-.1,.9),S=W(seat.x,seat.z,seat.y);
+ const path=[{x:px,z:pz}];if(kind=='door'&&lx*side<0){const L=t=='truck'?4.2:2.6;path.push(W(-side*(hw+.9),-(L),0))}path.push(D);
+ let len=0;for(let i=1;i<path.length;i++)len+=Math.hypot(path[i].x-path[i-1].x,path[i].z-path[i-1].z);
+ const walk=Math.min(.9,.25+len*.16),open=kind=='door'?.32:0,pull=vic?.42:0,inn=kind=='door'?(tall?.62:.46):.5,close=kind=='door'?.25:.05;
+ EA.on=1;EA.v=v;EA.t=0;EA.kind=kind;EA.side=side;EA.path=path;EA.D=D;EA.S=S;EA.tw=walk;EA.to=open;EA.tp=pull;EA.ti=inn;EA.tc=close;EA.tot=walk+open+pull+inn+close;EA.vic=vic||null;EA.vs=W(seat.x,seat.z,0);EA.hop=kind=='boat'?.35:kind=='moto'?.45:tall?.9:.25;EA.sc=sd&&kind=='door'?Math.max(.7,Math.min(1,sd.s+.12)):kind=='door'?.85:kind=='moto'?.95:.9;
+ EA.yaw=Math.atan2(-rx*side,-rz*side);EA.dr=kind=='door'?door(v,side,dz-.5+.5,tall?1.3:1.05):null;EA.dz=dz;
+ if(EA.dr)EA.dr.piv.position.x=side*hw+side*.02;
+ if(vic){vic.rt=Math.max(vic.rt||0,EA.tot+.4);vic.g.visible=false;if(v._oc){v._oc.visible=true;v._ocKeep=1}}
+ EA.D.yaw=EA.yaw;P.g.visible=true}
+const lerp=(a,b,t)=>a+(b-a)*t,ease=t=>t*t*(3-2*t);
+function eaTick(dt){const v=EA.v;if(!v||P.veh!==v||P.dead>0){eaEnd();return}EA.t+=dt;let t=EA.t;const u=P.g.userData,g=P.g;
+ // fase 1: andar até a porta
+ let x,z,y=(v.y||0)+.9,yaw=EA.yaw,sc=1,open=0,lg=0,ar=0;
+ if(t<EA.tw){const k=t/EA.tw,P0=EA.path,n=P0.length-1,f=k*n,i=Math.min(n-1,Math.floor(f)),q=f-i;x=lerp(P0[i].x,P0[i+1].x,q);z=lerp(P0[i].z,P0[i+1].z,q);yaw=Math.atan2(P0[i+1].x-P0[i].x,P0[i+1].z-P0[i].z);lg=Math.sin(t*14)*.8;ar=-lg*.7;y=.9}
+ else{const D=EA.D;x=D.x;z=D.z;y=.9;t-=EA.tw;
+  // fase 2: abre a porta
+  if(t<EA.to){open=ease(t/EA.to)}else{open=1;t-=EA.to;
+   // fase 3: puxa o ocupante para fora
+   if(t<EA.tp){const k=t/EA.tp,p=EA.vic;ar=-1.3*k;if(p){if(k>.15){p.g.visible=true;if(v._oc){v._oc.visible=false}}const vs=EA.vs,out=EA.D;p.x=lerp(vs.x,out.x+(out.x-v.x)*.55,ease(k));p.z=lerp(vs.z,out.z+(out.z-v.z)*.55,ease(k));p.y=.9;p.g.position.set(p.x,p.y,p.z);p.g.rotation.x=-.7*Math.sin(k*3.1);p.g.rotation.y=EA.yaw+Math.PI}}
+   else{t-=EA.tp;if(EA.vic&&!EA.vicDone){EA.vicDone=1;const p=EA.vic;p.g.rotation.x=0;p.rt=Math.min(p.rt||.6,.7);v._ocKeep=0}
+    // fase 4: entra no banco
+    if(t<EA.ti){const k=ease(t/EA.ti),S=EA.S,D=EA.D;x=lerp(D.x,S.x,k);z=lerp(D.z,S.z,k);y=lerp(.9,S.y,k)+Math.sin(k*3.14159)*EA.hop;sc=lerp(1,EA.sc,k);lg=-1.4*k;ar=-1*k;yaw=lerp(EA.yaw,v.yaw,k)}
+    else{t-=EA.ti;x=EA.S.x;z=EA.S.z;y=EA.S.y;sc=EA.sc;lg=-1.4;ar=-1;yaw=v.yaw;if(EA.kind=='door')open=1-ease(Math.min(1,t/EA.tc))}}}}
+ // o veículo já foi "ocupado" pelo jogo: o corpo é visual — segura o carro parado
+ v.sp=0;
+ g.visible=true;g.scale.setScalar(sc);g.position.set(x,y,z);g.rotation.set(0,yaw,0);if(u){u.lL.rotation.x=lg;u.lR.rotation.x=-lg;u.aL.rotation.x=ar;u.aR.rotation.x=-ar;u.gun&&(u.gun.visible=false)}
+ if(EA.dr){const d=EA.dr;d.piv.visible=open>.01;d.piv.rotation.y=-EA.side*open*1.25}
+ if(EA.t>=EA.tot)eaEnd()}
+function eaEnd(){const v=EA.v;EA.on=0;if(v){if(v._door)v._door.piv.visible=false;v._ocKeep=0}if(EA.vic){EA.vic.g.visible=true;EA.vic.g.rotation.x=0}EA.vic=null;EA.v=null}
+const _aE=act;act=function(){if(EA.on)return;if(P.veh||P.dead>0||PAUSED||lowQ())return _aE.apply(this,arguments);
+ const px=P.x,pz=P.z,n0=peds.length,had=P.veh;let near=null,bd=5;
+ _aE.apply(this,arguments);
+ if(P.veh&&!had){try{startEA(P.veh,px,pz,n0)}catch(e){console.log('ea',e);EA.on=0}}};
+const _uEA=update;update=function(dt){if(EA.on){J.x=J.y=0;tb=0;tc=0}_uEA(dt);if(PAUSED)return;try{if(EA.on)eaTick(dt);ocTick(dt);drvdTick(dt)}catch(e){console.log('v46 veh',e)}};
+window.VEHX={EA,killDriver,seatOf,eligible};
+// ===== ambulância-van + ambulâncias estacionadas no hospital =====
+window.mkAmbVan=function(v){const g=v.g;while(g.children.length)g.remove(g.children[0]);
+ const B=(w,h,d,col,x,y,z)=>{const m=new T.Mesh(BG,mat(col));m.scale.set(w,h,d);m.position.set(x,y,z);g.add(m);return m};
+ B(2.1,.95,5.0,0xf4f4f4,0,.78,0);B(2.1,1.15,3.0,0xf4f4f4,0,1.83,-.95);B(2.12,.3,5.02,0xc81818,0,.9,0);
+ B(1.9,.8,1.7,0x2a3340,0,1.62,1.3);B(2.0,.1,1.8,0xf4f4f4,0,2.07,1.3);B(1.96,.1,.12,0x222226,0,.4,2.55);B(1.96,.1,.12,0x222226,0,.4,-2.55);
+ for(const s of[-1,1]){B(.04,1.0,1.0,0xffffff,s*1.07,1.9,-.95);B(.05,.8,.22,0xd81818,s*1.09,1.9,-.95);B(.05,.22,.8,0xd81818,s*1.09,1.9,-.95)}
+ B(.04,1.1,.02,0x9a9a9a,0,1.85,-2.52);B(1.2,.04,.02,0xc81818,0,1.4,-2.52);
+ B(.34,.2,.06,0xfff2b0,-.7,.92,2.53);B(.34,.2,.06,0xfff2b0,.7,.92,2.53);B(.3,.18,.06,0xff2a2a,-.82,1.05,-2.53);B(.3,.18,.06,0xff2a2a,.82,1.05,-2.53);
+ const l1=B(.6,.2,.34,0xff2222,-.4,2.22,1.1),l2=B(.6,.2,.34,0x2244ff,.4,2.22,1.1);B(1.5,.06,.4,0x222226,0,2.14,1.1);
+ const wg=new T.CylinderGeometry(.44,.44,.32,14);wg.rotateZ(Math.PI/2);const wm=mat(0x141414);
+ for(const a of[-1,1])for(const b of[-1.6,1.6]){const w=new T.Mesh(wg,wm);w.position.set(a*1.05,.44,b);g.add(w)}
+ v.amb=1;v.kd='ambulancia';try{window.ENHV&&ENHV(v)}catch(e){}return{l1,l2}};
+let parked=0;const _uPk=update;update=function(dt){_uPk(dt);if(parked||PAUSED)return;parked=1;
+ try{const spots=[[216.2,-133.5],[220.8,-133.5],[225.4,-133.5],[234.6,-122.5],[239.2,-122.5],[243.8,-122.5],[216.2,-122.5],[247.4,-122.5]];let n=0;
+  for(const[x,z]of spots){if(n>=3)break;if(vehs.some(w=>Math.hypot(w.x-x,w.z-z)<3.4))continue;const v=spawnV('car',x,z,z<-128?0:Math.PI,0xf4f4f4,0);v.tr=0;v.ai=0;v.parked=1;v.hp=v.mh=220;mkAmbVan(v);n++}
+ }catch(e){console.log('v46 amb park',e)}};
+
+})()}catch(e){console.log('v46 veh8',e)}
 // ---------------- agendador: eventos raros, um por vez ----------------
 const KINDS=[['fight',evFight,1],['chat',evChat,1.3],['house',evHouse,1.6],['park',evPark,1],['chasefoot',evChaseFoot,1],['chasecar',evChaseCar,1]];
 function canRun(){if(PAUSED||P.dead>0||stars()>0||FZ.mode!='gnd'||(P.veh&&(P.veh.t=='plane'||P.veh.t=='heli'||P.veh.t=='boat'||P.veh.t=='tank'||P.veh.t=='train')))return false;try{if(inHouse(P)||inZone())return false}catch(e){}if(window.SH&&SH.on)return false;return true}
