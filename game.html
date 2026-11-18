@@ -2391,7 +2391,7 @@ window.V18={EVC,DR,restoreWorld,takeSnap,evStart};
 // ===== v24: configurações, sangue, densidade =====
 (function(){
 const g=id=>document.getElementById(id),KEY='maua_cfg';
-const DEF={tex:1,res:1,ren:1,blood:1,pop:1,gfx:1,gore:0,perf:0};
+const DEF={tex:1,res:1,ren:1,blood:1,pop:1,gfx:1,gore:0,perf:0,vq:1};
 let CFG=Object.assign({},DEF);
 try{const o=JSON.parse(localStorage.getItem(KEY)||'null');if(o)for(const k in DEF)if(typeof o[k]=='number')CFG[k]=o[k]}catch(e){}
 window.CFG=CFG;
@@ -2449,12 +2449,12 @@ document.head.insertAdjacentHTML('beforeend',`<style>
 </style>`);
 document.body.insertAdjacentHTML('beforeend',`<div id='cf'><div class='bgi2'></div><div class='svt'>Configurações</div><div class='svs'>Ajuste o gráfico e o desempenho do jogo</div><div class='cfl' id='cfl'></div><div id='cfh'>Pouco FPS? Use “Baixo” em Resolução, Renderização e Densidade.</div><div class='vlt red' id='cfv'>⬅ Voltar</div></div>`);
 const LV=['Baixo','Médio','Alto'];
-const ROWS=[['tex','Qualidade de Textura','Nitidez das texturas',LV],['res','Resolução','Quantidade de pixels da tela',LV],['ren','Renderização','Baixo = visual cartoon leve (ao reiniciar)',LV],['blood','Sangue','Efeitos de sangue',['Desligado','Ativo']],['gore','Gore','Cabeça/membros, ferimentos e ossos quebrados',['Desligado','Ativo']],['pop','Densidade Populacional','Pedestres e trânsito',LV],['gfx','Estilo Gráfico','Muda ao reiniciar o jogo',['Cartoon','Realista']],['perf','Contador de desempenho','FPS, draw calls e materiais no topo da tela',['Desligado','Ativo']],['cheat','Cheats','Digite um código secreto',['⌨️ Digitar código']]];
+const ROWS=[['tex','Qualidade de Textura','Nitidez das texturas',LV],['res','Resolução','Quantidade de pixels da tela',LV],['ren','Renderização','Baixo = visual cartoon leve (ao reiniciar)',LV],['blood','Sangue','Efeitos de sangue',['Desligado','Ativo']],['gore','Gore','Cabeça/membros, ferimentos e ossos quebrados',['Desligado','Ativo']],['pop','Densidade Populacional','Pedestres e trânsito',LV],['gfx','Estilo Gráfico','Muda ao reiniciar o jogo',['Cartoon','Realista']],['vq','Qualidade Visual','Luz, céu e sombras melhorados (Baixo = visual anterior)',['Baixo','Alto']],['perf','Contador de desempenho','FPS, draw calls e materiais no topo da tela',['Desligado','Ativo']],['cheat','Cheats','Digite um código secreto',['⌨️ Digitar código']]];
 function draw(){g('cfl').innerHTML=ROWS.map(([k,n,s,o])=>{
-  const opts=k=='cheat'?[0]:k=='blood'||k=='gfx'||k=='gore'||k=='perf'?[0,1]:[0,1,2];
+  const opts=k=='cheat'?[0]:k=='blood'||k=='gfx'||k=='gore'||k=='perf'||k=='vq'?[0,1]:[0,1,2];
   return "<div class='cfr'><div class='cfn'>"+n+"<small>"+s+"</small></div><div class='cfo'>"+opts.map(i=>"<div data-k='"+k+"' data-i='"+i+"' class='"+(CFG[k]==i?((k=='blood'||k=='gore'||k=='perf')&&i==0?'on off':'on'):'')+"'>"+o[i]+"</div>").join('')+"</div></div>"}).join('');
  g('cfl').querySelectorAll('.cfo div').forEach(e=>e.onclick=()=>{const k=e.dataset.k,i=+e.dataset.i;if(k=='cheat'){openCheat();return}if(CFG[k]===i)return;CFG[k]=i;save();
-  if(k=='res')applyRes();else if(k=='ren'){applyRen();try{msg(i==0?'Renderização baixa: visual cartoon leve ao reiniciar':'Renderização aplicada',2400)}catch(x){}}else if(k=='tex')applyTex();else if(k=='pop')applyPop();else if(k=='gfx')try{msg('Estilo gráfico aplicado ao reiniciar o jogo',3000)}catch(x){}else if(k=='perf'){try{window.PERFHUD&&PERFHUD(i)}catch(x){}}draw()})}
+  if(k=='res')applyRes();else if(k=='ren'){applyRen();try{msg(i==0?'Renderização baixa: visual cartoon leve ao reiniciar':'Renderização aplicada',2400)}catch(x){}}else if(k=='tex')applyTex();else if(k=='pop')applyPop();else if(k=='gfx')try{msg('Estilo gráfico aplicado ao reiniciar o jogo',3000)}catch(x){}else if(k=='perf'){try{window.PERFHUD&&PERFHUD(i)}catch(x){}}else if(k=='vq'){try{window.VQ&&VQ.apply()}catch(x){}}draw()})}
 function open(){draw();g('cf').style.display='block'}
 // ---------- cheats ----------
 document.head.insertAdjacentHTML('beforeend',`<style>
@@ -4881,22 +4881,23 @@ const ANI=Math.min(8,rd.capabilities.getMaxAnisotropy?rd.capabilities.getMaxAnis
 // ---------- cores do ambiente ----------
 const ZEN=new T.Color(0x2f6fd6),HOR=new T.Color(0xf4d3ab),GND=new T.Color(0xd9c6ad),FOGC=new T.Color(0xe3cdb2);
 const SUN=new T.Vector3(-0.62,0.42,-0.66).normalize();
-const U={uC:{value:cam.position},uT:{value:0},uS:{value:SUN},uZ:{value:ZEN},uH:{value:HOR}};
+const U={uC:{value:cam.position},uT:{value:0},uS:{value:SUN},uZ:{value:ZEN},uH:{value:HOR},uQ:{value:(window.CFG&&CFG.vq)?1:0}};
 // ---------- luz ----------
 try{sc.children.forEach(o=>{if(o.isHemisphereLight){o.color.set(0xa9c8ff);o.groundColor.set(0x8c7352);o.intensity=.62}});
  sun.color.set(0xffe2b8);sun.intensity=1.12;sun.position.copy(SUN).multiplyScalar(150);
  sc.add(new T.AmbientLight(0x2a2f3a,.35))}catch(e){console.log('luz',e)}
 try{sc.fog.color.copy(FOGC);sc.background=null}catch(e){}
 // ---------- céu (cúpula com gradiente, sol e nuvens procedurais) ----------
-const sky=new T.Mesh(new T.SphereGeometry(1,32,16),new T.ShaderMaterial({uniforms:{uT:U.uT,uS:U.uS,uZ:U.uZ,uH:U.uH,uG:{value:GND}},side:T.BackSide,depthWrite:false,depthTest:false,fog:false,
+const sky=new T.Mesh(new T.SphereGeometry(1,32,16),new T.ShaderMaterial({uniforms:{uT:U.uT,uS:U.uS,uZ:U.uZ,uH:U.uH,uQ:U.uQ,uG:{value:GND}},side:T.BackSide,depthWrite:false,depthTest:false,fog:false,
  vertexShader:'varying vec3 vD;void main(){vD=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
- fragmentShader:`uniform float uT;uniform vec3 uS,uZ,uH,uG;varying vec3 vD;
+ fragmentShader:`uniform float uT,uQ;uniform vec3 uS,uZ,uH,uG;varying vec3 vD;
  float hs(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
  float ns(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hs(i),hs(i+vec2(1.,0.)),f.x),mix(hs(i+vec2(0.,1.)),hs(i+vec2(1.,1.)),f.x),f.y);}
  void main(){vec3 d=normalize(vD);float h=d.y,s=max(dot(d,uS),0.);
   vec3 c=mix(uH,uZ,pow(clamp(h,0.,1.),.42));
   c=mix(c,uG,smoothstep(0.,-.06,h));
-  c+=vec3(1.,.72,.42)*pow(s,5.)*.32+vec3(1.,.88,.66)*pow(s,48.)*.45;
+  c=mix(c,uH*vec3(1.03,1.,.97),exp(-max(h,0.)*9.)*.3*uQ);
+  c+=vec3(1.,.72,.42)*pow(s,5.)*.32+vec3(1.,.88,.66)*pow(s,48.)*.45+vec3(1.,.7,.4)*pow(s,14.)*.12*uQ;
   if(h>0.){vec2 p=d.xz/(h+.1)*1.3+vec2(uT*.006,uT*.002);
    float n=ns(p)*.5+ns(p*2.03)*.25+ns(p*4.01)*.125+ns(p*8.05)*.0625;
    float cl=smoothstep(.52,.8,n)*smoothstep(0.,.16,h);
@@ -7188,7 +7189,7 @@ const _lp=loop;loop=function(n){_lp(n);if(!on)return;fr++;const d=n-t0;if(d<500)
  fr=0;t0=n;if(n-tm>3000||!nm){tm=n;count()}const i=rd.info;PERF.fps=fps;PERF.calls=i.render.calls;PERF.tris=i.render.triangles;PERF.mats=nm;PERF.upd=ua;PERF.rnd=ra;PERF.esp=esp;
  const cv=rd.domElement,q=x=>x<10?x.toFixed(1):Math.round(x);
  let t=fps+' FPS · '+i.render.calls+' DC · '+nm+' mat · '+i.memory.geometries+' geo · '+i.memory.textures+' tex'+(bad?' · ⚠'+bad:'')+
-  '\nUPD '+q(ua)+'/'+q(uM)+' · RND '+q(ra)+'/'+q(rM)+' · ESP '+q(esp)+' · '+cv.width+'×'+cv.height+' · b'+BID;
+  '\nUPD '+q(ua)+'/'+q(uM)+' · RND '+q(ra)+'/'+q(rM)+' · ESP '+q(esp)+' · '+cv.width+'×'+cv.height+' · b'+BID+(window.VQ?' · '+VQ.tag():'');
  if(jump&&performance.now()-jump.t<30000)t+='\n⚠ +'+jump.n+' mat ← '+jump.why;
  el.textContent=t;el.style.color=fps>=50?'#cfc':fps>=30?'#fe8':'#f88';uS=uM=uN=rS=rM=rN=0};
 }catch(e){console.log('perf',e)}})();
@@ -7717,6 +7718,28 @@ const _cs=closeShop;closeShop=function(){amm.style.display='none';return _cs.app
 const _su3=shopUI;shopUI=function(){_su3.apply(this,arguments);refresh()};
 window.AMMU={refresh,vendor};
 })()}catch(e){console.log('v46 ammu',e)}
+// ---------------- Etapa 0/1 visual: chave "Qualidade Visual", governador de quadro, luz mais contrastada, céu com bruma e sombra de contato nas árvores ----------------
+try{(function(){
+const V=window.VQ={on:!!(window.CFG&&CFG.vq),lv:2,ema:16,lo:0,hi:0,tag(){return 'Q'+(V.on?V.lv:'-')}};
+const hemi=sc.children.find(o=>o.isHemisphereLight),amb=sc.children.find(o=>o.isAmbientLight);
+const L0={sc:sun.color.getHex(),si:sun.intensity,hc:hemi&&hemi.color.getHex(),hg:hemi&&hemi.groundColor.getHex(),hi:hemi&&hemi.intensity,ai:amb&&amb.intensity};
+V.light=()=>{if(window.GFX===0||!hemi)return;const on=V.on;
+ sun.color.setHex(on?0xffdcae:L0.sc);sun.intensity=L0.si*(on?1.2:1);hemi.color.setHex(on?0xb2cdff:L0.hc);hemi.groundColor.setHex(on?0x927b58:L0.hg);hemi.intensity=L0.hi*(on?.88:1);if(amb)amb.intensity=L0.ai*(on?.6:1)};
+// sombra de contato sob as copas (1 InstancedMesh, 1 draw call)
+let TS=null;const build=()=>{const pts=[];const GR=new Set([0x4aa648,0x2f8a3a,0x3b9a45,0x2a7a35]);
+ for(const c of(window.XINST||[]))c.a.forEach(d=>{if(!d.dead&&GR.has(d[6])&&d[1]>1.8&&d[3]>2&&d[3]<8&&Math.abs(d[3]-d[5])<1.5)pts.push([d[0],d[2],d[3]])});
+ if(!pts.length)return;const bg=new T.PlaneGeometry(1,1);bg.rotateX(-Math.PI/2);const cv=document.createElement('canvas');cv.width=cv.height=64;const cg=cv.getContext('2d'),gr=cg.createRadialGradient(32,32,4,32,32,31);gr.addColorStop(0,'rgba(0,0,0,.75)');gr.addColorStop(.6,'rgba(0,0,0,.45)');gr.addColorStop(1,'rgba(0,0,0,0)');cg.fillStyle=gr;cg.fillRect(0,0,64,64);
+ const m=new T.InstancedMesh(bg,new T.MeshBasicMaterial({map:new T.CanvasTexture(cv),transparent:true,depthWrite:false,opacity:.5,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}),pts.length);
+ const o=new T.Object3D();pts.forEach((q,i)=>{o.position.set(q[0],.07,q[1]);o.scale.set(q[2]*1.25,1,q[2]*1.25);o.updateMatrix();m.setMatrixAt(i,o.matrix)});m.instanceMatrix.needsUpdate=true;
+ m.frustumCulled=false;m.userData.fxp=1;m.renderOrder=1;m.matrixAutoUpdate=false;sc.add(m);TS=m};
+V.sh=()=>{if(window.GFX===0)return;if(!TS&&V.on)build();if(TS)TS.visible=V.on&&V.lv>=1};
+V.apply=()=>{V.on=!!CFG.vq;try{if(typeof U!=='undefined'&&U.uQ)U.uQ.value=V.on&&V.lv>=1?1:0}catch(e){}V.light();V.sh()};
+// governador: mede o tempo de quadro; se o aparelho não aguenta, desliga primeiro os extras visuais (nunca mexe no jogo)
+let last=performance.now();const _uVQ=update;update=function(dt){_uVQ(dt);const n=performance.now(),d=n-last;last=n;if(d>250||PAUSED)return;V.ema+=(d-V.ema)*.04;
+ if(V.ema>40){V.lo+=d;V.hi=0}else if(V.ema<27){V.hi+=d;V.lo=0}else{V.lo=V.hi=0}
+ if(V.lo>4000&&V.lv>0){V.lv--;V.lo=0;V.apply()}else if(V.hi>12000&&V.lv<2){V.lv++;V.hi=0;V.apply()}};
+V.apply();
+})()}catch(e){console.log('v46 vq',e)}
 // ---------------- agendador: eventos raros, um por vez ----------------
 const KINDS=[['fight',evFight,1],['chat',evChat,1.3],['house',evHouse,1.6],['park',evPark,1],['chasefoot',evChaseFoot,1],['chasecar',evChaseCar,1]];
 function canRun(){if(PAUSED||P.dead>0||stars()>0||FZ.mode!='gnd'||(P.veh&&(P.veh.t=='plane'||P.veh.t=='heli'||P.veh.t=='boat'||P.veh.t=='tank'||P.veh.t=='train')))return false;try{if(inHouse(P)||inZone())return false}catch(e){}if(window.SH&&SH.on)return false;return true}
