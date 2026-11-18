@@ -8116,7 +8116,7 @@ function prep(name,gltf){const sc=gltf.scene;let body=null;const wh=[];
  let fz=0;wh.forEach(w=>{if(/front/.test(w.name))fz+=w.position.z});const flip=wh.length&&fz<0;
  let wr=.3;if(wh[0]){wh[0].geometry.computeBoundingBox();wr=(wh[0].geometry.boundingBox.max.y-wh[0].geometry.boundingBox.min.y)/2}
  HD.tpl[name]={sc,paint:RECOLOR[name]?paint:null,gg,gbb:gg?bb:null,sz,box,flip,wr,ok:1}}
-function loadAll(names,i){if(i>=names.length){HD.ready=1;console.log('hd: modelos prontos',names.length);return}
+function loadAll(names,i){if(i>=names.length){HD.ready=1;if(!Object.keys(HD.tpl).length)HD.on=false;console.log('hd: modelos prontos',Object.keys(HD.tpl).length);return}
  const n=names[i];try{loader.parse(b2ab(PK[n]),'',g=>{try{prep(n,g)}catch(e){HD.stat.fail++;console.log('hd prep',n,e)}setTimeout(()=>loadAll(names,i+1),30)},e=>{HD.stat.fail++;console.log('hd parse',n,e);setTimeout(()=>loadAll(names,i+1),30)})}catch(e){HD.stat.fail++;console.log('hd',n,e);setTimeout(()=>loadAll(names,i+1),30)}}
 const colOf=m=>{const q=m&&m.material&&(Array.isArray(m.material)?m.material[0]:m.material);return q&&q.color?q.color.getHex():0xcccccc};
 // ---- instância ----
