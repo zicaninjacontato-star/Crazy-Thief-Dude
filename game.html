@@ -8076,7 +8076,7 @@ if(!T.GLTFLoader||!PK||!Object.keys(PK).length){console.log('hd: sem pacote — 
 const HD=window.HD={ready:0,tpl:{},list:[],on:true,stat:{up:0,fail:0}};
 const loader=new T.GLTFLoader();
 const b2ab=b=>{const s=atob(b),a=new Uint8Array(s.length);for(let i=0;i<s.length;i++)a[i]=s.charCodeAt(i);return a.buffer};
-function modelOf(v){return v.t=='car'&&v.kd=='esportivo'&&!v.pol&&!v.disp&&!v.amb&&!v.taxi?'esportivo':null}
+function modelOf(v){return v.t=='car'&&(v.kd=='esportivo'||v.kd=='rua'||v.kd=='luxo')&&!v.pol&&!v.disp&&!v.amb&&!v.taxi?'esportivo':null}
 // ---- materiais compartilhados ----
 const lam=window.GFX===0;
 const DARK=lam?new T.MeshLambertMaterial({vertexColors:true}):new T.MeshPhongMaterial({vertexColors:true,shininess:35,specular:0x333333});
@@ -8106,7 +8106,7 @@ function upgrade(v){const name=modelOf(v),tp=name&&HD.tpl[name];if(!tp)return fa
  hd.add(bp);const wh=[];
  for(const k of['fl','fr','rl','rr']){const w=tp.wheels[k],wg=new T.Group();wg.position.copy(w.pos);wg.rotation.order='YXZ';wg.userData.front=k[0]=='f';const wm=new T.Mesh(w.geo,DARK);wg.add(wm);ent.push([wm,w.geo,lo&&lo.wheels[k]?lo.wheels[k].geo:null]);hd.add(wg);wh.push(wg)}
  hd.scale.setScalar(s);hd.position.z=-tp.zc*s;v.g.add(hd);
- const hid=[];ch.forEach(o=>{if(o!==hd&&o.visible&&!o.userData.nolod&&!o.userData.lodm){o.visible=false;hid.push(o)}});
+ const hid=[];ch.forEach(o=>{if(o!==hd&&o.visible&&!o.userData.nolod&&!o.userData.lodm&&!(o.scale.y<.06&&o.position.y<.3)){o.visible=false;hid.push(o)}});
  v._hd=hd;v._hdH=hid;v._hdT=tp;v._hdN=name;v._hdB=bp;v._hdW=wh;v._hdG=g;v._hdE=ent;v._hdLo=0;v._hdS=s;v._hy=v.yaw;v._hs=v.sp||0;v._hp=0;v._hr=0;v._hsa=0;v._hw=tp.W*s*.46;
  const ch2=Math.max(.5,(tp.roof-.4)*s)+.11,old=v._seat,cab=old&&old.cab||c0;
  v._seat={cab:{scale:{x:1,y:ch2,z:1},position:cab.position,isMesh:1,visible:true,material:cab.material},x:tp.seat.x*s,y:(tp.seat.y-.1)*s,z:(tp.seat.z-tp.zc)*s,s:.42};
