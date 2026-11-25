@@ -62,8 +62,14 @@ jobs:
           NOTES="Build ${GITHUB_RUN_NUMBER} (${GITHUB_SHA::7}). Protótipo em Godot 4.3. Instala ao lado dos outros APKs. O contador do jogo mostra b${GITHUB_SHA::7}."
           # atualiza a release existente (apagar e recriar passou a dar HTTP 500 no GitHub)
           if gh release view godot-slice >/dev/null 2>&1; then
-            gh release upload godot-slice CrazyThiefDudeNext.apk --clobber
-            gh release edit godot-slice --title "Crazy Thief Dude Next (fatia de teste Godot)" --notes "$NOTES"
+            # o GitHub às vezes responde 500 mesmo concluindo o envio: tenta de novo e confere pelo tamanho
+            SIZE=$(stat -c %s CrazyThiefDudeNext.apk)
+            for i in 1 2 3 4; do
+              gh release upload godot-slice CrazyThiefDudeNext.apk --clobber && break
+              sleep 25
+              if gh release view godot-slice --json assets --jq ".assets[] | select(.name==\"CrazyThiefDudeNext.apk\") | .size" | grep -qx "$SIZE"; then break; fi
+            done
+            gh release edit godot-slice --title "Crazy Thief Dude Next (fatia de teste Godot)" --notes "$NOTES" || true
           else
             gh release create godot-slice CrazyThiefDudeNext.apk --target "$GITHUB_SHA" --title "Crazy Thief Dude Next (fatia de teste Godot)" --notes "$NOTES"
           fi
