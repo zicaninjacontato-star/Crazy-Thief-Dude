@@ -59,5 +59,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp godot/build/CrazyThiefDudeNext.apk CrazyThiefDudeNext.apk
-          gh release delete godot-slice --yes --cleanup-tag || true
-          gh release create godot-slice CrazyThiefDudeNext.apk --target "$GITHUB_SHA" --title "Crazy Thief Dude Next (fatia de teste Godot)" --notes "Build ${GITHUB_RUN_NUMBER} (${GITHUB_SHA::7}). Protótipo em Godot 4.3: um bairro, personagem, carro com física e polícia básica. Instala ao lado dos outros APKs."
+          NOTES="Build ${GITHUB_RUN_NUMBER} (${GITHUB_SHA::7}). Protótipo em Godot 4.3. Instala ao lado dos outros APKs. O contador do jogo mostra b${GITHUB_SHA::7}."
+          # atualiza a release existente (apagar e recriar passou a dar HTTP 500 no GitHub)
+          if gh release view godot-slice >/dev/null 2>&1; then
+            gh release upload godot-slice CrazyThiefDudeNext.apk --clobber
+            gh release edit godot-slice --title "Crazy Thief Dude Next (fatia de teste Godot)" --notes "$NOTES"
+          else
+            gh release create godot-slice CrazyThiefDudeNext.apk --target "$GITHUB_SHA" --title "Crazy Thief Dude Next (fatia de teste Godot)" --notes "$NOTES"
+          fi
