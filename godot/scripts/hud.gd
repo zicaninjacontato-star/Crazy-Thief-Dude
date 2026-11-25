@@ -4,6 +4,7 @@ extends CanvasLayer
 signal enter_pressed
 signal jump_pressed
 signal weapon_pressed
+signal shop_pressed
 
 var joy := Vector2.ZERO
 var gas := false
@@ -30,6 +31,8 @@ var buttons := {}   # nome -> Rect2 (em pixels de tela)
 var driving := false
 var money: Label
 var hp := 100.0
+var armor := 0.0
+var shop_label := ""   # texto do botão de loja (vazio = escondido)
 var map_player := Vector3.ZERO
 var map_yaw := 0.0
 var map_police := Vector3.INF
@@ -90,6 +93,8 @@ func _layout() -> void:
 		buttons["jump"] = Rect2(s.x - b * 2.2 - 44, s.y - b - 30, b, b)
 		buttons["sprint"] = Rect2(s.x - b * 1.2 - 24, s.y - b * 2.3 - 50, b * 1.2, b * 0.8)
 	buttons["weapon"] = Rect2(s.x - 250, 128, 230, 44)
+	if shop_label != "" and not driving:
+		buttons["shop"] = Rect2(s.x - b - 24, s.y * 0.38 - b - 16, b, b)
 
 func _input(e: InputEvent) -> void:
 	_layout()
@@ -139,6 +144,8 @@ func _press(k: String, on: bool) -> void:
 		"fire": fire = on
 		"weapon":
 			if on: weapon_pressed.emit()
+		"shop":
+			if on: shop_pressed.emit()
 
 func _draw_controls() -> void:
 	_layout()
@@ -151,7 +158,7 @@ func _draw_controls() -> void:
 		root.draw_rect(Rect2(Vector2.ZERO, s), Color(0.8, 0, 0, flash))
 	_draw_minimap()
 	_draw_bars(s)
-	var names := {"enter": "CARRO", "jump": "PULO", "sprint": "CORRER", "gas": "ACEL", "brake": "FREIO", "fire": "ATIRAR", "weapon": weapon_text}
+	var names := {"enter": "CARRO", "jump": "PULO", "sprint": "CORRER", "gas": "ACEL", "brake": "FREIO", "fire": "ATIRAR", "weapon": weapon_text, "shop": shop_label}
 	var font := ThemeDB.fallback_font
 	for k in buttons:
 		var r: Rect2 = buttons[k]
@@ -165,7 +172,7 @@ func _process(_dt: float) -> void:
 	flash = maxf(0.0, flash - _dt)
 	big.text = wasted
 	big.position = Vector2(s.x * 0.5 - 300, s.y * 0.38)
-	money.position = Vector2(s.x - 300, 40)
+	money.position = Vector2(s.x - 300, 46)
 	stars.position = Vector2(s.x - 232, 88)
 	hint.position = Vector2(s.x * 0.5 - 200, 70)
 	root.queue_redraw()
@@ -179,6 +186,10 @@ func _draw_bars(s: Vector2) -> void:
 	var r := Rect2(s.x - 300, 14, 280, 22)
 	root.draw_rect(r, Color(0, 0, 0, 0.45))
 	root.draw_rect(Rect2(r.position + Vector2(3, 3), Vector2((r.size.x - 6) * clampf(hp / 100.0, 0.0, 1.0), r.size.y - 6)), Color(0.85, 0.12, 0.12))
+	if armor > 0.0:
+		var ra := Rect2(s.x - 300, 38, 280, 10)
+		root.draw_rect(ra, Color(0, 0, 0, 0.45))
+		root.draw_rect(Rect2(ra.position + Vector2(3, 2), Vector2((ra.size.x - 6) * clampf(armor / 100.0, 0.0, 1.0), ra.size.y - 4)), Color(0.75, 0.85, 0.95))
 
 ## minimapa redondo (gira com a câmera), ruas da grade, jogador e polícia
 func _draw_minimap() -> void:

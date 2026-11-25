@@ -3,6 +3,7 @@ extends RefCounted
 
 const M := preload("res://scripts/mats.gd")
 
+static var blood_on := true   # configuração "Sangue"
 static var _blood_mat: StandardMaterial3D
 static var _pool_mesh: CylinderMesh
 
@@ -15,6 +16,8 @@ static func blood_mat() -> StandardMaterial3D:
 	return _blood_mat
 
 static func blood_burst(world: Node, pos: Vector3, dir: Vector3, amount := 20) -> void:
+	if not blood_on:
+		return
 	var p := CPUParticles3D.new()
 	p.one_shot = true
 	p.emitting = false
@@ -41,6 +44,8 @@ static func blood_burst(world: Node, pos: Vector3, dir: Vector3, amount := 20) -
 	p.get_tree().create_timer(2.0).timeout.connect(p.queue_free)
 
 static func blood_pool(world: Node, pos: Vector3) -> void:
+	if not blood_on:
+		return
 	if _pool_mesh == null:
 		_pool_mesh = CylinderMesh.new()
 		_pool_mesh.top_radius = 0.5
@@ -61,6 +66,8 @@ static func blood_pool(world: Node, pos: Vector3) -> void:
 
 ## pequenas gotas saindo de um membro arrancado durante 2 s
 static func blood_trail(rb: Node3D) -> void:
+	if not blood_on:
+		return
 	var p := CPUParticles3D.new()
 	p.amount = 24
 	p.lifetime = 0.7

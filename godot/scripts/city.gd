@@ -16,6 +16,7 @@ var lanes: Array = []   # pontos de rota de carros (centro das faixas)
 var walk_loops: Array = []  # percursos de pedestres (um por quadra)
 var hospital_pos := Vector3.ZERO
 var police_pos := Vector3.ZERO
+var shops: Array = []   # {type, pos, name}
 
 func _ready() -> void:
 	rng.seed = 2026
@@ -263,6 +264,28 @@ func _landmarks() -> void:
 	var red := M.emissive(Color(0.9, 0.08, 0.08), 1.4)
 	var blue := M.emissive(Color(0.12, 0.3, 0.9), 1.4)
 	var pole := M.plain(Color(0.25, 0.25, 0.27), 0.4, 0.7)
+	# lojas: AMMU★NATION e concessionária (porta na calçada, placa luminosa com texto)
+	var gs := Vector3(_center(3), 0.3, _center(3) - BLOCK * 0.5 + 1.6)
+	var cs := Vector3(_center(1), 0.3, _center(1) - BLOCK * 0.5 + 1.6)
+	shops = [{"type": "guns", "pos": gs, "name": "AMMU★NATION", "col": Color(0.95, 0.15, 0.1)}, {"type": "cars", "pos": cs, "name": "CONCESSIONÁRIA", "col": Color(0.2, 0.75, 1.0)}]
+	for sh in shops:
+		var sp: Vector3 = sh.pos
+		var em := M.emissive(sh.col, 1.6)
+		_box(Vector3(5.2, 0.12, 2.6), sp + Vector3(0, 0.0, 0.2), M.plain(Color(0.12, 0.12, 0.13), 0.5, 0.2), false)
+		_box(Vector3(0.12, 3.2, 0.12), sp + Vector3(-2.4, 1.6, -0.6), pole, true)
+		_box(Vector3(0.12, 3.2, 0.12), sp + Vector3(2.4, 1.6, -0.6), pole, true)
+		_box(Vector3(5.0, 1.0, 0.25), sp + Vector3(0, 3.6, -0.6), M.plain(Color(0.05, 0.05, 0.06), 0.4, 0.2), false)
+		_box(Vector3(5.0, 0.08, 0.3), sp + Vector3(0, 3.06, -0.6), em, false)
+		var lb := Label3D.new()
+		lb.text = sh.name
+		lb.font_size = 96
+		lb.pixel_size = 0.0075
+		lb.modulate = sh.col.lightened(0.3)
+		lb.outline_size = 10
+		lb.position = sp + Vector3(0, 3.6, -0.76)
+		lb.rotation.y = PI
+		lb.shaded = false
+		add_child(lb)
 	for spec in [[hospital_pos, red, "H"], [police_pos, blue, "P"]]:
 		var p: Vector3 = spec[0] + Vector3(2.5, 0, 0)
 		_box(Vector3(0.15, 4.0, 0.15), p + Vector3(0, 2.0, 0), pole, true)

@@ -10,6 +10,7 @@ const Humanoid := preload("res://scripts/humanoid.gd")
 const Audio := preload("res://scripts/audio.gd")
 const FX := preload("res://scripts/fx.gd")
 const Combat := preload("res://scripts/combat.gd")
+const UI := preload("res://scripts/ui.gd")
 
 var city: Node3D
 var player: CharacterBody3D
@@ -45,6 +46,13 @@ var gore := true
 var _step_ph := 0.0
 var _lastv := Vector3.ZERO
 var combat: Node
+var ui: CanvasLayer
+var sun: DirectionalLight3D
+var world_env: Environment
+var armor := 0.0
+var owned_cars: Array = []   # [{kind, color}] comprados na concessionária
+var shop_near := ""
+var autosave_t := 0.0
 
 func _ready() -> void:
 	rng.seed = 7
@@ -111,6 +119,90 @@ func _ready() -> void:
 	add_child(combat)
 	combat.setup(self)
 	hud.weapon_pressed.connect(func(): combat.cycle())
+	hud.shop_pressed.connect(func(): if shop_near != "": ui.show_shop(shop_near))
+	ui = UI.new()
+	ui.main = self
+	add_child(ui)
+	ui.apply_now()
+	if shot == "" or shot_view in ["menu", "shop", "cars_shop", "settings"]:
+		ui.show_main_menu()
+	if shot_view in ["menu", "shop", "cars_shop", "settings"]:
+		process_mode = Node.PROCESS_MODE_ALWAYS   # captura de teste com o menu aberto
+
+## novo jogo: só soco, $600, sem carros comprados
+func new_game() -> void:
+	money = 600
+	hp = 100.0
+	armor = 0.0
+	combat.owned = {"fist": true}
+	combat.ammo = {}
+	combat.weapon = "fist"
+	combat._equip()
+	for c in _owned_nodes():
+		cars.erase(c)
+		c.queue_free()
+	owned_cars = []
+	ui.save_game()
+
+func load_game() -> void:
+	var d: Dictionary = ui.load_save()
+	if d.is_empty():
+		new_game()
+		return
+	money = int(d.get("money", 600))
+	armor = float(d.get("armor", 0.0))
+	var ow := {"fist": true}
+	var od: Dictionary = d.get("owned", {})
+	for k in od:
+		if od[k]: ow[k] = true
+	combat.owned = ow
+	var am := {}
+	var ad: Dictionary = d.get("ammo", {})
+	for k in ad:
+		am[k] = int(ad[k])
+	combat.ammo = am
+	var w: String = d.get("weapon", "fist")
+	combat.weapon = w if ow.has(w) else "fist"
+	combat._equip()
+	for c in _owned_nodes():
+		cars.erase(c)
+		c.queue_free()
+	owned_cars = d.get("cars", [])
+	for i in owned_cars.size():
+		var oc: Dictionary = owned_cars[i]
+		_place_owned(oc.get("kind", "sedan"), Color.html(oc.get("color", "#2244aa")), i)
+
+func _owned_nodes() -> Array:
+	return cars.filter(func(c): return is_instance_valid(c) and c.has_meta("owned"))
+
+## carros comprados: na rua em frente à concessionária (compra) ou numa fila de vagas ao lado do carro inicial (save)
+func spawn_owned_car(kind: String, col: Color, _near_shop: bool) -> void:
+	var sp: Vector3 = city.shops[1].pos
+	var n := _owned_nodes().size()
+	var c = _spawn_car(Vector3(sp.x - 6.0 + (n % 3) * 6.0, 0.6, sp.z - 4.6), PI * 0.5, col, false, kind)
+	c.set_meta("owned", true)
+
+func _place_owned(kind: String, col: Color, i: int) -> void:
+	var base: Vector3 = my_car.global_position
+	var c = _spawn_car(base + Vector3(0, 0, 8.0 + i * 6.5), 0.0, col, false, kind)
+	c.set_meta("owned", true)
+
+## configurações do menu (sangue, gore, qualidade, contador)
+func apply_settings(s: Dictionary) -> void:
+	gore = s.gore
+	FX.blood_on = s.blood
+	var q: int = s.quality
+	var mobile := OS.has_feature("mobile")
+	get_viewport().scaling_3d_scale = ([0.6, 0.75, 1.0] if mobile else [0.75, 1.0, 1.0])[q]
+	if sun:
+		sun.shadow_enabled = q > 0
+		sun.directional_shadow_max_distance = [0.0, 60.0, 90.0][q]
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS if q == 2 else DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+	if world_env:
+		world_env.glow_enabled = q > 0
+		world_env.fog_aerial_perspective = 0.4 if q > 0 else 0.0
+	if hud:
+		hud.info.visible = s.fps
 
 func _on_ped_died(p) -> void:
 	combat.drop_cash(p.global_position)
@@ -136,7 +228,7 @@ func _spawn_car(pos: Vector3, yaw: float, paint: Color, police := false, kind :=
 	return c
 
 func _inputs() -> void:
-	var map := {"move_f": [KEY_W, KEY_UP], "move_b": [KEY_S, KEY_DOWN], "move_l": [KEY_A, KEY_LEFT], "move_r": [KEY_D, KEY_RIGHT], "enter": [KEY_E, KEY_F], "jump": [KEY_SPACE], "sprint": [KEY_SHIFT], "fire": [KEY_J, KEY_CTRL], "weapon": [KEY_Q, KEY_TAB]}
+	var map := {"move_f": [KEY_W, KEY_UP], "move_b": [KEY_S, KEY_DOWN], "move_l": [KEY_A, KEY_LEFT], "move_r": [KEY_D, KEY_RIGHT], "enter": [KEY_E, KEY_F], "jump": [KEY_SPACE], "sprint": [KEY_SHIFT], "fire": [KEY_J, KEY_CTRL], "weapon": [KEY_Q, KEY_TAB], "shop": [KEY_B], "pause": [KEY_ESCAPE, KEY_P]}
 	for a in map:
 		if not InputMap.has_action(a):
 			InputMap.add_action(a)
@@ -178,10 +270,11 @@ func _environment() -> void:
 	env.adjustment_enabled = true
 	env.adjustment_contrast = 1.06
 	env.adjustment_saturation = 1.08
+	world_env = env
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
-	var sun := DirectionalLight3D.new()
+	sun = DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-38, 35, 0)
 	sun.light_color = Color(1.0, 0.95, 0.86)
 	sun.light_energy = 1.55
@@ -240,6 +333,8 @@ func _unhandled_input(e: InputEvent) -> void:
 	if e.is_action_pressed("fire"): combat.fire_held = true
 	if e.is_action_released("fire"): combat.fire_held = false
 	if e.is_action_pressed("weapon"): combat.cycle()
+	if e.is_action_pressed("shop") and shop_near != "": ui.show_shop(shop_near)
+	if e.is_action_pressed("pause"): ui.show_pause()
 
 func _physics_process(dt: float) -> void:
 	var k := Vector2(Input.get_axis("move_l", "move_r"), Input.get_axis("move_b", "move_f"))
@@ -411,6 +506,17 @@ func _process(dt: float) -> void:
 	hud.money.text = "$%d,00" % money
 	hud.weapon_text = combat.label()
 	hud.hp = hp
+	hud.armor = armor
+	shop_near = ""
+	if player.vehicle == null and not combat.dead:
+		for sh in city.shops:
+			if Vector2(sh.pos.x - player.global_position.x, sh.pos.z - player.global_position.z).length() < 3.2:
+				shop_near = sh.type
+	hud.shop_label = "LOJA" if shop_near != "" else ""
+	autosave_t += dt
+	if autosave_t > 60.0 and shot == "":
+		autosave_t = 0.0
+		ui.save_game()
 	hud.map_player = player.global_position
 	hud.map_yaw = cam_yaw + PI
 	hud.map_police = police_car.global_position if police_car else Vector3.INF
@@ -418,6 +524,8 @@ func _process(dt: float) -> void:
 	if msg_t > 0:
 		msg_t -= dt
 		if msg_t <= 0: hud.hint.text = ""
+	elif shop_near != "":
+		hud.hint.text = "Toque em LOJA para comprar"
 	elif player.vehicle == null and my_car and my_car.global_position.distance_to(player.global_position) < 4.0:
 		hud.hint.text = "Toque em CARRO para entrar"
 	else:
@@ -495,6 +603,36 @@ func _shot_tick() -> void:
 				player.global_position = base + Vector3(-9.0, 0, 14)
 				cam_yaw = -PI * 0.5 if shot_view == "cars" else -PI * 0.25
 				cam_pitch = -0.15
+	if frames == 30 and shot_view == "settings":
+		ui.show_settings(ui.show_main_menu)
+	if frames == 30 and shot_view in ["shop", "cars_shop"]:
+		money = 2500
+		ui.show_shop("guns" if shot_view == "shop" else "cars")
+	if shot_view == "buy":
+		if frames == 10:
+			new_game()
+			money = 20000
+			ui._buy_gun(ui.GUNS[0])
+			ui._buy_gun(ui.GUNS[6])
+			ui.car_color = 0
+			ui._buy_car(ui.CARS[2])
+			print("BUY money=", money, " owned=", combat.owned, " ammo=", combat.ammo, " armor=", armor, " cars=", owned_cars, " nodes=", _owned_nodes().size())
+			combat._on_cop_shot(20.0, player.global_position)
+			print("HIT hp=", hp, " armor=", armor)
+		if frames == 20:
+			new_game()
+			print("NEW money=", money, " owned=", combat.owned, " nodes=", _owned_nodes().size())
+			ui.save_game()
+		if frames == 22:
+			money = 20000
+			ui._buy_car(ui.CARS[0])
+			load_game()
+			print("LOAD money=", money, " owned=", combat.owned, " weapon=", combat.weapon, " cars=", owned_cars.size(), " nodes=", _owned_nodes().size())
+	if shot_view == "shopsign" and frames == 4:
+		var sh: Dictionary = city.shops[0]
+		player.global_position = sh.pos + Vector3(-3, 0, -6)
+		cam_yaw = PI + 0.4
+		cam_pitch = -0.1
 	if frames == shot_at:
 		var img := get_viewport().get_texture().get_image()
 		img.save_png(shot)

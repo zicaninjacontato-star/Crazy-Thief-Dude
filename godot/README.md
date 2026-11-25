@@ -2,6 +2,8 @@
 
 Protótipo para avaliar o visual e o desempenho de uma versão do jogo em motor nativo. **O jogo web (`../game.html`) não depende disto.**
 
+Conteúdo (lote 4): menu inicial (continuar / novo jogo / configurações), pausa, configurações (sangue, gore, qualidade gráfica baixa/média/alta, volume, contador de FPS), loja de armas AMMU★NATION (armas, munição, colete), concessionária (5 modelos, 8 cores) e save automático.
+
 Conteúdo (lote 3): armas (soco, pistola, submetralhadora, espingarda) com mira automática para o celular, botões ATIRAR e troca de arma, rastro e clarão de tiro; policiais descem da viatura, perseguem a pé e atiram; morte com ragdoll do jogador → WASTED → hospital (-$100); preso a pé → delegacia (-$100); pedestres mortos deixam dinheiro.
 
 Conteúdo (lote 2): carros próprios gerados por código (sedã, hatch, SUV, picape, esportivo, viatura) com centro de massa baixo e anticapotamento; HUD com minimapa, vida, dinheiro e estrelas; sons sintetizados (motor, sirene, batida, grito, passos); ragdoll físico (corpos rígidos + juntas) com sangue e gore (membro arrancado em impacto forte); cidade fundida por material (menos draw calls) e resolução 3D a 75% no celular.

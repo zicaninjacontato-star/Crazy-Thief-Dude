@@ -217,7 +217,13 @@ func _on_cop_shot(dmg: float, _from: Vector3) -> void:
 	main.audio.play("shot", _from, -3.0)
 	if dead or dmg <= 0.0:
 		return
-	main.hp -= dmg * (0.4 if main.player.vehicle != null else 1.0)
+	var d: float = dmg * (0.4 if main.player.vehicle != null else 1.0)
+	# colete absorve 70% do dano enquanto durar
+	if main.armor > 0.0:
+		var a := minf(main.armor, d * 0.7)
+		main.armor -= a
+		d -= a
+	main.hp -= d
 	main.hud.flash = 0.25
 
 func clear_police() -> void:
