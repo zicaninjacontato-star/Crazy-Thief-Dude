@@ -13,6 +13,9 @@ var accel := 9.0
 var gravity := 18.0
 var jump_v := 6.2
 var vehicle: Node = null
+var swimming := false
+var world2: Node = null
+var aim_yaw := NAN          # mira: corpo virado para onde a câmera olha
 
 func _ready() -> void:
 	var cs := CollisionShape3D.new()
@@ -43,7 +46,7 @@ func make_body():
 	return h
 
 func jump() -> void:
-	if is_on_floor():
+	if is_on_floor() and not swimming:
 		velocity.y = jump_v
 
 func _physics_process(dt: float) -> void:
@@ -54,15 +57,28 @@ func _physics_process(dt: float) -> void:
 	var want := (f * move_input.y + r * move_input.x)
 	var mag := minf(1.0, want.length())
 	var target_speed := lerpf(0.0, run_speed if (sprint or mag > 0.85) else walk_speed * 1.6, mag)
+	# nado: no mar, a partir de onde a água fica funda
+	var swim_now: bool = world2 != null and world2.is_swim(global_position.x)
+	if swim_now != swimming:
+		swimming = swim_now
+		body.swimming = swimming
+		if swimming and get_tree().current_scene.has_method("splash_at"):
+			get_tree().current_scene.splash_at(global_position)
+	if swimming:
+		target_speed = lerpf(0.0, 3.6 if sprint else 2.3, mag)
 	var hv := Vector3(velocity.x, 0, velocity.z)
 	var tv := want.normalized() * target_speed if mag > 0.05 else Vector3.ZERO
 	hv = hv.move_toward(tv, accel * dt * (1.6 if tv == Vector3.ZERO else 1.0))
 	velocity.x = hv.x
 	velocity.z = hv.z
-	if not is_on_floor():
+	if swimming:
+		velocity.y = (0.12 - global_position.y) * 5.0
+	elif not is_on_floor():
 		velocity.y -= gravity * dt
 	move_and_slide()
 	if hv.length() > 0.2:
 		var ang := atan2(hv.x, hv.z)
 		body.rotation.y = lerp_angle(body.rotation.y, ang, minf(1.0, dt * 10.0))
+	if not is_nan(aim_yaw):
+		body.rotation.y = aim_yaw
 	body.animate(hv.length(), dt)

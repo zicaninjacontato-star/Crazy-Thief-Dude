@@ -5,6 +5,7 @@ extends VehicleBody3D
 const M := preload("res://scripts/mats.gd")
 const CarModel := preload("res://scripts/carmodel.gd")
 const VehModel := preload("res://scripts/vehmodel.gd")
+const FX := preload("res://scripts/fx.gd")
 
 var throttle := 0.0     # -1..1 (negativo = ré)
 var brake_in := 0.0     # 0..1
@@ -27,6 +28,24 @@ var spin: Array = []        # rodas visuais que giram sozinhas (moto)
 var fork: Node3D            # garfo da moto (esterça)
 var lean: Node3D            # inclinação visual da moto
 var wheel_r := 0.33
+# dano / batidas / destruição
+signal crashed(car, dv)
+signal destroyed(car)
+var hp := 100.0
+var dead := false
+var _lastv := Vector3.ZERO
+var _crash_cd := 0.0
+var _fire_t := -1.0
+var model_root: Node3D
+var _smoke: CPUParticles3D
+var _fire: CPUParticles3D
+var paint_c := Color.WHITE
+# porta do motorista (abre na animação de entrar/sair)
+var door_info := {}
+var door_node: Node3D
+var door_cover: MeshInstance3D
+var door_open := 0.0
+var parked := false
 
 ## kind: sedan, hatch, suv, pickup, sport ou police (modelo gerado por carmodel.gd).
 func setup(kind: String, paint: Color) -> void:
@@ -69,6 +88,11 @@ func setup(kind: String, paint: Color) -> void:
 	body_size = size
 	seat = built.seat
 	add_child(built.root)
+	model_root = built.root
+	paint_c = built.get("paint", paint)
+	door_info = built.get("door", {})
+	if not door_info.is_empty():
+		_make_door()
 	var wr: float = built.wr
 	for wd in built.wheels:
 		var w := VehicleWheel3D.new()
@@ -93,6 +117,23 @@ func setup(kind: String, paint: Color) -> void:
 		w.add_child(wd.node)
 		wheels.append(w)
 	if police:
+		_light_bar()
+
+func make_police() -> void:
+	police = true
+	_light_bar()
+
+## viatura toda preta (3 estrelas ou mais)
+func paint_black() -> void:
+	var blk := M.car_paint(Color(0.03, 0.03, 0.035))
+	for n in model_root.find_children("*", "MeshInstance3D", true, false):
+		var m = n.material_override
+		if m is StandardMaterial3D and m.albedo_color.r > 0.85 and m.albedo_color.g > 0.85 and not m.transparency:
+			n.material_override = blk
+
+func _light_bar() -> void:
+	var size := body_size
+	if true:
 		for s in [-1.0, 1.0]:
 			var b := MeshInstance3D.new()
 			var bm := BoxMesh.new()
@@ -102,6 +143,93 @@ func setup(kind: String, paint: Color) -> void:
 			b.material_override = M.emissive(Color(1, 0.1, 0.1) if s < 0 else Color(0.1, 0.3, 1), 3.0)
 			add_child(b)
 			_lights.append(b)
+
+func _make_door() -> void:
+	var d := door_info
+	var h: float = d.y1 - d.y0
+	var ln: float = d.zf - d.zb
+	door_node = Node3D.new()
+	door_node.position = Vector3(d.x + 0.015, d.y0, d.zf)
+	model_root.add_child(door_node)
+	var panel := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.06, h, ln)
+	panel.mesh = bm
+	panel.position = Vector3(0.03, h * 0.5, -ln * 0.5)
+	panel.material_override = M.car_paint(Color(0.93, 0.93, 0.94) if police else paint_c)
+	door_node.add_child(panel)
+	var inner := MeshInstance3D.new()
+	var im := BoxMesh.new()
+	im.size = Vector3(0.02, h * 0.85, ln * 0.9)
+	inner.mesh = im
+	inner.position = Vector3(-0.02, h * 0.5, -ln * 0.5)
+	inner.material_override = M.plain(Color(0.12, 0.12, 0.13), 0.8)
+	door_node.add_child(inner)
+	door_cover = MeshInstance3D.new()
+	var cm := BoxMesh.new()
+	cm.size = Vector3(0.02, h * 0.98, ln * 0.98)
+	door_cover.mesh = cm
+	door_cover.position = Vector3(d.x + 0.02, d.y0 + h * 0.5, d.zf - ln * 0.5)
+	door_cover.material_override = M.plain(Color(0.03, 0.03, 0.035), 0.9)
+	model_root.add_child(door_cover)
+	set_door(0.0)
+
+## 0 = fechada, 1 = aberta (~70°)
+func set_door(a: float) -> void:
+	door_open = a
+	if door_node == null:
+		return
+	door_node.visible = a > 0.02
+	door_cover.visible = a > 0.02
+	door_node.rotation.y = -a * 1.2
+
+func door_world() -> Vector3:
+	## ponto na calçada ao lado da porta do motorista
+	if door_info.is_empty():
+		return global_transform * Vector3(body_size.x * 0.5 + 0.7, 0, seat.z)
+	return global_transform * Vector3(door_info.x + 0.75, 0, (door_info.zf + door_info.zb) * 0.5 - 0.3)
+
+func take_damage(d: float) -> void:
+	if dead or d <= 0.0:
+		return
+	hp -= d
+	if hp < 45.0 and _smoke == null:
+		_smoke = FX.smoke_emitter(model_root, Vector3(0, body_size.y * 0.6, body_size.z * 0.38))
+	if hp < 18.0 and _fire == null:
+		_fire = FX.fire_emitter(model_root, Vector3(0, body_size.y * 0.55, body_size.z * 0.38))
+		_fire_t = 4.5
+	if hp <= -25.0:
+		explode()
+
+func explode() -> void:
+	if dead:
+		return
+	dead = true
+	hp = 0.0
+	throttle = 0.0
+	ai_target = null
+	engine_force = 0.0
+	brake = 4.0
+	var burnt := M.plain(Color(0.06, 0.055, 0.05), 0.95)
+	for n in model_root.find_children("*", "MeshInstance3D", true, false):
+		n.material_override = burnt
+	for w in wheels:
+		for n in w.find_children("*", "MeshInstance3D", true, false):
+			n.material_override = burnt
+	if _fire == null:
+		_fire = FX.fire_emitter(model_root, Vector3(0, body_size.y * 0.55, 0))
+	apply_central_impulse(Vector3(randf_range(-1, 1), 6.0, randf_range(-1, 1)) * mass)
+	apply_torque_impulse(Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)) * mass * 1.5)
+	destroyed.emit(self)
+	get_tree().create_timer(14.0).timeout.connect(func(): if is_instance_valid(_fire): _fire.emitting = false)
+
+func _dent(dv: float) -> void:
+	if model_root == null:
+		return
+	var k := clampf((dv - 6.0) * 0.004, 0.0, 0.05)
+	model_root.scale.z = maxf(0.88, model_root.scale.z - k)
+	model_root.scale.y = maxf(0.9, model_root.scale.y - k * 0.4)
+	model_root.rotation.z = clampf(model_root.rotation.z + randf_range(-k, k), -0.05, 0.05)
 
 func _paint(n: Node, name: String, mat: Material) -> void:
 	var t := _find(n, name)
@@ -128,6 +256,25 @@ func _physics_process(dt: float) -> void:
 	if police:
 		for k in _lights.size():
 			_lights[k].visible = int(_t * 6.0 + k) % 2 == 0
+	# batida: variação brusca de velocidade
+	var dvv := (linear_velocity - _lastv).length()
+	_lastv = linear_velocity
+	_crash_cd -= dt
+	if dvv > 6.5 and _crash_cd <= 0.0 and _t > 1.0:
+		_crash_cd = 0.3
+		take_damage((dvv - 6.5) * (1.6 if kind == "bus" else 4.5))
+		_dent(dvv)
+		crashed.emit(self, dvv)
+	if _fire_t > 0.0 and not dead:
+		_fire_t -= dt
+		if _fire_t <= 0.0:
+			explode()
+	if dead:
+		engine_force = 0.0
+		brake = 6.0
+		steering = 0.0
+		_anti_flip(dt)
+		return
 	if ai_target != null:
 		_ai(dt)
 	var fs := forward_speed()

@@ -129,7 +129,7 @@ func _ground() -> void:
 	add_child(asphalt)
 	var grass := MeshInstance3D.new()
 	var gm := PlaneMesh.new()
-	gm.size = Vector2(900, 900)
+	gm.size = Vector2(3200, 3200)
 	grass.mesh = gm
 	grass.position.y = -0.03
 	grass.material_override = M.grass()

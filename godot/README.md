@@ -2,6 +2,8 @@
 
 Protótipo para avaliar o visual e o desempenho de uma versão do jogo em motor nativo. **O jogo web (`../game.html`) não depende disto.**
 
+Conteúdo (lote 7): táxi e 3 missões, praia/mar/píer com barcos, aeroporto com avião e helicóptero, delegacia, polícia por estrelas (viaturas, SWAT, helicóptero), interiores das lojas, roleta de armas, mira manual, fuzil/sniper/bazuca/granada, soco em combo, explosões, dano e destruição de veículos, batida de moto, queda, entrar/sair animado em todos os veículos, tubarão.
+
 Conteúdo (lote 6): motos (estacionadas, no trânsito e na concessionária) e ônibus com linha e pontos; noite mais clara e sem o travamento ao anoitecer.
 
 Conteúdo (lote 5): loja de roupas (camiseta, calça, jaqueta, boné/touca, óculos, cabelo, com prova no personagem), ciclo de dia e noite (pôr do sol, lua, janelas acesas, postes e faróis com luz de verdade) e relógio no HUD.

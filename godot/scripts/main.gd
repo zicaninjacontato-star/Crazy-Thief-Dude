@@ -12,6 +12,11 @@ const FX := preload("res://scripts/fx.gd")
 const Combat := preload("res://scripts/combat.gd")
 const UI := preload("res://scripts/ui.gd")
 const DayNight := preload("res://scripts/daynight.gd")
+const Police := preload("res://scripts/police.gd")
+const Arcade := preload("res://scripts/arcade.gd")
+const World2 := preload("res://scripts/world2.gd")
+const Missions := preload("res://scripts/missions.gd")
+const VehAnim := preload("res://scripts/vehanim.gd")
 
 var city: Node3D
 var player: CharacterBody3D
@@ -58,6 +63,15 @@ var tod := 10.0          # hora do dia (0-24)
 var quality := 1
 var daynight: Node
 var buses: Array = []   # {car, i, mk, stop_t, drv}
+var police: Node
+var world2: Node3D
+var missions: Node
+var vehanim: Node
+var interior := ""         # tipo da loja em que o jogador está ("" = rua)
+var _int_from := Vector3.ZERO
+var shop_action := ""      # "enter" / "exit" / "buy"
+var shark: Node3D
+var shark_t := 0.0
 
 func _ready() -> void:
 	rng.seed = 7
@@ -78,13 +92,18 @@ func _ready() -> void:
 	add_child(audio)
 	city = City.new()
 	add_child(city)
+	world2 = World2.new()
+	add_child(world2)
+	world2.build(self)
 	cam = Camera3D.new()
 	cam.fov = 62.0
 	cam.far = 650.0
 	add_child(cam)
 	cam.make_current()
 	player = Player.new()
+	player.world2 = world2
 	add_child(player)
+	player.set_meta("player", true)
 	player.position = Vector3(city._center(2) - city.BLOCK * 0.5 + 1.5, 0.3, city._center(2))
 	hud = Hud.new()
 	add_child(hud)
@@ -152,11 +171,21 @@ func _ready() -> void:
 		peds.append(p)
 	for p in peds:
 		p.died.connect(_on_ped_died)
+	police = Police.new()
+	add_child(police)
+	police.setup(self)
+	missions = Missions.new()
+	add_child(missions)
+	vehanim = VehAnim.new()
+	vehanim.main = self
+	add_child(vehanim)
 	combat = Combat.new()
 	add_child(combat)
 	combat.setup(self)
-	hud.weapon_pressed.connect(func(): combat.cycle())
-	hud.shop_pressed.connect(func(): if shop_near != "": ui.show_shop(shop_near))
+	missions.setup(self)
+	_spawn_extras()
+	hud.weapon_pressed.connect(func(): ui.show_wheel())
+	hud.shop_pressed.connect(_shop_action)
 	daynight = DayNight.new()
 	add_child(daynight)
 	daynight.setup(self)
@@ -272,15 +301,215 @@ func _block_loop(i: int, j: int, k: int) -> Array:
 func _spawn_car(pos: Vector3, yaw: float, paint: Color, police := false, kind := ""):
 	var c := Car.new()
 	add_child(c)
-	var kinds := ["sedan", "sedan", "hatch", "suv", "pickup", "sport"]
+	var kinds := ["sedan", "sedan", "hatch", "suv", "pickup", "sport", "taxi"]
 	c.setup("police" if police else (kind if kind != "" else kinds[rng.randi() % kinds.size()]), paint)
 	c.global_position = pos
 	c.rotation.y = yaw
+	c.crashed.connect(_on_crash)
+	c.destroyed.connect(_on_vehicle_destroyed)
 	cars.append(c)
 	return c
 
+func _spawn_arcade(kind: String, pos: Vector3, yaw: float, paint: Color):
+	var a := Arcade.new()
+	add_child(a)
+	a.setup(kind, paint)
+	a.world2 = world2
+	a.global_position = pos
+	a.rotation.y = yaw
+	a.crashed.connect(_on_crash)
+	a.destroyed.connect(_on_vehicle_destroyed)
+	cars.append(a)
+	return a
+
+## táxis, barcos, aviões, helicóptero, viaturas da delegacia, banhistas
+func _spawn_extras() -> void:
+	var road_x: float = city._center(2) - city.CELL * 0.5
+	_spawn_car(Vector3(road_x + 2.6, 0.7, city._center(2) + 14.0), 0.0, Color.YELLOW, false, "taxi")
+	_spawn_car(Vector3(city._center(1) - city.CELL * 0.5 - 2.6, 0.7, city._center(3)), PI, Color.YELLOW, false, "taxi")
+	var bcols := [Color(0.1, 0.3, 0.7), Color(0.75, 0.1, 0.1), Color(0.1, 0.5, 0.3)]
+	for i in world2.boat_spots.size():
+		var bs: Array = world2.boat_spots[i]
+		_spawn_arcade("boat", bs[0], bs[1], bcols[i % 3])
+	for i in world2.plane_spots.size():
+		var ps: Array = world2.plane_spots[i]
+		_spawn_arcade("plane", ps[0], ps[1], [Color(0.75, 0.1, 0.1), Color(0.1, 0.25, 0.6)][i % 2])
+	for hs in world2.heli_spots:
+		_spawn_arcade("heli", hs[0], hs[1], Color(0.85, 0.55, 0.05))
+	for sc in world2.station_cars:
+		var pc = _spawn_car(sc[0], sc[1], Color.WHITE, true)
+		pc.parked = true
+	for k in 6:
+		var p := Ped.new()
+		add_child(p)
+		p.setup(world2.beach_loop, k % 4, rng)
+		p.position = world2.beach_loop[k % 4].lerp(world2.beach_loop[(k + 1) % 4], rng.randf())
+		p.died.connect(_on_ped_died)
+		peds.append(p)
+
+## batida de qualquer veículo
+func _on_crash(c, dv: float) -> void:
+	var pv: Vector3 = c.global_position
+	if pv.distance_to(player.global_position) < 60.0:
+		audio.play("crash", pv, clampf((dv - 6.0) * 0.5, -6.0, 6.0))
+	if dv > 9.0:
+		FX.sparks(self, pv + Vector3(0, 0.7, 0))
+	if dv > 14.0 and c.get("paint_c") != null:
+		FX.debris(self, pv + Vector3(0, 0.9, 0), c.paint_c, c.linear_velocity * 0.4 + Vector3(randf_range(-3, 3), 4, randf_range(-3, 3)))
+	if c == player.vehicle:
+		hp -= maxf(0.0, dv - 8.0) * (2.4 if c.kind == "moto" else 0.9)
+		hud.flash = 0.2
+		# moto: o piloto voa
+		if c.kind == "moto" and dv > 7.5:
+			var vel: Vector3 = c.linear_velocity + c.global_transform.basis.z * dv * 0.6
+			eject_player(Vector3.ZERO)
+			combat.knockdown(vel + Vector3(0, 3.0, 0), 3.0)
+
+## explosão: efeito + dano em área + empurrão
+func explode_at(pos: Vector3, radius: float, dmg: float) -> void:
+	FX.explosion(self, pos, clampf(radius / 6.0, 0.7, 1.6))
+	audio.play("explosion", pos, 6.0)
+	for q in peds.duplicate():
+		if is_instance_valid(q) and not q.down:
+			var d: float = q.global_position.distance_to(pos)
+			if d < radius:
+				var dir: Vector3 = (q.global_position - pos + Vector3(0, 0.5, 0)).normalized()
+				q.hit(null, dir * (16.0 - d), gore)
+				combat.drop_cash(q.global_position)
+			elif d < radius * 2.5:
+				q.scare()
+	for c in police.cops + missions.hostiles():
+		if is_instance_valid(c) and not c.down and c.global_position.distance_to(pos) < radius:
+			var dir2: Vector3 = (c.global_position - pos + Vector3(0, 0.5, 0)).normalized()
+			c.hit(null, dir2 * (16.0 - c.global_position.distance_to(pos)), gore)
+			missions.on_kill(c)
+	for c in cars.duplicate():
+		if not is_instance_valid(c) or c.get("dead"):
+			continue
+		var d: float = c.global_position.distance_to(pos)
+		if d < radius * 1.4:
+			var f := 1.0 - d / (radius * 1.4)
+			c.take_damage(dmg * f)
+			if c is RigidBody3D:
+				c.apply_central_impulse(((c.global_position - pos).normalized() + Vector3(0, 0.8, 0)) * c.mass * 9.0 * f)
+	var pd: float = player.global_position.distance_to(pos)
+	if pd < radius and not combat.dead:
+		hp -= dmg * (1.0 - pd / radius) * (0.4 if player.vehicle else 1.0)
+		if player.vehicle == null:
+			combat.knockdown(((player.global_position - pos).normalized() + Vector3(0, 0.9, 0)) * (14.0 - pd), 2.8)
+	hud.flash = maxf(hud.flash, clampf(0.4 - pd / 100.0, 0.0, 0.4))
+	if wanted == 0 and pos.distance_to(player.global_position) < 60.0:
+		_add_wanted(1)
+
+func splash_at(pos: Vector3) -> void:
+	FX.splash(self, Vector3(pos.x, world2.WATER_Y, pos.z), 1.0)
+	audio.play("splash", pos)
+
+func _on_vehicle_destroyed(c) -> void:
+	var pos: Vector3 = c.global_position + Vector3(0, 0.8, 0)
+	call_deferred("explode_at", pos, 6.5, 140.0)
+	if c == player.vehicle:
+		var vel: Vector3 = c.linear_velocity
+		eject_player(Vector3.ZERO)
+		hp -= 60.0
+		combat.knockdown(vel + Vector3(randf_range(-3, 3), 8.0, randf_range(-3, 3)), 3.0)
+
+# ---------------------------------------------------------------- lojas com interior
+func _shop_action() -> void:
+	match shop_action:
+		"enter":
+			for sh in city.shops:
+				if Vector2(sh.pos.x - player.global_position.x, sh.pos.z - player.global_position.z).length() < 3.2:
+					enter_interior(sh.type)
+					return
+		"exit":
+			leave_interior()
+		"buy":
+			ui.show_shop(interior)
+
+func enter_interior(type: String) -> void:
+	var it: Dictionary = world2.interiors[type]
+	_int_from = player.global_position
+	interior = type
+	player.global_position = it.spawn
+	player.velocity = Vector3.ZERO
+	cam_yaw = PI
+	cam_pitch = -0.25
+	audio.play("door")
+
+func leave_interior() -> void:
+	if interior == "":
+		return
+	interior = ""
+	player.global_position = _int_from + Vector3(0, 0.2, -2.2)
+	player.velocity = Vector3.ZERO
+	cam_yaw = 0.0
+	audio.play("door")
+
+# ---------------------------------------------------------------- mar: carros afundam, tubarão
+func _water_tick(dt: float) -> void:
+	for c in cars.duplicate():
+		if not is_instance_valid(c) or not (c is VehicleBody3D):
+			continue
+		if world2.is_water(c.global_position.x - 11.0, 0) and not c.has_meta("sinking"):
+			c.set_meta("sinking", true)
+			FX.splash(self, c.global_position + Vector3(0, 0.8, 0), 1.6)
+			audio.play("splash", c.global_position, 4.0)
+			c.dead = true
+			c.collision_mask = 0
+			c.gravity_scale = 0.12
+			c.linear_damp = 3.0
+			if c == player.vehicle:
+				eject_player(Vector3.ZERO)
+				player.global_position.x = c.global_position.x
+			var cc = c
+			get_tree().create_timer(12.0).timeout.connect(func(): if is_instance_valid(cc): cars.erase(cc); cc.queue_free())
+	# tubarão no fim do mar (a nado, longe da costa)
+	var pp: Vector3 = player.global_position
+	if player.swimming and pp.x > world2.SHORE_X + 280.0 and pp.x < 2600.0:
+		if shark == null:
+			shark = _make_shark()
+			shark.global_position = pp + Vector3(40.0, 0, randf_range(-20, 20))
+			_msg("Cuidado: tubarão!")
+	if shark:
+		var to: Vector3 = pp - shark.global_position
+		to.y = 0
+		shark_t += dt
+		var spd := 7.5 if player.swimming else 3.0
+		if player.swimming and to.length() < 1.6 and not combat.dead:
+			hp = 0.0
+			FX.blood_burst(self, pp + Vector3(0, 0.9, 0), Vector3.UP, 40)
+			audio.play("scream", pp)
+		if not player.swimming:
+			to = -to
+			if to.length() > 0.0 and shark.global_position.distance_to(pp) > 120.0:
+				shark.queue_free()
+				shark = null
+				return
+		var dir := to.normalized()
+		shark.global_position += dir * spd * dt
+		shark.global_position.y = world2.WATER_Y - 0.55 + sin(shark_t * 3.0) * 0.05
+		shark.rotation.y = lerp_angle(shark.rotation.y, atan2(dir.x, dir.z), dt * 3.0)
+
+func _make_shark() -> Node3D:
+	var n := Node3D.new()
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var CM := preload("res://scripts/carmodel.gd")
+	CM._ell(st, Vector3(0, 0, 0), Vector3(0.9, 0.8, 3.6), Color(0.35, 0.38, 0.42))
+	CM._ell(st, Vector3(0, -0.15, 0.2), Vector3(0.75, 0.5, 3.0), Color(0.85, 0.85, 0.85))
+	CM._box(st, Vector3(0.08, 0.9, 0.7), Vector3(0, 0.75, 0.1), Color(0.3, 0.33, 0.37))
+	CM._box(st, Vector3(0.08, 0.8, 0.5), Vector3(0, 0.1, -1.9), Color(0.3, 0.33, 0.37))
+	CM._box(st, Vector3(1.6, 0.06, 0.5), Vector3(0, -0.2, 0.6), Color(0.3, 0.33, 0.37))
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	mi.material_override = CM.vc_mat()
+	n.add_child(mi)
+	add_child(n)
+	return n
+
 func _inputs() -> void:
-	var map := {"move_f": [KEY_W, KEY_UP], "move_b": [KEY_S, KEY_DOWN], "move_l": [KEY_A, KEY_LEFT], "move_r": [KEY_D, KEY_RIGHT], "enter": [KEY_E, KEY_F], "jump": [KEY_SPACE], "sprint": [KEY_SHIFT], "fire": [KEY_J, KEY_CTRL], "weapon": [KEY_Q, KEY_TAB], "shop": [KEY_B], "pause": [KEY_ESCAPE, KEY_P]}
+	var map := {"move_f": [KEY_W, KEY_UP], "move_b": [KEY_S, KEY_DOWN], "move_l": [KEY_A, KEY_LEFT], "move_r": [KEY_D, KEY_RIGHT], "enter": [KEY_E, KEY_F], "jump": [KEY_SPACE], "sprint": [KEY_SHIFT], "fire": [KEY_J, KEY_CTRL], "weapon": [KEY_Q, KEY_TAB], "shop": [KEY_B], "pause": [KEY_ESCAPE, KEY_P], "aim": [KEY_R]}
 	for a in map:
 		if not InputMap.has_action(a):
 			InputMap.add_action(a)
@@ -336,46 +565,68 @@ func _environment() -> void:
 	sun.directional_shadow_max_distance = 60.0
 	add_child(sun)
 
+## entrar/sair (com animação). Sair de carro rápido = se jogar para fora (ragdoll).
 func _toggle_car() -> void:
+	if vehanim.busy() or combat.dead or combat.down_t > 0.0 or interior != "":
+		return
 	if player.vehicle != null:
 		var c = player.vehicle
+		var spd: float = c.linear_velocity.length()
+		var k: String = c.kind
+		var air: bool = k in ["plane", "heli"] and c.global_position.y > 2.0
+		if air or (k == "moto" and spd > 3.0) or (k not in ["boat", "plane", "heli", "moto"] and spd > 6.0):
+			var vel: Vector3 = c.linear_velocity
+			eject_player(Vector3.ZERO)
+			if not air:
+				combat.knockdown(vel * 0.7 + c.global_transform.basis.x * 3.0 + Vector3(0, 2.0, 0), 2.6)
+			return
 		c.throttle = 0
 		c.brake_in = 1.0
-		player.vehicle = null
-		player.visible = true
-		player.collision_layer = 1
-		player.collision_mask = 1
-		player.process_mode = Node.PROCESS_MODE_INHERIT
-		var side: Vector3 = c.global_transform.basis.x * (c.body_size.x * 0.5 + 0.8)
-		player.global_position = c.global_position + side + Vector3(0, 0.3, 0)
-		player.velocity = Vector3.ZERO
-		if seated:
-			seated.queue_free()
-			seated = null
+		vehanim.start_exit(c)
 		return
 	var best = null
 	var bd := 2.4
 	for c in cars:
-		if not is_instance_valid(c) or c.police or traffic.any(func(t): return t.car == c):
+		if not is_instance_valid(c) or c.get("dead") or police.is_unit_car(c):
 			continue
 		# distância até a caixa do veículo (ônibus é comprido)
 		var lp: Vector3 = c.global_transform.affine_inverse() * player.global_position
 		var hs: Vector3 = c.body_size * 0.5
 		var q := Vector3(clampf(lp.x, -hs.x, hs.x), 0, clampf(lp.z, -hs.z, hs.z))
 		var d: float = Vector2(lp.x - q.x, lp.z - q.z).length()
-		if d < bd:
+		var lim := bd + (1.6 if c.kind == "boat" else 0.0)
+		if d < lim:
 			bd = d
 			best = c
 	if best == null:
 		return
+	best.throttle = 0.0
+	best.brake_in = 1.0
+	best.ai_target = null
+	vehanim.start_enter(best)
+
+## chamado pela animação quando o jogador chega à porta: ele passa a "estar" no veículo
+func finish_enter(best) -> Node3D:
 	player.vehicle = best
 	player.visible = false
 	player.collision_layer = 0
 	player.collision_mask = 0
 	player.velocity = Vector3.ZERO
-	for b in buses:
-		if b.car == best and is_instance_valid(b.drv):
-			b.drv.queue_free()   # motorista do ônibus "sai"
+	best.ai_target = null
+	best.driver = player
+	# roubo: tráfego, ônibus e viaturas
+	for t in traffic.duplicate():
+		if t.car == best:
+			traffic.erase(t)
+			_spawn_fleeing(best)
+	for b in buses.duplicate():
+		if b.car == best:
+			if is_instance_valid(b.drv):
+				b.drv.queue_free()
+			buses.erase(b)
+			_spawn_fleeing(best)
+	if best.police:
+		_add_wanted(1)
 	seated = player.make_body()
 	seated.sitting = true
 	seated.scale = Vector3.ONE * 0.85
@@ -386,8 +637,53 @@ func _toggle_car() -> void:
 	else:
 		best.add_child(seated)
 	seated.animate(0, 0)
-	best.brake_in = 0
+	if combat.weapon != "fist":
+		seated.give_gun(preload("res://scripts/weapons.gd").gun_mesh(combat.weapon))
+	return seated
+
+func anim_done() -> void:
+	if player.vehicle:
+		player.vehicle.brake_in = 0
 	cam_idle = 2.0
+
+func _spawn_fleeing(c) -> void:
+	var p := Ped.new()
+	add_child(p)
+	var loop: Array = city.walk_loops[0]
+	for l in city.walk_loops:
+		if l[0].distance_to(c.global_position) < loop[0].distance_to(c.global_position):
+			loop = l
+	p.setup(loop, 0, rng)
+	p.position = c.door_world() + c.global_transform.basis.x * 0.8
+	p.died.connect(_on_ped_died)
+	p.scare()
+	p.flee = 10.0
+	peds.append(p)
+	audio.play("scream", p.position, -6.0)
+
+func finish_exit(c, pos: Vector3) -> void:
+	c.throttle = 0
+	c.brake_in = 1.0
+	c.driver = null
+	player.vehicle = null
+	player.visible = true
+	player.collision_layer = 1
+	player.collision_mask = 1
+	player.process_mode = Node.PROCESS_MODE_INHERIT
+	player.global_position = pos + Vector3(0, 0.3, 0)
+	player.velocity = Vector3.ZERO
+	player.body.rotation.y = c.rotation.y
+	if seated:
+		seated.queue_free()
+		seated = null
+	combat._equip()
+
+## sai na hora (sem animação): batida de moto, morte, derrubada, missão
+func eject_player(_impulse: Vector3) -> void:
+	vehanim.cancel()
+	if player.vehicle != null:
+		var c = player.vehicle
+		finish_exit(c, c.global_position + Vector3(0, 0.6 if c.kind != "plane" else 2.5, 0) + c.global_transform.basis.x * (0.0 if c.kind in ["moto"] else c.body_size.x * 0.5 + 0.6))
 
 func _unhandled_input(e: InputEvent) -> void:
 	if e.is_action_pressed("enter"): _toggle_car()
@@ -395,18 +691,21 @@ func _unhandled_input(e: InputEvent) -> void:
 	if e.is_action_pressed("fire"): combat.fire_held = true
 	if e.is_action_released("fire"): combat.fire_held = false
 	if e.is_action_pressed("weapon"): combat.cycle()
-	if e.is_action_pressed("shop") and shop_near != "": ui.show_shop(shop_near)
+	if e.is_action_pressed("shop"): _shop_action()
 	if e.is_action_pressed("pause"): ui.show_pause()
 
 func _physics_process(dt: float) -> void:
 	var k := Vector2(Input.get_axis("move_l", "move_r"), Input.get_axis("move_b", "move_f"))
 	var stick: Vector2 = hud.joy
 	var mv := Vector2(stick.x, -stick.y) if stick.length() > 0.05 else k
-	if player.vehicle == null:
+	vehanim.tick(dt)
+	if vehanim.busy() or combat.down_t > 0.0:
+		player.move_input = Vector2.ZERO
+	elif player.vehicle == null:
 		player.move_input = Vector2(mv.x, mv.y)
 		player.cam_yaw = cam_yaw + PI
 		player.sprint = hud.sprint or Input.is_action_pressed("sprint")
-	elif not shot_view in ["drive", "motoride"]:
+	elif not shot_view in ["drive", "motoride", "planefly", "helifly", "boatride", "busride", "motocrash"]:
 		var c = player.vehicle
 		var g := 1.0 if hud.gas else 0.0
 		var b := 1.0 if hud.brk else 0.0
@@ -416,18 +715,10 @@ func _physics_process(dt: float) -> void:
 		c.throttle = g - b
 		c.steer_in = -mv.x
 		c.handbrake = Input.is_action_pressed("jump")
+		if "stick" in c:
+			c.stick = mv
 	if player.vehicle:
 		player.global_position = player.vehicle.global_position
-	if player.vehicle:
-		var v: Vector3 = player.vehicle.linear_velocity
-		if _lastv.length() > 4.0 and _lastv.distance_to(v) > 5.0:
-			var pv: Vector3 = player.vehicle.global_position
-			audio.play("crash", pv, 3.0)
-			FX.sparks(self, pv + player.vehicle.global_transform.basis.z * 2.0 + Vector3(0, 0.6, 0))
-			hp = maxf(5.0, hp - _lastv.distance_to(v) * 0.8)
-		_lastv = v
-	else:
-		_lastv = Vector3.ZERO
 	if hud.fire:
 		combat.fire_held = true
 	elif not Input.is_action_pressed("fire"):
@@ -435,7 +726,9 @@ func _physics_process(dt: float) -> void:
 	_traffic()
 	_buses(dt)
 	_crimes(dt)
-	_police(dt)
+	police.tick(dt)
+	missions.tick(dt)
+	_water_tick(dt)
 
 func _traffic() -> void:
 	for t in traffic:
@@ -512,49 +805,19 @@ func _crimes(dt: float) -> void:
 				for q in peds:
 					if q != p and q.global_position.distance_to(p.global_position) < 18.0:
 						q.scare()
-	if wanted > 0:
-		wanted_timer -= dt
-		if wanted_timer <= 0 and (police_car == null or police_car.global_position.distance_to(player.global_position) > 80.0):
-			wanted = 0
-			combat.clear_police()
-			if police_car:
-				police_car.queue_free()
-				cars.erase(police_car)
-				police_car = null
+	# policiais e capangas também podem ser atropelados
+	if vc != null and vc.linear_velocity.length() > 4.0:
+		for c in police.cops + missions.hostiles():
+			if is_instance_valid(c) and not c.down and c.global_position.distance_to(vc.global_position) < vc.body_size.x * 0.5 + 1.0:
+				c.hit(vc, vc.linear_velocity, gore)
+				audio.play("hit", c.global_position, 4.0)
+				_add_wanted(2 if c in police.cops else 0)
 
 func _add_wanted(n: int) -> void:
+	if interior != "":
+		return
 	wanted = mini(5, wanted + n)
-	wanted_timer = 35.0
-
-func _police(dt: float) -> void:
-	if wanted > 0 and police_car == null:
-		# nasce numa rua (linha da grade mais próxima), ~55 m antes/depois do jogador, virada para ele
-		var pp: Vector3 = player.global_position
-		var best_road := 0.0
-		var bd := 1e9
-		for k in city.N + 1:
-			var road: float = (k - city.N * 0.5) * city.CELL
-			if absf(road - pp.x) < bd:
-				bd = absf(road - pp.x)
-				best_road = road
-		var ext: float = city.extent() - 8.0
-		var z := pp.z - 55.0 if pp.z > 0 else pp.z + 55.0
-		z = clampf(z, -ext, ext)
-		var yaw := 0.0 if z < pp.z else PI
-		police_car = _spawn_car(Vector3(best_road + (2.6 if yaw == 0.0 else -2.6), 0.8, z), yaw, Color(0.92, 0.92, 0.93), true)
-		police_car.max_engine = 6200.0
-	if police_car:
-		police_car.ai_target = player.vehicle if player.vehicle else player
-		var d: float = police_car.global_position.distance_to(player.global_position)
-		var slow: bool = player.vehicle == null or player.vehicle.linear_velocity.length() < 2.0
-		bust_timer = bust_timer + dt if (d < 6.0 and slow) else 0.0
-		if bust_timer > 3.0:
-			_msg("PRESO! (teste)")
-			wanted = 0
-			bust_timer = 0
-			police_car.queue_free()
-			cars.erase(police_car)
-			police_car = null
+	police.on_crime()
 
 func _msg(t: String) -> void:
 	hud.hint.text = t
@@ -570,16 +833,49 @@ func _process(dt: float) -> void:
 		cam_idle = 2.0
 	cam_idle -= dt
 	var tgt: Node3D = player.vehicle if player.vehicle else player
-	var dist := 7.5 if player.vehicle else 4.6
-	var h := 1.6 if player.vehicle else 1.5
+	var dist := 4.6
+	var h := 1.5
+	if player.vehicle:
+		dist = {"bus": 13.0, "plane": 15.0, "heli": 13.0, "boat": 9.0, "moto": 5.5}.get(player.vehicle.kind, 7.5)
+		h = {"bus": 3.0, "plane": 3.0, "heli": 3.0}.get(player.vehicle.kind, 1.6)
+	elif player.body and player.body.ragdolled and player.body.parts.size() > 0 and is_instance_valid(player.body.parts[0]):
+		tgt = player.body.parts[0]
+		h = 0.6
+	var aiming: bool = (hud.aim or Input.is_action_pressed("aim")) and player.vehicle == null and not combat.dead and combat.down_t <= 0.0 and not player.swimming
+	combat.aim = aiming
+	if not aiming:
+		player.aim_yaw = NAN
+	hud.crosshair = aiming
+	if interior != "":
+		dist = 3.6
+	if aiming:
+		dist = 2.4
+		h = 1.65
+		player.aim_yaw = cam_yaw + PI
+	var want_fov := 62.0
+	if aiming:
+		want_fov = 22.0 if combat.weapon == "sniper" else 48.0
+	cam.fov = lerpf(cam.fov, want_fov, minf(1.0, dt * 10.0))
 	if player.vehicle and cam_idle <= 0:
 		var fwd: Vector3 = player.vehicle.global_transform.basis.z
 		var want_yaw := atan2(fwd.x, fwd.z) + PI
 		cam_yaw = lerp_angle(cam_yaw, want_yaw, minf(1.0, dt * 2.5))
 	var off := Vector3(sin(cam_yaw) * cos(cam_pitch), -sin(cam_pitch), cos(cam_yaw) * cos(cam_pitch)) * dist
 	var focus := tgt.global_position + Vector3(0, h, 0)
-	cam.global_position = cam.global_position.lerp(focus + off, minf(1.0, dt * 8.0)) if frames > 2 else focus + off
-	cam.look_at(focus, Vector3.UP)
+	if aiming:
+		focus += Vector3(cos(cam_yaw), 0, -sin(cam_yaw)) * 0.55     # sobre o ombro direito
+	# câmera não atravessa paredes
+	var want_pos := focus + off
+	var cq := PhysicsRayQueryParameters3D.create(focus, want_pos, 1)
+	var excl := [player.get_rid()]
+	if player.vehicle:
+		excl.append(player.vehicle.get_rid())
+	cq.exclude = excl
+	var ch := get_world_3d().direct_space_state.intersect_ray(cq)
+	if not ch.is_empty():
+		want_pos = ch.position + (focus - want_pos).normalized() * 0.3
+	cam.global_position = cam.global_position.lerp(want_pos, minf(1.0, dt * (14.0 if aiming else 8.0))) if frames > 2 else want_pos
+	cam.look_at(focus + (-off.normalized() * 6.0 if aiming else Vector3.ZERO), Vector3.UP)
 	# sons contínuos
 	if player.vehicle:
 		var v = player.vehicle
@@ -609,11 +905,35 @@ func _process(dt: float) -> void:
 	hud.hp = hp
 	hud.armor = armor
 	shop_near = ""
-	if player.vehicle == null and not combat.dead:
+	shop_action = ""
+	if player.vehicle == null and not combat.dead and not vehanim.busy():
+		if interior != "":
+			var it: Dictionary = world2.interiors[interior]
+			shop_near = interior
+			if player.global_position.distance_to(it.exit) < 2.2:
+				shop_action = "exit"
+			elif player.global_position.distance_to(it.counter) < 2.6:
+				shop_action = "buy"
+		else:
+			for sh in city.shops:
+				if Vector2(sh.pos.x - player.global_position.x, sh.pos.z - player.global_position.z).length() < 3.2:
+					shop_near = sh.type
+					shop_action = "enter"
+	hud.shop_label = {"enter": "ENTRAR", "exit": "SAIR", "buy": "COMPRAR"}.get(shop_action, "")
+	var pk: String = player.vehicle.kind if player.vehicle else ""
+	hud.gas_name = "SUBIR" if pk == "heli" else "ACEL"
+	hud.brk_name = "DESCER" if pk == "heli" else "FREIO"
+	hud.stars_blink = wanted > 0 and not police.seen
+	var bl: Array = missions.blips()
+	for u in police.units:
+		if is_instance_valid(u.car):
+			bl.append({"pos": u.car.global_position, "col": Color(0.2, 0.45, 1.0) if int(Time.get_ticks_msec() / 250) % 2 == 0 else Color(1, 0.15, 0.15)})
+	if police.heli and is_instance_valid(police.heli):
+		bl.append({"pos": police.heli.global_position, "col": Color(0.2, 0.45, 1.0)})
+	if interior == "":
 		for sh in city.shops:
-			if Vector2(sh.pos.x - player.global_position.x, sh.pos.z - player.global_position.z).length() < 3.2:
-				shop_near = sh.type
-	hud.shop_label = "LOJA" if shop_near != "" else ""
+			bl.append({"pos": sh.pos, "col": {"guns": Color(1, 0.3, 0.2), "cars": Color(0.3, 0.8, 1), "clothes": Color(0.95, 0.45, 0.85)}[sh.type]})
+	hud.map_blips = bl
 	hud.clock.text = "%02d:%02d" % [int(tod), int(fmod(tod, 1.0) * 60.0)]
 	autosave_t += dt
 	if autosave_t > 60.0 and shot == "":
@@ -621,19 +941,207 @@ func _process(dt: float) -> void:
 		ui.save_game()
 	hud.map_player = player.global_position
 	hud.map_yaw = cam_yaw + PI
-	hud.map_police = police_car.global_position if police_car else Vector3.INF
+	hud.map_police = Vector3.INF
 	hud.speed.text = ("%d km/h" % round(player.vehicle.speed_kmh())) if player.vehicle else ""
+	if player.vehicle and player.vehicle.kind in ["plane", "heli"]:
+		hud.speed.text += "\nalt. %d m" % round(player.vehicle.global_position.y)
 	if msg_t > 0:
 		msg_t -= dt
 		if msg_t <= 0: hud.hint.text = ""
-	elif shop_near != "":
-		hud.hint.text = {"guns": "AMMU★NATION", "cars": "Concessionária", "clothes": "Loja de roupas"}[shop_near] + " · toque em LOJA"
-	elif player.vehicle == null and my_car and my_car.global_position.distance_to(player.global_position) < 4.0:
-		hud.hint.text = "Toque em CARRO para entrar"
+	elif shop_action != "":
+		hud.hint.text = {"guns": "AMMU★NATION", "cars": "Concessionária", "clothes": "Loja de roupas"}[shop_near] + " · toque em " + hud.shop_label
+	elif player.swimming:
+		hud.hint.text = "Nadando"
 	else:
 		hud.hint.text = ""
 	if shot != "":
 		_shot_tick()
+
+func _near_kind(k: String):
+	var best = null
+	for c in cars:
+		if is_instance_valid(c) and c.kind == k and (best == null or c.global_position.distance_to(player.global_position) < best.global_position.distance_to(player.global_position)):
+			best = c
+	return best
+
+## cenas de teste do lote 7
+func _test_views() -> void:
+	var v := shot_view
+	if v == "beach" and frames == 4:
+		player.global_position = Vector3(world2.SHORE_X - 20.0, 1.3, 30.0)
+		cam_yaw = -PI * 0.5 - 0.5
+		cam_pitch = -0.12
+	if v == "swim":
+		if frames == 4:
+			player.global_position = Vector3(world2.SHORE_X + 14.0, 0.5, 20.0)
+			cam_yaw = -PI * 0.5
+		if frames > 6:
+			hud.joy = Vector2(0, -1)
+		if frames % 30 == 0:
+			print("SWIM ", frames, " swim=", player.swimming, " pos=", player.global_position.snapped(Vector3.ONE * 0.1))
+	if v in ["airport", "planefly", "helifly"] and frames == 4:
+		var k: String = "heli" if v == "helifly" else "plane"
+		var pl = _near_kind(k) if false else null
+		for c in cars:
+			if c.kind == k:
+				pl = c
+				break
+		player.global_position = pl.global_position + pl.global_transform.basis.x * (6.0 if k == "plane" else 2.4)
+		cam_yaw = PI * 0.5 if v == "airport" else 0.0
+	if v in ["planefly", "helifly"]:
+		if frames == 6:
+			_toggle_car()
+		if player.vehicle and frames > 6:
+			var c = player.vehicle
+			if v == "planefly":
+				c.throttle = 1.0
+				c.stick = Vector2(0, -0.6 if frames > 130 else 0.0)
+			else:
+				c.throttle = 1.0 if frames < 120 else 0.0
+				c.stick = Vector2(0.0, 0.6 if frames > 120 else 0.0)
+		if frames % 30 == 0:
+			print("FLY ", frames, " veh=", player.vehicle.kind if player.vehicle else "-", " anim=", vehanim.state, " pos=", (player.vehicle.global_position if player.vehicle else player.global_position).snapped(Vector3.ONE), " v=", snappedf(player.vehicle.v, 0.1) if player.vehicle else 0.0, " dead=", player.vehicle.dead if player.vehicle else false)
+	if v == "boatride":
+		if frames == 4:
+			for c in cars:
+				if c.kind == "boat":
+					player.global_position = c.global_position + Vector3(0, 1.4, -3.0)
+					player.global_position = Vector3(world2.SHORE_X + 50.0, 1.9, 40.0)
+					break
+		if frames == 8:
+			_toggle_car()
+		if player.vehicle and frames > 8:
+			player.vehicle.throttle = 1.0
+			player.vehicle.steer_in = 0.4 if frames > 100 else 0.0
+		if frames % 30 == 0:
+			print("BOAT ", frames, " veh=", player.vehicle.kind if player.vehicle else "-", " anim=", vehanim.state, " pos=", (player.vehicle.global_position if player.vehicle else player.global_position).snapped(Vector3.ONE * 0.1))
+	if v == "enter":
+		if frames == 4:
+			player.global_position = my_car.global_position + Vector3(3.0, 0, 3.0)
+			cam_yaw = 0.9
+		if frames == 6:
+			_toggle_car()
+		if frames == 90:
+			_toggle_car()
+		if frames % 6 == 0 and frames < 150:
+			print("ENT ", frames, " st=", vehanim.state, " veh=", player.vehicle != null, " door=", snappedf(my_car.door_open, 0.01), " seat=", (seated.position.snapped(Vector3.ONE * 0.01) if seated else Vector3.ZERO), " vis=", player.visible)
+	if v == "interior":
+		if frames == 4:
+			player.global_position = city.shops[0].pos
+		if frames == 8:
+			_shop_action()
+		if frames == 12:
+			print("INT ", interior, " action=", shop_action, " pos=", player.global_position)
+	if v == "interior2" and frames == 6:
+		enter_interior("cars")
+		cam_yaw = PI + 0.4
+	if v == "explode":
+		if frames == 4:
+			player.global_position = my_car.global_position + Vector3(-9.0, 0, 6.0)
+			cam_yaw = -2.2
+		if frames == 30:
+			my_car.take_damage(200.0)
+		if frames % 20 == 0:
+			print("EXP ", frames, " car_dead=", my_car.dead, " hp=", snappedf(hp, 1), " down=", snappedf(combat.down_t, 0.1))
+	if v == "wanted":
+		if frames == 4:
+			_add_wanted(4)
+			combat.weapon = "pistol"
+		if frames % 30 == 0:
+			print("WNT ", frames, " stars=", wanted, " units=", police.units.size(), " cops=", police.cops.size(), " heli=", police.heli != null, " hp=", snappedf(hp, 1), " seen=", police.seen)
+	if v == "aimshot":
+		if frames == 4:
+			player.global_position = my_car.global_position + Vector3(-5.0, 0, 12.0)
+			cam_yaw = -PI
+			cam_pitch = -0.05
+			hud.aim = true
+			combat.weapon = "rifle"
+			combat.ammo["rifle"] = 50
+			combat.owned["rifle"] = true
+			combat._equip()
+		if frames > 20 and frames < 30:
+			combat.fire_held = true
+	if v == "punch":
+		if frames == 4:
+			player.global_position = my_car.global_position + Vector3(-5.0, 0, 12.0)
+			shot_ped = Ped.new()
+			add_child(shot_ped)
+			var pp: Vector3 = player.global_position + Vector3(0, 0, 1.6)
+			shot_ped.setup([pp, pp + Vector3(0, 0, 0.1), pp, pp], 0, rng)
+			peds.append(shot_ped)
+			combat.weapon = "fist"
+			combat._equip()
+			cam_yaw = PI
+		if frames > 10 and frames < 200 and frames % 3 == 0:
+			combat.combo_t = 0.5
+			combat.shoot()
+			print("PUN ", frames, " combo=", combat.combo, " ped_hp=", shot_ped.hp if is_instance_valid(shot_ped) else -1, " down=", shot_ped.down if is_instance_valid(shot_ped) else true, " stars=", wanted)
+	if v == "wheel" and frames == 20:
+		combat.owned = {"fist": true, "pistol": true, "rifle": true, "rpg": true, "grenade": true}
+		combat.ammo = {"pistol": 30, "rifle": 90, "rpg": 3, "grenade": 4}
+		ui.show_wheel()
+	if v == "rpg":
+		if frames == 4:
+			player.global_position = my_car.global_position + Vector3(-25.0, 0, 0.0)
+			combat.owned["rpg"] = true
+			combat.ammo["rpg"] = 3
+			combat.weapon = "rpg"
+			combat._equip()
+			cam_yaw = PI * 0.5
+			cam_pitch = -0.04
+			hud.aim = true
+		if frames == 20:
+			cam_yaw = atan2(player.global_position.x - my_car.global_position.x, player.global_position.z - my_car.global_position.z)
+		if frames == 40:
+			combat.shoot()
+		if frames % 20 == 0:
+			print("RPG ", frames, " rockets=", combat.rockets.size(), " car_hp=", snappedf(my_car.hp, 1), " dead=", my_car.dead)
+	if v == "taxi":
+		if frames == 4:
+			var tx = _near_kind("taxi")
+			player.global_position = tx.door_world()
+			set_meta("tx", tx)
+		if frames == 6:
+			vehanim.start_enter(get_meta("tx"))
+		if frames % 30 == 0:
+			print("TAXI ", frames, " veh=", player.vehicle.kind if player.vehicle else "-", " active=", missions.active, " st=", missions.taxi_state, " obj=", missions.obj_pos, " text=", missions.text)
+	if v == "mission":
+		if frames == 4:
+			player.global_position = missions.givers[1].pos
+		if frames % 30 == 0:
+			print("MIS ", frames, " active=", missions.active, " text=", missions.text, " hostiles=", missions.hostiles().size(), " timer=", snappedf(missions.timer, 1))
+	if v == "busride":
+		if frames == 4:
+			var b = buses[0].car
+			player.global_position = b.door_world()
+		if frames == 6:
+			_toggle_car()
+		if player.vehicle and frames > 80:
+			player.vehicle.throttle = 1.0
+		if frames % 30 == 0:
+			print("BUSR ", frames, " veh=", player.vehicle.kind if player.vehicle else "-", " anim=", vehanim.state, " v=", snappedf(player.vehicle.speed_kmh(), 1) if player.vehicle else 0.0)
+	if v == "fall":
+		if frames == 4:
+			player.global_position = Vector3(city._center(2), 22.0, city._center(2) - city.BLOCK * 0.5 + 1.0)
+		if frames % 15 == 0:
+			print("FALL ", frames, " y=", snappedf(player.global_position.y, 0.1), " hp=", snappedf(hp, 1), " down=", snappedf(combat.down_t, 0.1), " rag=", player.body.ragdolled)
+	if v == "motocrash":
+		if frames == 4:
+			var mo = null
+			for c in cars:
+				if c.kind == "moto" and not traffic.any(func(t): return t.car == c):
+					mo = c
+					break
+			player.global_position = mo.door_world()
+			set_meta("moto", mo)
+		if frames == 6:
+			_toggle_car()
+		if player.vehicle and frames > 70:
+			player.vehicle.throttle = 1.0
+			player.vehicle.steer_in = -1.0 if frames > 120 else 0.0
+		if frames % 15 == 0:
+			var mo2 = get_meta("moto")
+			print("MCR ", frames, " veh=", player.vehicle.kind if player.vehicle else "-", " anim=", vehanim.state, " hp=", snappedf(hp, 1), " down=", snappedf(combat.down_t, 0.1), " v=", snappedf(mo2.speed_kmh(), 1), " pos=", mo2.global_position.snapped(Vector3.ONE), " thr=", mo2.throttle)
 
 ## Modo de captura para testes automáticos: --shot=arquivo.png --view=nome
 func _shot_tick() -> void:
@@ -764,6 +1272,7 @@ func _shot_tick() -> void:
 		ui._set_outfit("jacket", "5a3a22")
 		ui._set_outfit("hat", 1)
 		ui._set_outfit("glasses", true)
+	_test_views()
 	if shot_view == "warm" and frames % 5 == 0 and frames < 40:
 		print("WARM ", frames, " w=", daynight._warm, " omni=", daynight.lamp_lights.filter(func(l): return l.visible).size(), " spot=", daynight.car_lights.filter(func(c): return c.l.visible).size())
 	if shot_view == "bus" and frames == 4 or shot_view == "bus" and frames == shot_at - 2:

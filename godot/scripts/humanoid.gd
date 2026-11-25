@@ -16,6 +16,10 @@ var ragdolled := false
 var parts: Array = []    # RigidBody3D do ragdoll
 var aiming := false
 var punch_t := 0.0
+var punch_kind := 0      # 0 direto direita, 1 direto esquerda, 2 chute
+var swimming := false
+var guard := false       # guarda alta (modo luta)
+var throw_t := 0.0
 var gun: Node3D
 
 ## arma na mão direita (apontando para frente quando o braço está esticado)
@@ -166,6 +170,22 @@ func animate(speed: float, dt: float) -> void:
 	var sh: Array = [bones.shinL, bones.shinR]
 	var up: Array = [bones.upperL, bones.upperR]
 	var fo: Array = [bones.foreL, bones.foreR]
+	if swimming:
+		phase += dt * 4.0
+		bones.hips.rotation.x = 1.25
+		bones.hips.position.y = 0.6
+		bones.chest.rotation.x = 0.0
+		bones.head.rotation.x = -0.9
+		var sw := sin(phase)
+		for k in 2:
+			var sg := 1.0 if k == 0 else -1.0
+			th[k].rotation.x = sw * sg * 0.35 * minf(1.0, speed)
+			sh[k].rotation.x = 0.2
+			up[k].rotation.x = -2.6 + sin(phase + k * PI) * 1.4 * minf(1.0, speed + 0.25)
+			up[k].rotation.z = sg * 0.3
+			fo[k].rotation.x = -0.3
+		return
+	bones.hips.rotation.x = 0.0
 	if sitting:
 		for k in 2:
 			th[k].rotation.x = -1.45
@@ -197,12 +217,35 @@ func animate(speed: float, dt: float) -> void:
 	bones.hips.rotation.y = -s * 0.08 * amp
 	bones.hips.position.y = 0.98 - run * 0.04 + absf(cos(phase)) * lerpf(0.025, 0.07, run) * walk
 	bones.head.rotation.x = -run * 0.15
-	if punch_t > 0.0:
+	if throw_t > 0.0:
+		throw_t -= dt
+		var tk := clampf(throw_t / 0.5, 0.0, 1.0)
+		up[1].rotation.x = lerpf(-2.4, 1.2, 1.0 - tk) if tk < 0.6 else lerpf(-0.3, -2.4, (1.0 - tk) / 0.4)
+		fo[1].rotation.x = -0.4
+	elif punch_t > 0.0:
 		punch_t -= dt
 		var k := sin(clampf(punch_t / 0.3, 0.0, 1.0) * PI)
-		up[1].rotation.x = -1.5 * k
-		up[1].rotation.z = 0.0
-		fo[1].rotation.x = -0.2 * k
+		bones.chest.rotation.y = (0.35 if punch_kind == 0 else -0.35) * k
+		if punch_kind == 2:
+			# chute frontal com a perna direita
+			th[1].rotation.x = -1.6 * k
+			sh[1].rotation.x = 0.2 * (1.0 - k)
+			bones.chest.rotation.x = 0.25 * k
+			up[0].rotation.x = -0.9
+			up[1].rotation.x = -0.9
+		else:
+			var a := 1 if punch_kind == 0 else 0
+			var o := 1 - a
+			up[a].rotation.x = -1.55 * k
+			up[a].rotation.z = 0.0
+			fo[a].rotation.x = -0.15 * k
+			up[o].rotation.x = -1.1
+			fo[o].rotation.x = -1.7
+	elif guard:
+		for k2 in 2:
+			up[k2].rotation.x = -1.1
+			up[k2].rotation.z = 0.25 if k2 == 0 else -0.25
+			fo[k2].rotation.x = -1.8
 	elif aiming:
 		up[1].rotation.x = -1.48
 		up[1].rotation.z = 0.0

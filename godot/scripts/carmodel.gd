@@ -22,7 +22,10 @@ const KINDS := {
 ## Devolve {"root": Node3D com a carroceria, "wheels": [{"node": Node3D, "pos": Vector3, "front": bool}], "wr": raio, "seat": Vector3, "size": Vector3}
 static func build(kind: String, paint: Color) -> Dictionary:
 	var police := kind == "police"
-	var k: Dictionary = KINDS["sedan" if police else kind]
+	var taxi := kind == "taxi"
+	if taxi:
+		paint = Color(0.95, 0.72, 0.05)
+	var k: Dictionary = KINDS["sedan" if police or taxi else kind]
 	var L: float = k.L
 	var W: float = k.W
 	var wb: float = k.wb
@@ -172,6 +175,12 @@ static func build(kind: String, paint: Color) -> Dictionary:
 		_box(det, Vector3(W * 0.86, 0.05, 1.9), Vector3(0, 1.06, -1.5), Color(0.1, 0.1, 0.11))
 	if police:
 		_box(det, Vector3(1.2, 0.1, 0.3), Vector3(0, _top(top, 0.0) + 0.07, -0.1), Color(0.1, 0.1, 0.12))
+	if taxi:
+		_box(lit, Vector3(0.7, 0.22, 0.3), Vector3(0, _top(top, 0.0) + 0.14, -0.1), Color(1.0, 0.9, 0.35))
+		_box(det, Vector3(0.74, 0.04, 0.34), Vector3(0, _top(top, 0.0) + 0.02, -0.1), Color(0.1, 0.1, 0.1))
+		for zz in range(-10, 11):
+			_box(det, Vector3(0.02, 0.08, 0.16), Vector3(W * 0.5 - 0.02, 0.62, zz * 0.18), Color(0.05, 0.05, 0.05) if zz % 2 == 0 else Color(0.95, 0.95, 0.95))
+			_box(det, Vector3(0.02, 0.08, 0.16), Vector3(-W * 0.5 + 0.02, 0.62, zz * 0.18), Color(0.05, 0.05, 0.05) if zz % 2 == 0 else Color(0.95, 0.95, 0.95))
 	_commit(root, det, vc_mat())
 	_commit(root, lit, vc_lit())
 	# --- rodas (1 malha cada: pneu + aro + raios) ---
@@ -207,7 +216,8 @@ static func build(kind: String, paint: Color) -> Dictionary:
 			n.material_override = vc_mat()
 			wheels.append({"node": n, "pos": Vector3((W * 0.5 - 0.15) * s, wr, wz), "front": wz > 0})
 	var seat_z := (zc0 + zc1) * 0.5 + 0.1
-	return {"root": root, "wheels": wheels, "wr": wr, "seat": Vector3(0.38, 0.38 if kind == "sport" else 0.5, seat_z), "size": Vector3(W, roof_max, L)}
+	var door := {"zf": zc1 - 0.05, "zb": b_pillar if kind != "pickup" else zc0 + 0.1, "y0": 0.32, "y1": belt + 0.02, "x": W * 0.5}
+	return {"root": root, "wheels": wheels, "wr": wr, "seat": Vector3(0.38, 0.38 if kind == "sport" else 0.5, seat_z), "size": Vector3(W, roof_max, L), "door": door, "paint": paint}
 
 static func _first_cabin_z(top: Array, belt: float, front: bool) -> float:
 	# z onde o teto (vidro) encontra a linha de cintura, na frente ou atrás

@@ -1,0 +1,374 @@
+extends CharacterBody3D
+## Veículos "arcade" (sem rodas físicas): barco, avião e helicóptero.
+## Mesma interface do car.gd (throttle, brake_in, steer_in, seat, body_size, take_damage, explode...),
+## então entrar/sair, dano, explosão e câmera funcionam igual. 'stick' recebe o joystick (x = lado, y = frente).
+
+const CM := preload("res://scripts/carmodel.gd")
+const M := preload("res://scripts/mats.gd")
+const FX := preload("res://scripts/fx.gd")
+
+signal crashed(car, dv)
+signal destroyed(car)
+
+const WATER_Y := 0.9
+
+var kind := "boat"          # boat, plane, heli
+var throttle := 0.0
+var brake_in := 0.0
+var steer_in := 0.0
+var handbrake := false
+var stick := Vector2.ZERO
+var max_engine := 1.0
+var police := false
+var ai_target: Node3D = null
+var ai_mode := ""           # "" ou "follow" (helicóptero da polícia)
+var driver: Node = null
+var wheels: Array = []
+var lean: Node3D = null
+var body_size := Vector3(2, 1.5, 6)
+var seat := Vector3(0, 0.6, 0)
+var model_root: Node3D
+var hp := 100.0
+var dead := false
+var parked := false
+var linear_velocity := Vector3.ZERO
+var engine_on := false
+var world2: Node = null      # para saber onde é água
+var v := 0.0                 # velocidade escalar para a frente
+var _rot_main: Node3D
+var _rot_tail: Node3D
+var _prop: Node3D
+var _t := 0.0
+var _fire: CPUParticles3D
+var _smoke: CPUParticles3D
+var _fall := false
+var yaw := 0.0
+var pitch := 0.0
+var roll := 0.0
+var vy := 0.0
+
+func setup(k: String, paint: Color) -> void:
+	kind = k
+	collision_layer = 1
+	collision_mask = 1
+	model_root = Node3D.new()
+	add_child(model_root)
+	var cs := CollisionShape3D.new()
+	var bx := BoxShape3D.new()
+	match kind:
+		"boat":
+			_boat(paint)
+			body_size = Vector3(2.2, 1.4, 6.0)
+			seat = Vector3(0.35, 0.55, -0.4)
+			hp = 120.0
+		"plane":
+			_plane(paint)
+			body_size = Vector3(10.5, 2.6, 8.4)
+			seat = Vector3(0, 0.95, 0.6)
+			hp = 140.0
+		"heli":
+			_heli(paint, police)
+			body_size = Vector3(2.4, 2.8, 9.0)
+			seat = Vector3(0.35, 0.65, 0.9)
+			hp = 160.0
+	bx.size = Vector3(minf(body_size.x, 2.4), 1.2, body_size.z * 0.8)
+	cs.shape = bx
+	cs.position = Vector3(0, 0.8, 0)
+	add_child(cs)
+
+func door_world() -> Vector3:
+	return global_transform * Vector3(body_size.x * 0.5 + 0.9 if kind != "plane" else 1.6, 0, seat.z)
+
+func set_door(_a: float) -> void:
+	pass
+
+func speed_kmh() -> float:
+	return linear_velocity.length() * 3.6
+
+func forward_speed() -> float:
+	return v
+
+func take_damage(d: float) -> void:
+	if dead:
+		return
+	hp -= d
+	if hp < 40.0 and _smoke == null:
+		_smoke = FX.smoke_emitter(model_root, Vector3(0, 1.2, -0.5))
+	if hp < 15.0 and _fire == null:
+		_fire = FX.fire_emitter(model_root, Vector3(0, 1.0, -0.5))
+		if kind != "boat" and global_position.y > 2.0:
+			_fall = true     # motor falha: cai girando
+	if hp <= 0.0:
+		explode()
+
+func explode() -> void:
+	if dead:
+		return
+	dead = true
+	engine_on = false
+	var burnt := M.plain(Color(0.06, 0.055, 0.05), 0.95)
+	for n in model_root.find_children("*", "MeshInstance3D", true, false):
+		n.material_override = burnt
+	if _fire == null:
+		_fire = FX.fire_emitter(model_root, Vector3(0, 1.0, 0))
+	destroyed.emit(self)
+
+var _inited := false
+func _physics_process(dt: float) -> void:
+	if not _inited:
+		_inited = true
+		yaw = rotation.y
+	_t += dt
+	if _rot_main:
+		_rot_main.rotate_y(dt * (28.0 if engine_on or _fall else 0.0))
+	if _rot_tail:
+		_rot_tail.rotate_x(dt * (40.0 if engine_on else 0.0))
+	if _prop:
+		_prop.rotate_z(dt * (30.0 * clampf(v / 10.0 + (0.4 if engine_on else 0.0), 0.0, 1.5)))
+	var before := velocity
+	match kind:
+		"boat": _boat_phys(dt)
+		"plane": _plane_phys(dt)
+		"heli": _heli_phys(dt)
+	linear_velocity = velocity
+	# batida em parede/prédio
+	if get_slide_collision_count() > 0:
+		var dv := (before - velocity).length()
+		if dv > 7.0:
+			take_damage((dv - 7.0) * (6.0 if kind != "boat" else 3.0))
+			crashed.emit(self, dv)
+			if kind == "plane" and dv > 14.0:
+				explode()
+
+# ---------------------------------------------------------------- barco
+func _boat_phys(dt: float) -> void:
+	var drive := not dead and (driver != null or ai_target != null or throttle != 0.0)
+	engine_on = drive
+	var acc := throttle * 11.0 if drive else 0.0
+	v += acc * dt
+	v -= v * (0.35 if absf(throttle) > 0.05 else 0.9) * dt
+	v = clampf(v, -6.0, 26.0)
+	yaw += steer_in * 1.1 * clampf(absf(v) / 5.0, 0.0, 1.0) * signf(v + 0.01) * dt
+	var fwd := Vector3(sin(yaw), 0, cos(yaw))
+	var next := global_position + fwd * v * dt
+	if world2 and not world2.is_water(next.x, next.z):
+		v = -v * 0.3
+		if absf(v) > 4.0:
+			take_damage(absf(v) * 2.0)
+	velocity = fwd * v
+	velocity.y = (WATER_Y - 0.55 - global_position.y) * 6.0 if not dead else -0.6
+	move_and_slide()
+	if dead and global_position.y < -2.5:
+		queue_free()
+	# balanço nas ondas e empinar com a aceleração
+	rotation = Vector3(0, yaw, 0)
+	model_root.rotation.x = -clampf(v / 26.0, 0.0, 1.0) * 0.12 + sin(_t * 1.7) * 0.025
+	model_root.rotation.z = sin(_t * 1.3) * 0.03 - steer_in * clampf(v / 20.0, 0.0, 1.0) * 0.12
+
+# ---------------------------------------------------------------- avião
+func _plane_phys(dt: float) -> void:
+	var on_ground := global_position.y < 0.15
+	engine_on = driver != null and not dead
+	var thr := throttle if engine_on else 0.0
+	v += (thr * (16.0 if thr > 0 else 22.0) - v * 0.12) * dt
+	v = clampf(v, 0.0, 62.0)
+	if on_ground:
+		yaw += steer_in * 0.8 * clampf(v / 8.0, 0.0, 1.0) * dt
+		roll = lerpf(roll, 0.0, dt * 4.0)
+		var want_pitch := 0.0
+		if v > 24.0 and stick.y < -0.2:
+			want_pitch = 0.25     # decolagem: puxe o manche (joystick para trás)
+		pitch = lerpf(pitch, want_pitch, dt * 2.0)
+		vy = 0.0
+	else:
+		roll = lerpf(roll, -stick.x * 0.95, dt * 2.5)
+		pitch = clampf(pitch - stick.y * 1.1 * dt, -0.9, 0.9)
+		yaw += roll * 0.9 * dt
+	if _fall:
+		roll += dt * 2.5
+		pitch = lerpf(pitch, -0.7, dt)
+	var fwd := Vector3(sin(yaw) * cos(pitch), sin(pitch), cos(yaw) * cos(pitch))
+	var vel := fwd * v
+	# sustentação: abaixo de 20 m/s o avião afunda (estol)
+	var lift := clampf((v - 14.0) / 10.0, 0.0, 1.0)
+	if not on_ground or pitch > 0.05:
+		vy = lerpf(vy, -9.0 * (1.0 - lift), dt * 1.5)
+		vel.y += vy
+	if _fall:
+		vel.y -= 12.0
+	velocity = vel
+	move_and_slide()
+	if global_position.y < 0.0:
+		var impact := -vel.y
+		global_position.y = 0.0
+		if impact > 7.0 or pitch < -0.35 or _fall or absf(roll) > 0.8:
+			explode()
+			v = 0.0
+		pitch = maxf(pitch, 0.0)
+	rotation = Vector3(0, 0, 0)
+	basis = Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, -pitch) * Basis(Vector3.FORWARD, -roll)
+
+# ---------------------------------------------------------------- helicóptero
+func _heli_phys(dt: float) -> void:
+	engine_on = (driver != null or ai_mode != "") and not dead
+	var target_v := Vector3.ZERO
+	var climb := 0.0
+	if ai_mode == "follow" and ai_target and is_instance_valid(ai_target):
+		# polícia: circula o alvo a 22 m de altura
+		var c := ai_target.global_position + Vector3(cos(_t * 0.35) * 18.0, 0, sin(_t * 0.35) * 18.0)
+		var to := c - global_position
+		to.y = 0
+		target_v = to.limit_length(24.0)
+		climb = clampf((ai_target.global_position.y + 22.0 - global_position.y) * 0.8, -6.0, 6.0)
+		var face := ai_target.global_position - global_position
+		yaw = lerp_angle(yaw, atan2(face.x, face.z), dt * 1.5)
+	elif ai_mode == "leave":
+		target_v = Vector3(sin(yaw), 0, cos(yaw)) * 25.0
+		climb = 4.0
+	elif engine_on:
+		yaw -= stick.x * 1.4 * dt
+		var fwd := Vector3(sin(yaw), 0, cos(yaw))
+		target_v = fwd * stick.y * 30.0
+		climb = (throttle * 7.0) if absf(throttle) > 0.05 else 0.0
+	var hv := Vector3(velocity.x, 0, velocity.z).lerp(target_v, dt * 1.2)
+	var vyy := lerpf(velocity.y, climb, dt * 2.0)
+	if not engine_on:
+		vyy = velocity.y - 14.0 * dt
+		hv = hv.lerp(Vector3.ZERO, dt * 0.5)
+	if _fall:
+		yaw += dt * 4.0
+		vyy = velocity.y - 10.0 * dt
+	velocity = Vector3(hv.x, vyy, hv.z)
+	move_and_slide()
+	if global_position.y < 0.0:
+		if velocity.y < -9.0 or _fall:
+			explode()
+		global_position.y = 0.0
+		velocity.y = 0.0
+	# inclina para onde acelera
+	var local := Basis(Vector3.UP, yaw).inverse() * hv
+	pitch = lerpf(pitch, -clampf(local.z / 30.0, -1, 1) * 0.25, dt * 3.0)
+	roll = lerpf(roll, clampf(local.x / 30.0, -1, 1) * 0.25, dt * 3.0)
+	basis = Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, -pitch) * Basis(Vector3.FORWARD, roll)
+	v = hv.length()
+
+# ---------------------------------------------------------------- modelos
+func _st() -> SurfaceTool:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	return st
+
+func _commit(st: SurfaceTool, parent: Node3D, mat: Material = null) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	mi.material_override = mat if mat else CM.vc_mat()
+	parent.add_child(mi)
+	return mi
+
+func _glass() -> StandardMaterial3D:
+	var g := StandardMaterial3D.new()
+	g.albedo_color = Color(0.1, 0.16, 0.22, 0.55)
+	g.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	g.metallic = 0.8
+	g.roughness = 0.05
+	return g
+
+func _cyl(r: float, h: float, seg := 12) -> CylinderMesh:
+	var c := CylinderMesh.new()
+	c.top_radius = r
+	c.bottom_radius = r
+	c.height = h
+	c.radial_segments = seg
+	c.rings = 1
+	return c
+
+func _boat(paint: Color) -> void:
+	var st := _st()
+	var white := Color(0.93, 0.93, 0.92)
+	# casco: fatias que afinam na proa
+	for i in 12:
+		var z := lerpf(-2.9, 2.2, i / 11.0)
+		var w := 2.1 * (1.0 - pow(clampf((z - 0.2) / 2.2, 0.0, 1.0), 1.6) * 0.85)
+		CM._box(st, Vector3(w, 0.9, 0.46), Vector3(0, 0.45 + clampf((z - 0.8) * 0.15, 0, 0.25), z), white)
+		CM._box(st, Vector3(w + 0.02, 0.22, 0.46), Vector3(0, 0.25, z), paint)
+	CM._ell(st, Vector3(0, 0.62, 2.55), Vector3(0.55, 0.62, 1.2), white)
+	CM._box(st, Vector3(1.7, 0.1, 3.6), Vector3(0, 0.88, -0.6), Color(0.55, 0.42, 0.28))    # piso
+	CM._box(st, Vector3(0.6, 0.85, 0.6), Vector3(0.35, 1.2, 0.35), Color(0.85, 0.85, 0.84))  # console
+	CM._box(st, Vector3(0.5, 0.15, 0.5), Vector3(0.35, 1.0, -0.4), Color(0.1, 0.1, 0.12))    # banco
+	CM._box(st, Vector3(0.5, 0.55, 0.1), Vector3(0.35, 1.3, -0.62), Color(0.1, 0.1, 0.12))
+	CM._box(st, Vector3(1.6, 0.4, 0.5), Vector3(0, 1.08, -2.3), Color(0.1, 0.1, 0.12))       # banco de trás
+	CM._box(st, Vector3(0.45, 1.0, 0.45), Vector3(0, 0.9, -3.05), Color(0.12, 0.12, 0.13))   # motor de popa
+	CM._box(st, Vector3(0.15, 0.7, 0.15), Vector3(0, 0.3, -3.1), Color(0.3, 0.3, 0.32))
+	_commit(st, model_root)
+	var g := _st()
+	CM._box(g, Vector3(0.9, 0.45, 0.04), Vector3(0.35, 1.82, 0.7), Color(1, 1, 1))
+	var gm := _commit(g, model_root, _glass())
+	gm.rotation.x = -0.4
+
+func _plane(paint: Color) -> void:
+	var st := _st()
+	var white := Color(0.93, 0.93, 0.92)
+	CM._ell(st, Vector3(0, 1.3, 0.2), Vector3(1.3, 1.35, 7.6), white)                   # fuselagem
+	CM._ell(st, Vector3(0, 1.32, 0.0), Vector3(1.32, 0.3, 7.4), paint)                  # faixa
+	CM._box(st, Vector3(10.5, 0.14, 1.6), Vector3(0, 1.85, 0.6), white)                 # asa
+	for s in [-1.0, 1.0]:
+		CM._box(st, Vector3(0.6, 0.16, 1.62), Vector3(4.9 * s, 1.85, 0.6), paint)       # pontas
+		CM._prim(st, _cyl(0.04, 1.3, 6), Transform3D(Basis(Vector3.FORWARD, 0.5 * s), Vector3(1.2 * s, 1.25, 0.6)), Color(0.3, 0.3, 0.32))
+	CM._box(st, Vector3(3.6, 0.1, 0.9), Vector3(0, 1.5, -3.4), white)                  # estabilizador
+	CM._box(st, Vector3(0.1, 1.4, 1.1), Vector3(0, 2.1, -3.45), paint)                 # leme
+	# trem de pouso
+	for p in [Vector3(1.2, 0.35, 0.9), Vector3(-1.2, 0.35, 0.9), Vector3(0, 0.3, 3.0)]:
+		CM._prim(st, _cyl(0.32, 0.18, 12), Transform3D(Basis(Vector3.FORWARD, PI * 0.5), p), Color(0.05, 0.05, 0.05))
+		CM._box(st, Vector3(0.08, 0.7, 0.08), p + Vector3(0, 0.4, 0), Color(0.3, 0.3, 0.32))
+	CM._box(st, Vector3(0.7, 0.1, 0.8), Vector3(0, 0.95, 0.6), Color(0.12, 0.12, 0.13))  # banco
+	CM._box(st, Vector3(0.8, 0.35, 0.15), Vector3(0, 1.45, 1.55), Color(0.1, 0.1, 0.1)) # painel
+	_commit(st, model_root)
+	var g := _st()
+	CM._ell(g, Vector3(0, 1.95, 1.0), Vector3(0.95, 0.7, 2.0), Color(1, 1, 1))
+	_commit(g, model_root, _glass())
+	_prop = Node3D.new()
+	_prop.position = Vector3(0, 1.3, 4.0)
+	model_root.add_child(_prop)
+	var ps := _st()
+	CM._box(ps, Vector3(0.18, 2.3, 0.06), Vector3.ZERO, Color(0.08, 0.08, 0.08))
+	CM._ell(ps, Vector3(0, 0, 0.1), Vector3(0.35, 0.35, 0.4), paint)
+	_commit(ps, _prop)
+
+func _heli(paint: Color, pol: bool) -> void:
+	var st := _st()
+	var c2 := Color(0.12, 0.12, 0.14) if pol else Color(0.9, 0.9, 0.9)
+	CM._ell(st, Vector3(0, 1.5, 0.4), Vector3(2.1, 1.9, 4.0), paint)
+	CM._box(st, Vector3(0.35, 0.4, 4.6), Vector3(0, 1.75, -3.6), paint)
+	CM._box(st, Vector3(0.12, 1.1, 0.7), Vector3(0, 2.3, -5.7), c2)
+	CM._box(st, Vector3(1.4, 0.08, 0.5), Vector3(0, 1.8, -5.4), c2)
+	CM._box(st, Vector3(0.6, 0.4, 0.8), Vector3(0, 2.55, 0.2), c2)                       # motor
+	for s in [-1.0, 1.0]:
+		CM._box(st, Vector3(0.1, 0.1, 3.4), Vector3(1.0 * s, 0.08, 0.3), Color(0.15, 0.15, 0.16))   # esquis
+		CM._box(st, Vector3(0.08, 0.6, 0.08), Vector3(0.9 * s, 0.4, 1.0), Color(0.15, 0.15, 0.16))
+		CM._box(st, Vector3(0.08, 0.6, 0.08), Vector3(0.9 * s, 0.4, -0.5), Color(0.15, 0.15, 0.16))
+	CM._box(st, Vector3(1.4, 0.12, 0.6), Vector3(0, 0.75, 0.2), Color(0.1, 0.1, 0.12))
+	if pol:
+		CM._box(st, Vector3(2.12, 0.25, 2.0), Vector3(0, 1.4, 0.0), Color(0.95, 0.95, 0.95))
+	_commit(st, model_root)
+	var g := _st()
+	CM._ell(g, Vector3(0, 1.7, 1.55), Vector3(1.8, 1.5, 1.8), Color(1, 1, 1))
+	_commit(g, model_root, _glass())
+	_rot_main = Node3D.new()
+	_rot_main.position = Vector3(0, 2.85, 0.2)
+	model_root.add_child(_rot_main)
+	var rs := _st()
+	for q in 2:
+		CM._prim(rs, _blade(), Transform3D(Basis(Vector3.UP, q * PI * 0.5), Vector3.ZERO), Color(0.1, 0.1, 0.1))
+	_commit(rs, _rot_main)
+	_rot_tail = Node3D.new()
+	_rot_tail.position = Vector3(0.25, 2.3, -5.7)
+	model_root.add_child(_rot_tail)
+	var ts := _st()
+	CM._box(ts, Vector3(0.04, 1.3, 0.14), Vector3.ZERO, Color(0.1, 0.1, 0.1))
+	CM._box(ts, Vector3(0.04, 0.14, 1.3), Vector3.ZERO, Color(0.1, 0.1, 0.1))
+	_commit(ts, _rot_tail)
+
+func _blade() -> BoxMesh:
+	var b := BoxMesh.new()
+	b.size = Vector3(0.28, 0.04, 10.4)
+	return b

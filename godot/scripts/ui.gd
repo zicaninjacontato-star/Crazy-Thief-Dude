@@ -10,9 +10,16 @@ const GUNS := [
 	{"id": "pistol", "name": "Pistola", "price": 300, "ammo": 60},
 	{"id": "smg", "name": "Submetralhadora", "price": 900, "ammo": 180},
 	{"id": "shotgun", "name": "Espingarda", "price": 1200, "ammo": 30},
-	{"id": "ammo_pistol", "name": "Munição de pistola (+60)", "price": 80},
-	{"id": "ammo_smg", "name": "Munição de submetralhadora (+150)", "price": 150},
-	{"id": "ammo_shotgun", "name": "Cartuchos (+20)", "price": 120},
+	{"id": "rifle", "name": "Fuzil", "price": 2500, "ammo": 150},
+	{"id": "sniper", "name": "Sniper", "price": 4000, "ammo": 15},
+	{"id": "rpg", "name": "Bazuca", "price": 8000, "ammo": 4},
+	{"id": "grenade", "name": "Granadas (5)", "price": 600, "ammo": 5},
+	{"id": "ammo_pistol", "name": "Munição de pistola (+60)", "price": 80, "pack": 60},
+	{"id": "ammo_smg", "name": "Munição de submetralhadora (+150)", "price": 150, "pack": 150},
+	{"id": "ammo_shotgun", "name": "Cartuchos (+20)", "price": 120, "pack": 20},
+	{"id": "ammo_rifle", "name": "Munição de fuzil (+120)", "price": 300, "pack": 120},
+	{"id": "ammo_sniper", "name": "Munição de sniper (+10)", "price": 400, "pack": 10},
+	{"id": "ammo_rpg", "name": "Foguetes (+3)", "price": 1500, "pack": 3},
 	{"id": "armor", "name": "Colete (100%)", "price": 250},
 ]
 const CARS := [
@@ -45,7 +52,7 @@ func _ready() -> void:
 func _process(_dt: float) -> void:
 	var s := get_viewport().get_visible_rect().size
 	pause_btn.position = Vector2(s.x * 0.5 - 32, 38)
-	pause_btn.visible = overlay == null
+	pause_btn.visible = overlay == null and wheel == null
 
 # ---------------- utilidades de interface ----------------
 func _open(title: String, side := false) -> VBoxContainer:
@@ -95,6 +102,8 @@ func _open(title: String, side := false) -> VBoxContainer:
 	return box
 
 func _close() -> void:
+	if wheel:
+		_close_wheel()
 	if overlay:
 		overlay.queue_free()
 		overlay = null
@@ -118,6 +127,62 @@ func _info(box: Container, text: String, color := Color(0.8, 0.8, 0.8)) -> Label
 	l.add_theme_color_override("font_color", color)
 	box.add_child(l)
 	return l
+
+# ---------------- roleta de armas (câmera lenta enquanto aberta) ----------------
+var wheel: Control
+
+func show_wheel() -> void:
+	if wheel or overlay:
+		return
+	var W := preload("res://scripts/weapons.gd")
+	Engine.time_scale = 0.15
+	main.hud.input_block = true
+	main.hud.fire = false
+	wheel = Control.new()
+	wheel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(wheel)
+	var bg := ColorRect.new()
+	bg.color = Color(0, 0, 0, 0.35)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.gui_input.connect(func(e): if e is InputEventMouseButton and e.pressed: _close_wheel())
+	wheel.add_child(bg)
+	var s := get_viewport().get_visible_rect().size
+	var c := s * 0.5
+	var list: Array = W.ORDER
+	var R := minf(s.y * 0.34, 230.0)
+	for i in list.size():
+		var w: String = list[i]
+		var a := -PI * 0.5 + TAU * i / list.size()
+		var b := Button.new()
+		var has: bool = main.combat.owned.get(w, false)
+		var am: int = main.combat.ammo.get(w, 0)
+		b.text = W.DATA[w].name + ("" if w == "fist" else "\n%d" % am)
+		b.disabled = not has or (w != "fist" and am <= 0)
+		b.custom_minimum_size = Vector2(150, 90)
+		b.size = Vector2(150, 90)
+		b.position = c + Vector2(cos(a), sin(a)) * R - b.size * 0.5
+		b.add_theme_font_size_override("font_size", 20)
+		var st := StyleBoxFlat.new()
+		st.bg_color = Color(0.1, 0.1, 0.12, 0.85) if w != main.combat.weapon else Color(0.75, 0.55, 0.1, 0.9)
+		st.set_corner_radius_all(45)
+		st.border_color = Color(1, 0.85, 0.3, 0.8)
+		st.set_border_width_all(2)
+		b.add_theme_stylebox_override("normal", st)
+		b.pressed.connect(func(): main.combat.select(w); _close_wheel())
+		wheel.add_child(b)
+	var lb := Label.new()
+	lb.text = "ARMAS"
+	lb.add_theme_font_size_override("font_size", 30)
+	lb.add_theme_color_override("font_color", Color(1, 0.85, 0.3))
+	lb.position = c - Vector2(45, 20)
+	wheel.add_child(lb)
+
+func _close_wheel() -> void:
+	if wheel:
+		wheel.queue_free()
+		wheel = null
+	Engine.time_scale = 1.0
+	main.hud.input_block = false
 
 # ---------------- telas ----------------
 func show_main_menu() -> void:
@@ -317,7 +382,7 @@ func _buy_gun(it: Dictionary) -> void:
 		var w := id.substr(5)
 		if main.money < it.price: return
 		main.money -= it.price
-		c.ammo[w] = c.ammo.get(w, 0) + (60 if w == "pistol" else (150 if w == "smg" else 20))
+		c.ammo[w] = c.ammo.get(w, 0) + int(it.pack)
 	elif id == "armor":
 		if main.money < it.price: return
 		main.money -= it.price

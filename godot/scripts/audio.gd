@@ -33,6 +33,12 @@ func _ready() -> void:
 	sounds["shot"] = _shot()
 	sounds["punch"] = _noise_burst(0.12, 0.002, 450.0, 1.0)
 	sounds["cash"] = _chime()
+	sounds["door"] = _noise_burst(0.18, 0.003, 260.0, 1.3)
+	sounds["explosion"] = _boom()
+	sounds["splash"] = _noise_burst(0.7, 0.02, 2500.0, 0.8)
+	sounds["rocket"] = _noise_burst(0.9, 0.05, 1200.0, 0.6)
+	sounds["swoosh"] = _noise_burst(0.15, 0.04, 2200.0, 0.4)
+	sounds["kick"] = _noise_burst(0.14, 0.002, 380.0, 1.2)
 
 func _gen_player() -> AudioStreamPlayer:
 	var p := AudioStreamPlayer.new()
@@ -187,4 +193,19 @@ func _chime() -> AudioStreamWAV:
 		var t := i / RATE
 		var f := 1320.0 if t < 0.12 else 1760.0
 		out[i] = sin(TAU * f * t) * exp(-t * 7.0) * 0.4
+	return _wav(out)
+
+func _boom() -> AudioStreamWAV:
+	var dur := 1.6
+	var n := int(dur * RATE)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	var y := 0.0
+	var y2 := 0.0
+	for i in n:
+		var t := i / RATE
+		y += 0.08 * ((randf() * 2.0 - 1.0) - y)
+		y2 += 0.5 * ((randf() * 2.0 - 1.0) - y2)
+		var low := sin(TAU * 45.0 * t * (1.0 - t * 0.3)) * exp(-t * 3.0)
+		out[i] = clampf((y * 6.0 + low * 0.9) * exp(-t * 2.2) + y2 * exp(-t * 25.0) * 0.8, -1.0, 1.0)
 	return _wav(out)

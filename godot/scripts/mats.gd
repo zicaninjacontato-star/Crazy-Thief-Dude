@@ -268,3 +268,38 @@ static func car_paint(c: Color) -> StandardMaterial3D:
 
 static func skin(c: Color) -> StandardMaterial3D:
 	return plain(c, 0.6)
+
+static func sand() -> StandardMaterial3D:
+	if _cache.has("sand"): return _cache["sand"]
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = noise_tex(0.08, 21, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 512, false, 0, ramp(Color(0.58, 0.49, 0.33), Color(0.74, 0.65, 0.47)))
+	m.normal_enabled = true
+	m.normal_texture = noise_tex(0.6, 22, FastNoiseLite.TYPE_SIMPLEX, 512, true, 2.0)
+	m.roughness = 0.95
+	_world(m, 5.0)
+	_cache["sand"] = m
+	return m
+
+## água: ondas por mapa normal que desliza (offset animado pelo world2)
+static func water() -> StandardMaterial3D:
+	if _cache.has("water"): return _cache["water"]
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.05, 0.2, 0.3, 0.86)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.metallic = 0.25
+	m.roughness = 0.06
+	m.normal_enabled = true
+	m.normal_scale = 0.7
+	m.normal_texture = noise_tex(0.12, 31, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 512, true, 6.0)
+	m.uv1_scale = Vector3(60, 60, 1)
+	_cache["water"] = m
+	return m
+
+static func wood() -> StandardMaterial3D:
+	if _cache.has("wood"): return _cache["wood"]
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = noise_tex(0.02, 41, FastNoiseLite.TYPE_CELLULAR, 256, false, 0, ramp(Color(0.33, 0.22, 0.13), Color(0.5, 0.36, 0.22)))
+	m.roughness = 0.85
+	_world(m, 3.0)
+	_cache["wood"] = m
+	return m

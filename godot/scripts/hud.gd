@@ -34,6 +34,18 @@ var clock: Label
 var hp := 100.0
 var armor := 0.0
 var shop_label := ""   # texto do botão de loja (vazio = escondido)
+var aim := false
+var crosshair := false
+var input_block := false
+var map_blips: Array = []      # [{pos, col}]
+var mission_text := ""
+var mission_timer := -1.0
+var gas_name := "ACEL"
+var brk_name := "FREIO"
+var stars_blink := false
+var mlabel: Label
+var _banner: Label
+var _banner_t := 0.0
 var map_player := Vector3.ZERO
 var map_yaw := 0.0
 var map_police := Vector3.INF
@@ -71,6 +83,13 @@ func _ready() -> void:
 	hint.position = Vector2(-200, 70)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.size = Vector2(400, 30)
+	mlabel = _label(Vector2(0, 0), 22)
+	mlabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	mlabel.size = Vector2(700, 60)
+	mlabel.add_theme_color_override("font_color", Color(1, 0.9, 0.35))
+	_banner = _label(Vector2(0, 0), 44)
+	_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_banner.size = Vector2(1000, 60)
 
 func _label(pos: Vector2, size: int) -> Label:
 	var l := Label.new()
@@ -94,11 +113,19 @@ func _layout() -> void:
 		buttons["fire"] = Rect2(s.x - b * 1.2 - 24, s.y - b * 1.2 - 30, b * 1.2, b * 1.2)
 		buttons["jump"] = Rect2(s.x - b * 2.2 - 44, s.y - b - 30, b, b)
 		buttons["sprint"] = Rect2(s.x - b * 1.2 - 24, s.y - b * 2.3 - 50, b * 1.2, b * 0.8)
+		buttons["aim"] = Rect2(s.x - b * 2.2 - 44, s.y - b * 2.2 - 46, b, b)
 	buttons["weapon"] = Rect2(s.x - 250, 128, 230, 44)
 	if shop_label != "" and not driving:
 		buttons["shop"] = Rect2(s.x - b - 24, s.y * 0.38 - b - 16, b, b)
 
+func banner(text: String, col: Color, secs := 3.5) -> void:
+	_banner.text = text
+	_banner.add_theme_color_override("font_color", col)
+	_banner_t = secs
+
 func _input(e: InputEvent) -> void:
+	if input_block:
+		return
 	_layout()
 	if e is InputEventScreenTouch:
 		var p: Vector2 = e.position
@@ -144,6 +171,7 @@ func _press(k: String, on: bool) -> void:
 		"brake": brk = on
 		"sprint": sprint = on
 		"fire": fire = on
+		"aim": aim = on
 		"weapon":
 			if on: weapon_pressed.emit()
 		"shop":
@@ -160,7 +188,12 @@ func _draw_controls() -> void:
 		root.draw_rect(Rect2(Vector2.ZERO, s), Color(0.8, 0, 0, flash))
 	_draw_minimap()
 	_draw_bars(s)
-	var names := {"enter": "CARRO", "jump": "PULO", "sprint": "CORRER", "gas": "ACEL", "brake": "FREIO", "fire": "ATIRAR", "weapon": weapon_text, "shop": shop_label}
+	var names := {"enter": "CARRO", "jump": "PULO", "sprint": "CORRER", "gas": gas_name, "brake": brk_name, "fire": "ATIRAR", "weapon": weapon_text, "shop": shop_label, "aim": "MIRA"}
+	if crosshair:
+		var cc := s * 0.5
+		for v in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
+			root.draw_line(cc + v * 6.0, cc + v * 16.0, Color(1, 1, 1, 0.9), 2.5)
+		root.draw_circle(cc, 2.0, Color(1, 0.2, 0.2))
 	var font := ThemeDB.fallback_font
 	for k in buttons:
 		var r: Rect2 = buttons[k]
@@ -177,6 +210,15 @@ func _process(_dt: float) -> void:
 	money.position = Vector2(s.x - 300, 46)
 	stars.position = Vector2(s.x - 232, 88)
 	hint.position = Vector2(s.x * 0.5 - 200, 70)
+	mlabel.position = Vector2(s.x * 0.5 - 350, s.y - 70)
+	var tt := ""
+	if mission_timer > 0.0:
+		tt = "   ⏱ %d:%02d" % [int(mission_timer) / 60, int(mission_timer) % 60]
+	mlabel.text = mission_text + tt
+	_banner.position = Vector2(s.x * 0.5 - 500, s.y * 0.26)
+	_banner_t -= _dt
+	_banner.visible = _banner_t > 0.0
+	stars.modulate.a = (0.25 if int(Time.get_ticks_msec() / 300) % 2 == 0 else 1.0) if stars_blink else 1.0
 	root.queue_redraw()
 
 func take_cam_drag() -> Vector2:
@@ -221,6 +263,12 @@ func _draw_minimap() -> void:
 				a = Vector3(map_player.x - h, 0, c)
 				b = Vector3(map_player.x + h, 0, c)
 			root.draw_line(tr.call(a), tr.call(b), Color(0.16, 0.16, 0.18), map_roadw * sc)
+	for bl in map_blips:
+		var bp: Vector2 = tr.call(bl.pos)
+		if bp.distance_to(C) > R - 7:
+			bp = C + (bp - C).normalized() * (R - 7)
+		root.draw_circle(bp, 6, Color(0, 0, 0, 0.7))
+		root.draw_circle(bp, 4.5, bl.col)
 	if map_police != Vector3.INF:
 		var pp: Vector2 = tr.call(map_police)
 		if pp.distance_to(C) < R - 6:
