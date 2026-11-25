@@ -20,6 +20,9 @@ var punch_kind := 0      # 0 direto direita, 1 direto esquerda, 2 chute
 var swimming := false
 var moto_pose := false
 var guard := false       # guarda alta (modo luta)
+var arm_pose := ""       # só os braços: "handsup" (rendido), "phone" (ligando para a polícia)
+var hurt_t := 0.0        # reação a um soco (cabeça e tronco jogados para trás)
+var hurt_side := 1.0
 var throw_t := 0.0
 var dive := false
 var crouching := false
@@ -273,6 +276,29 @@ func animate(speed: float, dt: float) -> void:
 func _upper(dt: float, up: Array, fo: Array) -> void:
 	var th: Array = [bones.thighL, bones.thighR]
 	var sh: Array = [bones.shinL, bones.shinR]
+	if hurt_t > 0.0:
+		hurt_t -= dt
+		var hk := sin(clampf(hurt_t / 0.35, 0.0, 1.0) * PI)
+		bones.chest.rotation.x -= 0.35 * hk
+		bones.chest.rotation.z = 0.25 * hk * hurt_side
+		bones.head.rotation.x = -0.6 * hk
+		bones.head.rotation.y = 0.5 * hk * hurt_side
+		for k3 in 2:
+			up[k3].rotation = Vector3(-0.4 * hk, 0, (0.6 if k3 == 0 else -0.6) * hk)
+		return
+	if arm_pose == "handsup":
+		for k3 in 2:
+			up[k3].rotation = Vector3(-2.85, 0, 0.35 if k3 == 0 else -0.35)
+			fo[k3].rotation.x = -0.35 + sin(_t * 9.0 + k3) * 0.05
+		bones.head.rotation.x = 0.15
+		return
+	if arm_pose == "phone":
+		up[1].rotation = Vector3(-0.35, 0, -0.75)
+		fo[1].rotation.x = -2.35
+		up[0].rotation = Vector3(-0.2, 0, 0.1)
+		fo[0].rotation.x = -0.4
+		bones.head.rotation.z = -0.15
+		return
 	if throw_t > 0.0:
 		throw_t -= dt
 		var tk := clampf(throw_t / 0.5, 0.0, 1.0)
@@ -283,7 +309,25 @@ func _upper(dt: float, up: Array, fo: Array) -> void:
 		punch_t -= dt
 		var k := sin(clampf(punch_t / 0.3, 0.0, 1.0) * PI)
 		bones.chest.rotation.y = (0.4 if punch_kind == 0 else -0.4) * k
-		if punch_kind == 2:
+		if punch_kind == 3:
+			# gancho de baixo para cima (uppercut)
+			up[1].rotation = Vector3(-0.4 - 1.6 * k, 0, -0.1)
+			fo[1].rotation.x = -1.9 + 0.6 * k
+			up[0].rotation = Vector3(-1.1, 0, 0.2)
+			fo[0].rotation.x = -1.8
+			bones.chest.rotation.x = -0.25 * k
+			for i2 in 2:
+				th[i2].rotation.x -= 0.35 * k
+				sh[i2].rotation.x += 0.5 * k
+		elif punch_kind == 4:
+			# cruzado lateral (hook)
+			up[0].rotation = Vector3(-1.45, 0, 1.2 * k)
+			fo[0].rotation.x = -1.5
+			fo[0].rotation.y = -0.8 * k
+			up[1].rotation = Vector3(-1.1, 0, -0.25)
+			fo[1].rotation.x = -1.8
+			bones.chest.rotation.y = -0.7 * k
+		elif punch_kind == 2:
 			th[1].rotation.x = -1.65 * k
 			sh[1].rotation.x = 0.15 * (1.0 - k)
 			bones.chest.rotation.x = 0.3 * k

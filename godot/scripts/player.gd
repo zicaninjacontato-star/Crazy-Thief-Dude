@@ -17,6 +17,7 @@ var swimming := false
 var world2: Node = null
 var aim_yaw := NAN          # mira: corpo virado para onde a câmera olha
 var diving := false         # segurando MERGULHAR (botão PULO na água)
+var rising := false         # segurando SUBIR (debaixo d'água)
 var underwater := false
 var pk_t := -1.0            # parkour em andamento (tempo)
 var pk_dur := 0.0
@@ -87,9 +88,17 @@ func _physics_process(dt: float) -> void:
 	underwater = false
 	if swimming:
 		# superfície: cabeça para fora; MERGULHAR (segurar PULO) desce até o fundo
+		# debaixo d'água fica na profundidade em que está (flutuação neutra): MERGULHAR desce, SUBIR sobe
 		var surf := wy - 0.78
+		var under := global_position.y < surf - 0.35
 		if diving:
 			velocity.y = move_toward(velocity.y, -2.6, dt * 6.0)
+		elif rising:
+			velocity.y = move_toward(velocity.y, 2.4, dt * 6.0)
+			if global_position.y > surf - 0.1:
+				velocity.y = clampf((surf - global_position.y) * 3.0, -2.5, 2.8)
+		elif under:
+			velocity.y = move_toward(velocity.y, 0.0, dt * 4.0)
 		else:
 			velocity.y = clampf((surf - global_position.y) * 3.0, -2.5, 2.8)
 		underwater = global_position.y < surf - 0.5

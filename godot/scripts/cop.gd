@@ -51,6 +51,14 @@ func setup(seed: int, kind := "cop") -> void:
 			weapon = "rifle"
 			dmg = 9.0
 			rate = 0.55
+		"heavy":
+			# policial de armadura (5 estrelas): colete pesado, capacete, fuzil potente, aguenta muito
+			body.build(Color(0.16, 0.17, 0.14), Color(0.1, 0.1, 0.09), skin, Color(0.05, 0.05, 0.05), {"hat": 2, "hat_c": Color(0.12, 0.13, 0.11), "glasses": true, "jacket": Color(0.22, 0.24, 0.18)})
+			body.scale = Vector3(1.1, 1.06, 1.15)
+			hp = 340.0
+			weapon = "rifle"
+			dmg = 13.0
+			rate = 0.38
 		"thug":
 			body.build(Color(0.15, 0.15, 0.15), Color(0.1, 0.1, 0.32), skin, Color(0.05, 0.04, 0.03), {"hat": 1, "hat_c": Color(0.7, 0.1, 0.1), "jacket": Color(0.6, 0.05, 0.05)})
 			weapon = "smg" if rng.randf() < 0.5 else "pistol"
@@ -297,6 +305,8 @@ func _physics_process(dt: float) -> void:
 	if arrest_only:
 		return
 	cool -= dt
+	if get_tree().current_scene.combat.hostage != null and d < 40.0:
+		return     # refém: a polícia não atira
 	if cool <= 0.0 and d < 34.0 and _los:
 		cool = rng.randf_range(rate * 0.7, rate * 1.3)
 		var muzzle := global_position + Vector3(0, 1.4, 0) + dirv * 0.6

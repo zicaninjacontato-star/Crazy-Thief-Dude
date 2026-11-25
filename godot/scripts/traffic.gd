@@ -250,6 +250,41 @@ func _physics_process(dt: float) -> void:
 func _drive(a: Dictionary, dt: float) -> void:
 	var c = a.car
 	var pos: Vector3 = c.global_position
+	# reação à arma apontada: avança para atropelar / para e o motorista se rende
+	var md: String = a.get("mode", "")
+	if md == "ram":
+		a.mode_t -= dt
+		var pp: Vector3 = main.player.global_position
+		if a.mode_t <= 0.0 or main.player.vehicle != null:
+			a.mode = ""
+		else:
+			c.ai_target = null
+			var loc: Vector3 = c.global_transform.affine_inverse() * pp
+			c.steer_in = clampf(atan2(loc.x, loc.z) * 2.0, -1.0, 1.0)
+			c.throttle = 1.0
+			c.brake_in = 0.0
+			return
+	elif md == "stop":
+		c.throttle = 0.0
+		c.brake_in = 1.0
+		return
+	# vigia: carro que não sai do lugar por muito tempo
+	a.wd_t = a.get("wd_t", 0.0) + dt
+	if a.wd_t > 10.0:
+		var moved: float = pos.distance_to(a.get("wd_p", pos + Vector3(99, 0, 0)))
+		a.wd_t = 0.0
+		a.wd_p = pos
+		if moved < 3.0:
+			a.wd_n = a.get("wd_n", 0) + 1
+			if a.wd_n >= 2 and (pos.distance_to(main.player.global_position) > 55.0 or not _in_view(pos)):
+				_respawn(a)
+				a.wd_n = 0
+				return
+			# à vista: anda ignorando os outros carros e dá ré se preciso
+			a.ghost = 3.0
+			a.back = 1.0
+		else:
+			a.wd_n = 0
 	var d: Vector2i = a.d
 	var dir := _d3(d)
 	var center := node_pos(a.n)
@@ -309,7 +344,10 @@ func _drive(a: Dictionary, dt: float) -> void:
 	if lim < 0.6 and blk != null:
 		a.blk_t = a.get("blk_t", 0.0) + dt
 		# carro parado/abandonado na faixa: ultrapassa pela faixa oposta
-		if a.st == "road" and along > 16.0 and not is_agent(blk) and a.blk_t > 2.5 and blk.linear_velocity.length() < 0.5:
+		var blk_stuck: bool = not is_agent(blk) or _agent_of(blk).get("blk_t", 0.0) > 3.0 or _agent_of(blk).get("mode", "") == "stop"
+		if blk == main.player.vehicle and a.blk_t > 1.5 and fmod(a.blk_t, 2.5) < dt:
+			main.audio.play("horn", pos, -4.0)
+		if a.st == "road" and along > 7.0 and blk_stuck and a.blk_t > 2.5 and blk.linear_velocity.length() < 0.5:
 			a.blk_t = 0.0
 			a.ovt = 4.0
 			a.ign = blk
@@ -542,3 +580,27 @@ func chase(c, goal: Vector3, lead_goal: Vector3, st: Dictionary, dt: float, vmax
 			st.back = 1.2
 	else:
 		st.stuck = 0.0
+
+func _agent_of(car) -> Dictionary:
+	for a in agents:
+		if a.car == car:
+			return a
+	return {}
+
+func _in_view(p: Vector3) -> bool:
+	var cam: Camera3D = main.cam
+	return not cam.is_position_behind(p) and p.distance_to(cam.global_position) < 120.0
+
+## arma apontada para o motorista: 50% acelera para atropelar, 50% para e sai com as mãos para cima
+func aim_reaction(car) -> String:
+	var a := _agent_of(car)
+	if a.is_empty() or a.get("reacted", false) or a.bus:
+		return ""
+	a.reacted = true
+	if rng.randf() < 0.5:
+		a.mode = "ram"
+		a.mode_t = 3.5
+		main.audio.play("horn", car.global_position, 2.0)
+		return "ram"
+	a.mode = "stop"
+	return "stop"

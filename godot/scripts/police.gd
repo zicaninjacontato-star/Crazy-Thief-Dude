@@ -11,6 +11,8 @@ const Cop := preload("res://scripts/cop.gd")
 const Arcade := preload("res://scripts/arcade.gd")
 const W := preload("res://scripts/weapons.gd")
 const FX := preload("res://scripts/fx.gd")
+const Tank := preload("res://scripts/tank.gd")
+const Jet := preload("res://scripts/jet.gd")
 
 var main: Node3D
 var units: Array = []       # {car, kind, out, crew}
@@ -24,6 +26,9 @@ var bust_t := 0.0
 var armed_t := 0.0          # >0: jogador sacou/atirou recentemente
 var rng := RandomNumberGenerator.new()
 var _mk: Marker3D
+var army: Array = []        # tanques e caças (5 estrelas)
+var jet_cd := 0.0
+var tank_cd := 3.0
 
 func setup(m: Node3D) -> void:
 	main = m
@@ -45,6 +50,10 @@ func clear() -> void:
 		main.cars.erase(heli)
 		heli.queue_free()
 	heli = null
+	for a in army:
+		if is_instance_valid(a):
+			a.queue_free()
+	army.clear()
 	unseen = 0.0
 	main.police_car = null
 
@@ -79,6 +88,8 @@ func tick(dt: float) -> void:
 	var near = null
 	var nd := 1e9
 	for u in units:
+		if u.car == main.player.vehicle:
+			continue
 		var d: float = u.car.global_position.distance_to(pp)
 		if d < nd:
 			nd = d
@@ -88,7 +99,8 @@ func tick(dt: float) -> void:
 		_retreat(pp)
 		return
 	var want_cars: int = [0, 1, 2, 3, 3, 4][s]
-	var want_swat: int = 0 if s < 3 else (1 if s < 5 else 2)
+	var want_swat: int = 0 if s < 3 else (1 if s < 5 else 1)
+	var want_arm: int = 2 if s >= 5 else 0
 	var n_car := units.filter(func(u): return u.kind == "car").size()
 	var n_swat := units.filter(func(u): return u.kind == "swat").size()
 	spawn_cd -= dt
@@ -99,9 +111,16 @@ func tick(dt: float) -> void:
 		elif n_swat < want_swat:
 			_spawn_unit("swat", s, pp)
 			spawn_cd = 4.0
+		elif units.filter(func(u): return u.kind == "armored").size() < want_arm:
+			_spawn_unit("armored", s, pp)
+			spawn_cd = 4.0
 	if s >= 4 and (heli == null or not is_instance_valid(heli) or heli.dead):
 		if heli == null or not is_instance_valid(heli):
 			_spawn_heli(pp)
+	if heli and is_instance_valid(heli):
+		# helicóptero: devagar até 4★ (dá para fugir); no máximo de estrelas, a toda velocidade
+		heli.ai_speed = 34.0 if s >= 5 else 12.0
+	_army_tick(dt, s, pp)
 	_units_tick(dt, s, p, pp)
 	_cops_tick(dt, s, p)
 	_heli_tick(dt, s, p)
@@ -134,13 +153,22 @@ func _spawn_unit(kind: String, s: int, pp: Vector3) -> void:
 	if kind == "swat":
 		c = main._spawn_car(sp[0], sp[1], Color(0.06, 0.06, 0.07), false, "suv")
 		c.make_police()
+		c.siren_on = true
 		c.max_engine = 7400.0
+	elif kind == "armored":
+		# carro-forte da polícia: blindado, pesado, 4 policiais de armadura
+		c = main._spawn_car(sp[0], sp[1], Color(0.18, 0.2, 0.16), false, "pickup")
+		c.make_police()
+		c.siren_on = true
+		c.max_engine = 9000.0
+		c.mass = 3200.0
+		c.hp = 420.0
 	else:
 		c = main._spawn_car(sp[0], sp[1], Color(0.92, 0.92, 0.93), true)
 		c.max_engine = 6600.0 + s * 300.0
 		if s >= 3:
 			c.paint_black()
-	units.append({"car": c, "kind": kind, "out": false, "crew": 4 if kind == "swat" else 2})
+	units.append({"car": c, "kind": kind, "out": false, "crew": 4 if kind in ["swat", "armored"] else 2})
 
 func _spawn_heli(pp: Vector3) -> void:
 	var h = Arcade.new()
@@ -206,7 +234,7 @@ func _crew_out(u: Dictionary, s: int) -> void:
 	for i in n:
 		var cp := Cop.new()
 		main.add_child(cp)
-		cp.setup(rng.randi(), "swat" if u.kind == "swat" else "cop")
+		cp.setup(rng.randi(), {"swat": "swat", "armored": "heavy"}.get(u.kind, "cop"))
 		var side: float = 1.0 if i % 2 == 0 else -1.0
 		cp.global_position = c.global_position + c.global_transform.basis.x * (c.body_size.x * 0.5 + 0.8) * side - c.global_transform.basis.z * (i / 2) * 1.5 + Vector3(0, 0.2, 0)
 		cp.unit = c
@@ -251,8 +279,10 @@ func _visibility(dt: float, s: int, pp: Vector3) -> void:
 	for cp in cops:
 		if not cp.down and cp.global_position.distance_to(pp) < 42.0:
 			seen = true
-	if heli and is_instance_valid(heli) and not heli.dead and heli.global_position.distance_to(pp) < 95.0:
+	if heli and is_instance_valid(heli) and not heli.dead and heli.global_position.distance_to(pp) < (95.0 if s >= 5 else 60.0):
 		seen = true
+	if s >= 5:
+		seen = true      # nível máximo: o exército não desiste (só acaba morrendo)
 	if seen:
 		unseen = 0.0
 	else:
@@ -350,3 +380,34 @@ func _retreat(pp: Vector3) -> void:
 			main.cars.erase(heli)
 			heli.queue_free()
 			heli = null
+
+## 5 estrelas: o exército entra — 2 tanques pelas ruas e um caça com mísseis (volta se for derrubado)
+func _army_tick(dt: float, s: int, pp: Vector3) -> void:
+	army = army.filter(func(a): return is_instance_valid(a))
+	if s < 5:
+		for a in army:
+			if a.global_position.distance_to(pp) > 120.0 or a.kind == "jet":
+				a.queue_free()
+		return
+	var tanks := army.filter(func(a): return a.kind == "tank" and not a.dead).size()
+	tank_cd -= dt
+	if tanks < 2 and tank_cd <= 0.0:
+		var sp := _spawn_point(pp)
+		var t := Tank.new()
+		main.add_child(t)
+		t.setup(main)
+		t.global_position = sp[0] + Vector3(0, 0.6, 0)
+		t.rotation.y = sp[1]
+		army.append(t)
+		tank_cd = 8.0
+		if tanks == 0:
+			main.hud.banner("O EXÉRCITO CHEGOU!", Color(1, 0.3, 0.2))
+	jet_cd -= dt
+	var jets := army.filter(func(a): return a.kind == "jet").size()
+	if jets == 0 and jet_cd <= 0.0:
+		var j := Jet.new()
+		main.add_child(j)
+		j.setup(main)
+		j.start(pp)
+		army.append(j)
+		jet_cd = 20.0

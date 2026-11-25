@@ -111,6 +111,7 @@ func _process(dt: float) -> void:
 		p.body.guard = aim and weapon == "fist" and p.vehicle == null
 	_cash_tick()
 	_projectiles(dt)
+	_threat_tick(dt)
 	if dead:
 		dead_t += dt
 		if dead_t > 5.0:
@@ -206,7 +207,7 @@ func shoot() -> void:
 	if d.get("rocket", false):
 		_fire_rocket(muzzle, dir)
 		return
-	main.audio.play("shot", muzzle, 2.0 if weapon in ["shotgun", "sniper"] else 0.0)
+	main.audio.play("shot_" + weapon if main.audio.sounds.has("shot_" + weapon) else "shot", muzzle, 2.0 if weapon in ["shotgun", "sniper"] else 0.0)
 	var pellets: int = d.get("pellets", 1)
 	for k in pellets:
 		var sd: Vector3 = (dir + Vector3(rng.randf_range(-1, 1), rng.randf_range(-0.5, 0.5), rng.randf_range(-1, 1)) * d.spread).normalized()
@@ -328,34 +329,71 @@ func _punch(fwd: Vector3) -> void:
 	var p = main.player
 	if combo_t <= 0.0:
 		combo = 0
-	var kind := combo % 3
+	# combo: jab, direto, cruzado, gancho e chute (os dois últimos derrubam)
+	var seq := [0, 1, 4, 3, 2]
+	var kind: int = seq[combo % seq.size()]
 	combo += 1
-	combo_t = 0.85
-	cool = 0.32 if kind < 2 else 0.55
+	combo_t = 0.9
+	cool = {0: 0.26, 1: 0.3, 4: 0.36, 3: 0.45, 2: 0.55}[kind]
 	p.body.punch_kind = kind
 	p.body.punch_t = 0.3
-	var t = _target(fwd, 2.6, 1.1)
+	var t = _target(fwd, 2.8, 1.2)
 	if t:
 		_face(t.global_position)
 		var to: Vector3 = t.global_position - p.global_position
 		to.y = 0
 		if to.length() > 1.3:
 			p.velocity += to.normalized() * 6.0      # avança até o alvo
-		if to.length() < 2.2:
-			var dmg := 17.0 if kind < 2 else 34.0
-			main.audio.play("kick" if kind == 2 else "punch", t.global_position)
+		if to.length() < 2.3:
+			# esquiva do NPC que está brigando
+			if t.get("mode") == "brawl" and rng.randf() < 0.22 and kind != 2:
+				t.dodge(to.normalized())
+				main.audio.play("swoosh", t.global_position, -4.0)
+				return
+			var dmg: float = {0: 12.0, 1: 14.0, 4: 18.0, 3: 26.0, 2: 30.0}[kind]
+			if t.get("mode") == "brawl" and t.get("blocking"):
+				dmg *= 0.35
+			main.audio.play("kick" if kind == 2 else "punch", t.global_position, 2.0 if kind >= 2 else 0.0)
 			var dir: Vector3 = to.normalized()
-			if t.has_method("hit") and kind == 2 and t.hp - dmg <= 0.0:
-				t.hit(p, dir * 7.0 + Vector3(0, 1.5, 0), false)
+			var finisher := kind == 2 or kind == 3
+			if t.has_method("hit") and finisher and t.hp - dmg <= 0.0:
+				t.hit(p, dir * 7.0 + Vector3(0, 2.5 if kind == 3 else 1.5, 0), false)
 				main._add_wanted(2 if t in cops else 1)
 				if not (t in cops):
 					main.audio.play("scream", t.global_position, -4.0)
+			elif t.has_method("knock") and finisher and t.hp - dmg > 0.0 and rng.randf() < 0.7:
+				t.knock(dir * (6.0 if kind == 2 else 3.0) + Vector3(0, 3.0 if kind == 3 else 1.0, 0), dmg)
+				if t.get("mode") != "brawl" and main.wanted == 0 and not (t in main.missions.hostiles()):
+					main._add_wanted(1)
 			else:
+				if t.get("body") and not t.body.ragdolled:
+					t.body.hurt_t = 0.35
+					t.body.hurt_side = 1.0 if kind in [0, 4] else -1.0
+				if t is Node3D:
+					t.global_position += dir * (0.25 + 0.1 * kind)
 				_damage(t, dmg, dir)
 			if t in cops and main.wanted == 0:
 				main._add_wanted(1)
 			return
 	main.audio.play("swoosh", p.global_position, -6.0)
+
+## NPC brigando acerta o jogador
+func melee_hit_player(dmg: float, from: Vector3) -> void:
+	if dead or down_t > 0.0 or main.player.vehicle != null:
+		return
+	var p = main.player
+	main.hp -= dmg
+	main.hud.flash = 0.2
+	main.audio.play("punch", p.global_position, 0.0)
+	var dir: Vector3 = p.global_position - from
+	dir.y = 0
+	dir = dir.normalized()
+	p.velocity += dir * 3.5
+	if p.body and not p.body.ragdolled:
+		p.body.hurt_t = 0.35
+		p.body.hurt_side = 1.0 if rng.randf() < 0.5 else -1.0
+	if dmg > 15.0 and rng.randf() < 0.35 and main.hp > 0.0:
+		knockdown(dir * 3.0 + Vector3(0, 1.0, 0), 1.8)
 
 # ---------------------------------------------------------------- foguete e granada
 func _fire_rocket(from: Vector3, dir: Vector3) -> void:
@@ -497,7 +535,7 @@ func _cash_tick() -> void:
 			cash.erase(c)
 
 func _on_cop_shot(dmg: float, _from: Vector3) -> void:
-	main.audio.play("shot", _from, -3.0)
+	main.audio.play("shot_rifle" if main.wanted >= 3 else "shot_pistol", _from, -3.0)
 	if dead or dmg <= 0.0:
 		return
 	var d: float = dmg * (0.4 if main.player.vehicle != null else 1.0)
@@ -689,3 +727,148 @@ func _respawn(pos: Vector3, text: String) -> void:
 	main.wanted = 0
 	clear_police()
 	main._msg(text)
+
+# ---------------------------------------------------------------- arma apontada: reações, assalto e refém
+var hostage = null
+var _thr_t := 0.0
+var _surrender: Array = []     # [{car, t}]
+
+func _aim_dir() -> Array:
+	var ray := _aim_ray()
+	return ray
+
+## o jogador está apontando uma arma para este alvo?
+func aiming_at(t) -> bool:
+	var p = main.player
+	if not aim or weapon in ["fist", "grenade"] or p.vehicle != null or dead:
+		return false
+	var ray := _aim_ray()
+	var c: Vector3 = t.global_position + Vector3(0, 1.1, 0)
+	var rel: Vector3 = c - ray[0]
+	var d := rel.length()
+	if d > 26.0 or d < 0.5:
+		return false
+	var ang: float = (ray[1] as Vector3).angle_to(rel / d)
+	return ang < atan(1.1 / d) + 0.04
+
+func _threat_tick(dt: float) -> void:
+	var p = main.player
+	# motoristas que se renderam descem do carro com as mãos para cima
+	for sr in _surrender.duplicate():
+		sr.t -= dt
+		if sr.t <= 0.0:
+			_surrender.erase(sr)
+			_driver_out(sr.car)
+	if hostage != null:
+		if not is_instance_valid(hostage) or hostage.down or p.vehicle != null or dead or down_t > 0.0:
+			release_hostage()
+		else:
+			var f := Vector3(sin(p.body.rotation.y), 0, cos(p.body.rotation.y))
+			hostage.global_position = p.global_position + f * 0.55 + Vector3(0, 0, 0)
+			hostage.body.rotation.y = p.body.rotation.y
+			p.velocity.x *= 0.6
+			p.velocity.z *= 0.6
+	_thr_t -= dt
+	if _thr_t > 0.0:
+		return
+	_thr_t = 0.15
+	var rob := false
+	if aim and weapon not in ["fist", "grenade"] and p.vehicle == null and not dead:
+		for q in main.peds:
+			if not is_instance_valid(q) or q.down or q == hostage:
+				continue
+			if aiming_at(q):
+				if q.mode == "":
+					q.react_aim()
+			if q.mode == "handsup" and not q.robbed and q.global_position.distance_to(p.global_position) < 4.0:
+				rob = true
+		for a in main.traffic_sys.agents:
+			var c = a.car
+			if is_instance_valid(c) and c.global_position.distance_to(p.global_position) < 22.0 and aiming_at(c) and c.kind != "bus":
+				var r: String = main.traffic_sys.aim_reaction(c)
+				if r == "stop":
+					_surrender.append({"car": c, "t": 1.2})
+	main.hud.rob_avail = rob and hostage == null
+	main.hud.hostage_on = hostage != null
+
+func _nearest_handsup():
+	var p = main.player
+	var best = null
+	var bd := 4.0
+	for q in main.peds:
+		if is_instance_valid(q) and not q.down and q.mode == "handsup":
+			var d: float = q.global_position.distance_to(p.global_position)
+			if d < bd:
+				bd = d
+				best = q
+	return best
+
+## assalto: o NPC rendido entrega uma quantia aleatória e foge
+func rob_target() -> void:
+	var q = _nearest_handsup()
+	if q == null:
+		return
+	var v := rng.randi_range(15, 380)
+	main.money += v
+	main._msg("Assalto: +$%d" % v)
+	main.audio.play("cash")
+	q.robbed = true
+	q._end_mode()
+	q.flee = 12.0
+	if main.police.seen_by_cop(q.global_position) or rng.randf() < 0.35:
+		main._add_wanted(1)
+
+## refém: segura o NPC rendido na frente (a polícia não atira); de novo solta
+func toggle_hostage() -> void:
+	if hostage != null:
+		release_hostage()
+		return
+	var q = _nearest_handsup()
+	if q == null:
+		return
+	hostage = q
+	q.mode = "hostage"
+	q.body.arm_pose = "handsup"
+	main.audio.play("scream", q.global_position, -6.0)
+	if main.wanted < 2:
+		main._add_wanted(2 - main.wanted)
+
+func release_hostage() -> void:
+	if hostage != null and is_instance_valid(hostage) and not hostage.down:
+		hostage._end_mode()
+		hostage.flee = 12.0
+	hostage = null
+	main.hud.hostage_on = false
+
+func _driver_out(car) -> void:
+	if not is_instance_valid(car) or car.dead or car == main.player.vehicle:
+		return
+	var info: Dictionary = main.traffic_sys.release(car)
+	if info.is_empty() or not is_instance_valid(info.get("drv")):
+		return
+	var h: Node3D = info.drv
+	var pos: Vector3 = car.door_world() + car.global_transform.basis.x * 1.0
+	pos.y = car.global_position.y - 0.4
+	var Ped := preload("res://scripts/ped.gd")
+	var q = Ped.new()
+	main.add_child(q)
+	var loop: Array = main.city.walk_loops[0]
+	for l in main.city.walk_loops:
+		if l[0].distance_to(pos) < loop[0].distance_to(pos):
+			loop = l
+	q.setup(loop, 0, rng)
+	q._cols = info.cols.duplicate()
+	q.body.queue_free()
+	q._make_body()
+	q.global_position = pos
+	q.died.connect(main._on_ped_died)
+	main.peds.append(q)
+	h.queue_free()
+	car.set_door(1.0)
+	main.audio.play("door", car.global_position)
+	q.reacted = true
+	q.mode = "handsup"
+	q.mode_t = 7.0
+	q.body.arm_pose = "handsup"
+	car.unlocked = true
+	main.get_tree().create_timer(0.8).timeout.connect(func(): if is_instance_valid(car): car.set_door(0.0))

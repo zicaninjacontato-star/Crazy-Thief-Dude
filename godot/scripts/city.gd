@@ -4,6 +4,7 @@ extends Node3D
 
 const M := preload("res://scripts/mats.gd")
 
+const W2 := preload("res://scripts/world2.gd")
 const N := 5            # quadras por lado
 const CELL := 64.0      # distância entre centros de quadras
 const ROADW := 14.0     # largura do asfalto entre quadras
@@ -136,20 +137,22 @@ func _ground() -> void:
 	asphalt.mesh = pm
 	asphalt.material_override = M.asphalt()
 	add_child(asphalt)
-	var grass := MeshInstance3D.new()
-	var gm := PlaneMesh.new()
-	gm.size = Vector2(836, 1200)
-	grass.mesh = gm
-	grass.position = Vector3(-182.0, -0.03, 0)     # só a ilha (x −600..236, z −600..600): mar em volta
-	grass.material_override = M.grass()
-	add_child(grass)
-	# chão firme só em terra (o leito do mar fica no world2, a −12 m)
-	var cs := CollisionShape3D.new()
-	var bx := BoxShape3D.new()
-	bx.size = Vector3(844.0, 20.0, 1200.0)
-	cs.shape = bx
-	cs.position = Vector3(-178.0, -10.0, 0)
-	body.add_child(cs)
+	# terra só na ilha (cidade + praia) e na península do aeroporto: mar em volta
+	for r in W2.land_rects():
+		var grass := MeshInstance3D.new()
+		var gm := PlaneMesh.new()
+		gm.size = r.size
+		grass.mesh = gm
+		grass.position = Vector3(r.get_center().x, -0.03, r.get_center().y)
+		grass.material_override = M.grass()
+		add_child(grass)
+		# chão firme só em terra (o leito do mar fica no world2, a −12 m)
+		var cs := CollisionShape3D.new()
+		var bx := BoxShape3D.new()
+		bx.size = Vector3(r.size.x + 8.0, 20.0, r.size.y)
+		cs.shape = bx
+		cs.position = Vector3(r.get_center().x + (4.0 if r.end.x >= W2.SHORE_X else 0.0), -10.0, r.get_center().y)
+		body.add_child(cs)
 
 func _block(cx: float, cz: float) -> void:
 	# laje da calçada (meio-fio de 15 cm)

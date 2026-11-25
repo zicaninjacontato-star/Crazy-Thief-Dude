@@ -22,6 +22,7 @@ var max_engine := 1.0
 var police := false
 var ai_target: Node3D = null
 var ai_mode := ""           # "" ou "follow" (helicóptero da polícia)
+var ai_speed := 24.0        # velocidade máxima seguindo o alvo
 var driver: Node = null
 var wheels: Array = []
 var lean: Node3D = null
@@ -281,7 +282,7 @@ func _heli_phys(dt: float) -> void:
 		var c := ai_target.global_position + Vector3(cos(_t * 0.35) * 18.0, 0, sin(_t * 0.35) * 18.0)
 		var to := c - global_position
 		to.y = 0
-		target_v = to.limit_length(24.0)
+		target_v = to.limit_length(ai_speed)
 		climb = clampf((ai_target.global_position.y + 22.0 - global_position.y) * 0.8, -6.0, 6.0)
 		var face := ai_target.global_position - global_position
 		yaw = lerp_angle(yaw, atan2(face.x, face.z), dt * 1.5)

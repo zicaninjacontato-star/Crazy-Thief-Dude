@@ -27,6 +27,14 @@ var _look := Vector3.ZERO
 var _cols := []
 var _rng := RandomNumberGenerator.new()
 signal died(ped)
+# reações: "" normal · "handsup" rendido · "call" ligando para a polícia · "brawl" brigando · "hostage" refém
+var mode := ""
+var mode_t := 0.0
+var reacted := false
+var robbed := false
+var blocking := false
+var _atk_cd := 0.8
+var _atk_hit := -1.0
 
 func setup(path: Array, start: int, rng: RandomNumberGenerator) -> void:
 	loop = path
@@ -112,13 +120,130 @@ func damage(amount: float, dir: Vector3, gore: bool, src: PhysicsBody3D = null) 
 	if hp <= 0.0:
 		hit(src, dir * (5.0 if amount < 60.0 else 9.0), gore and amount > 60.0)
 		return true
-	flee = 8.0
 	stagger = 0.35
+	if mode == "brawl":
+		stagger = 0.18
+		return false
+	if mode == "hostage":
+		return false
+	# soco: alguns revidam e começam uma briga
+	if amount < 40.0 and _rng.randf() < 0.45 and not beach and get_tree().current_scene.combat.weapon == "fist":
+		start_brawl()
+		return false
+	_end_mode()
+	flee = 8.0
 	return false
 
 func scare() -> void:
-	if not down:
+	if not down and mode != "hostage" and mode != "handsup":
+		_end_mode()
 		flee = 6.0
+
+func _end_mode() -> void:
+	mode = ""
+	blocking = false
+	if body:
+		body.arm_pose = ""
+		body.guard = false
+
+func start_brawl() -> void:
+	_end_mode()
+	mode = "brawl"
+	mode_t = 25.0
+	flee = 0.0
+	cross_to = Vector3.INF
+	body.guard = true
+	_atk_cd = 0.6
+
+func dodge(dir: Vector3) -> void:
+	var side := Vector3(dir.z, 0, -dir.x) * (1.0 if _rng.randf() < 0.5 else -1.0)
+	position += side * 0.9 + dir * 0.3
+	stagger = 0.15
+
+## arma apontada para ele: foge, liga para a polícia, parte para cima ou se rende
+func react_aim() -> void:
+	if reacted or down or mode != "" or knocked > 0.0:
+		return
+	reacted = true
+	var r := _rng.randf()
+	cross_to = Vector3.INF
+	var main := get_tree().current_scene
+	if r < 0.32:
+		flee = 10.0
+		main.audio.play("scream", global_position, -6.0)
+	elif r < 0.52:
+		mode = "call"
+		mode_t = 3.5
+		body.arm_pose = "phone"
+		flee = 0.0
+	elif r < 0.67:
+		start_brawl()
+	else:
+		mode = "handsup"
+		mode_t = 6.0
+		body.arm_pose = "handsup"
+		flee = 0.0
+
+func _mode_tick(dt: float) -> void:
+	var main := get_tree().current_scene
+	var pl = main.player
+	var to: Vector3 = pl.global_position - global_position
+	to.y = 0
+	var d := to.length()
+	mode_t -= dt
+	match mode:
+		"handsup":
+			body.rotation.y = lerp_angle(body.rotation.y, atan2(to.x, to.z), minf(1.0, dt * 6.0))
+			body.animate(0.0, dt)
+			if main.combat.aiming_at(self):
+				mode_t = maxf(mode_t, 3.0)
+			if mode_t <= 0.0 or d > 20.0:
+				_end_mode()
+				flee = 10.0
+		"call":
+			# corre um pouco para longe enquanto liga
+			var away := -to.normalized() if d > 0.01 else Vector3.FORWARD
+			position += away * 1.6 * dt
+			body.rotation.y = lerp_angle(body.rotation.y, atan2(away.x, away.z), minf(1.0, dt * 6.0))
+			body.animate(1.6, dt)
+			if mode_t <= 0.0:
+				_end_mode()
+				flee = 10.0
+				if main.wanted == 0:
+					main._add_wanted(1)
+				main._msg("Alguém chamou a polícia!")
+		"brawl":
+			if pl.vehicle != null or main.combat.dead or d > 24.0 or mode_t <= 0.0:
+				_end_mode()
+				flee = 6.0
+				return
+			body.guard = true
+			mode_t = maxf(mode_t, 8.0) if d < 4.0 else mode_t
+			body.rotation.y = lerp_angle(body.rotation.y, atan2(to.x, to.z), minf(1.0, dt * 8.0))
+			blocking = pl.body != null and pl.body.punch_t > 0.15 and _rng.randf() < 0.02 + 0.3 * dt
+			if d > 1.15:
+				var sp := 3.6 if d > 3.0 else 2.0
+				position += to.normalized() * sp * dt
+				body.animate(sp, dt)
+			else:
+				# círculo de luta: passinhos laterais
+				position += Vector3(to.z, 0, -to.x).normalized() * sin(_t * 2.3) * 0.6 * dt
+				_t += dt
+				body.animate(0.4, dt)
+				_atk_cd -= dt
+				if _atk_cd <= 0.0:
+					_atk_cd = _rng.randf_range(0.7, 1.4)
+					body.punch_kind = [0, 1, 4, 3][_rng.randi() % 4]
+					body.punch_t = 0.3
+					_atk_hit = 0.14
+			if _atk_hit > 0.0:
+				_atk_hit -= dt
+				if _atk_hit <= 0.0 and d < 1.6:
+					main.combat.melee_hit_player(_rng.randf_range(6.0, 13.0) * (1.6 if body.punch_kind == 3 else 1.0), global_position)
+				elif _atk_hit <= 0.0:
+					main.audio.play("swoosh", global_position, -6.0)
+		"hostage":
+			body.animate(0.0, dt)
 
 func _process(dt: float) -> void:
 	if down:
@@ -136,7 +261,11 @@ func _process(dt: float) -> void:
 		if knocked <= 0.0:
 			_get_up()
 		return
-	_bump(dt)
+	if mode != "" and stagger <= 0.0:
+		_mode_tick(dt)
+		return
+	if mode == "":
+		_bump(dt)
 	if stagger > 0.0:
 		stagger -= dt
 		body.animate(0.5, dt)

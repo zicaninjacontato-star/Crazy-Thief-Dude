@@ -7,6 +7,7 @@ const Car := preload("res://scripts/car.gd")
 const Ped := preload("res://scripts/ped.gd")
 const Hud := preload("res://scripts/hud.gd")
 const Humanoid := preload("res://scripts/humanoid.gd")
+const M := preload("res://scripts/mats.gd")
 const Audio := preload("res://scripts/audio.gd")
 const FX := preload("res://scripts/fx.gd")
 const Combat := preload("res://scripts/combat.gd")
@@ -154,6 +155,9 @@ func _ready() -> void:
 	_spawn_extras()
 	hud.weapon_pressed.connect(func(): ui.show_wheel())
 	hud.shop_pressed.connect(_shop_action)
+	hud.siren_pressed.connect(_toggle_siren)
+	hud.rob_pressed.connect(func(): combat.rob_target())
+	hud.hostage_pressed.connect(func(): combat.toggle_hostage())
 	daynight = DayNight.new()
 	add_child(daynight)
 	daynight.setup(self)
@@ -337,7 +341,7 @@ func _spawn_extras() -> void:
 	var specs := [["boat", 70.0, Color(0.8, 0.8, 0.82)], ["boat", 140.0, Color(0.1, 0.3, 0.6)], ["boat", 95.0, Color(0.7, 0.15, 0.1)], ["jetski", 45.0, Color(0.1, 0.7, 0.3)], ["jetski", 55.0, Color(0.9, 0.3, 0.6)], ["ship", 320.0, Color.WHITE]]
 	for i in specs.size():
 		var off: float = specs[i][1]
-		var x0: float = world2.ISL_X0 - off
+		var x0: float = world2.PEN_X0 - off
 		var x1: float = world2.SHORE_X + off
 		var z0: float = world2.ISL_Z0 - off
 		var z1: float = world2.ISL_Z1 + off
@@ -357,6 +361,33 @@ func _spawn_extras() -> void:
 		dh.animate(0, 0)
 		dh.set_far(70.0)
 		b.npc_drv = dh
+	# pescadores nos deques do costão
+	for fs in world2.fish_spots:
+		var fh := Humanoid.new()
+		fh.build(Color.from_hsv(rng.randf(), 0.4, 0.6), Color(0.25, 0.3, 0.2), Color(0.78, 0.56, 0.38), Color(0.15, 0.1, 0.06), {"hat": 1, "hat_c": Color(0.85, 0.8, 0.6)})
+		add_child(fh)
+		fh.global_position = fs[0] + Vector3(0, -0.2, 0)
+		fh.rotation.y = fs[1]
+		fh.sitting = rng.randf() < 0.5
+		if fh.sitting:
+			fh.global_position.y -= 0.45
+		fh.animate(0, 0)
+		var rod := MeshInstance3D.new()
+		var rb := BoxMesh.new()
+		rb.size = Vector3(0.03, 0.03, 3.2)
+		rod.mesh = rb
+		rod.material_override = M.plain(Color(0.15, 0.12, 0.1), 0.5)
+		rod.position = Vector3(0, 1.25, 1.3)
+		rod.rotation.x = -0.55
+		fh.add_child(rod)
+		var line := MeshInstance3D.new()
+		var lb := BoxMesh.new()
+		lb.size = Vector3(0.008, 3.6, 0.008)
+		line.mesh = lb
+		line.material_override = M.plain(Color(0.9, 0.9, 0.9), 0.5)
+		line.position = Vector3(0, 0.7, 2.75)
+		fh.add_child(line)
+		fh.set_far(80.0)
 	sea = Sea.new()
 	add_child(sea)
 	sea.setup(self)
@@ -419,6 +450,9 @@ func explode_at(pos: Vector3, radius: float, dmg: float) -> void:
 			c.take_damage(dmg * f)
 			if c is RigidBody3D:
 				c.apply_central_impulse(((c.global_position - pos).normalized() + Vector3(0, 0.8, 0)) * c.mass * 9.0 * f)
+	for a in police.army:
+		if is_instance_valid(a) and not a.dead and a.global_position.distance_to(pos) < radius * 1.4:
+			a.take_damage(dmg * (1.0 - a.global_position.distance_to(pos) / (radius * 1.4)) * 0.9)
 	var pd: float = player.global_position.distance_to(pos)
 	if pd < radius and not combat.dead:
 		hp -= dmg * (1.0 - pd / radius) * (0.4 if player.vehicle else 1.0)
@@ -493,6 +527,7 @@ func leave_interior() -> void:
 
 # ---------------------------------------------------------------- mar: carros afundam, tubarão
 var breath := 100.0
+var _route_t := 0.0
 var _uw_fog := false
 var shark_cd := 0.0
 var shark_jump := -1.0
@@ -527,6 +562,7 @@ func _water_tick(dt: float) -> void:
 				c.gravity_scale = 0.12
 	# mergulho, fôlego e afogamento
 	player.diving = player.swimming and (hud.jump_held or Input.is_action_pressed("jump"))
+	player.rising = player.swimming and (hud.rise_held or Input.is_key_pressed(KEY_Q))
 	var pv = player.vehicle
 	var in_sunk: bool = pv != null and pv.has_meta("sink_t") and pv.global_position.y + 1.1 < world2.WATER_Y
 	if (player.underwater or in_sunk) and not combat.dead:
@@ -692,6 +728,11 @@ func _toggle_car() -> void:
 		var spd: float = c.linear_velocity.length()
 		var k: String = c.kind
 		var air: bool = k in ["plane", "heli"] and c.global_position.y > 2.0
+		if not air and k not in ["boat", "plane", "heli", "moto"] and spd > 6.0 and c.get("door_node") != null:
+			c.throttle = 0.0
+			c.brake_in = 0.0
+			vehanim.start_jump(c)
+			return
 		if air or (k == "moto" and spd > 3.0) or (k not in ["boat", "plane", "heli", "moto"] and spd > 6.0):
 			var vel: Vector3 = c.linear_velocity
 			eject_player(Vector3.ZERO)
@@ -1039,8 +1080,16 @@ func _process(dt: float) -> void:
 			_step_ph += dt * (2.2 + hs * 1.65) / PI
 			if _step_ph >= 1.0:
 				_step_ph -= 1.0
-				audio.play("step", null, -8.0)
-	audio.set_siren(police_car != null, police_car.global_position.distance_to(player.global_position) if police_car else 999.0)
+				audio.play("step_" + _surface(), null, -6.0 if hs < 4.0 else -3.0)
+	# sirene: viatura da polícia mais próxima, ou a viatura que o jogador dirige com a sirene ligada
+	var pv = player.vehicle
+	var own_siren: bool = pv != null and pv.get("police") == true and pv.get("siren_on") == true
+	hud.siren_avail = pv != null and pv.get("police") == true
+	hud.siren_on = own_siren
+	if own_siren:
+		audio.set_siren(true, 0.0)
+	else:
+		audio.set_siren(police_car != null, police_car.global_position.distance_to(player.global_position) if police_car else 999.0)
 	# HUD
 	fps_acc += dt
 	fps_n += 1
@@ -1112,6 +1161,20 @@ func _process(dt: float) -> void:
 		for sh in city.shops:
 			bl.append({"pos": sh.pos, "col": {"guns": Color(1, 0.3, 0.2), "cars": Color(0.3, 0.8, 1), "clothes": Color(0.95, 0.45, 0.85)}[sh.type]})
 	hud.map_blips = bl
+	# rastro até o destino (missão/táxi tem prioridade sobre o ponto marcado no mapa)
+	_route_t -= dt
+	if _route_t <= 0.0:
+		_route_t = 0.4
+		var rtgt := Vector3.INF
+		if missions.obj_pos != Vector3.INF:
+			rtgt = missions.obj_pos
+		elif hud.map_waypoint != Vector3.INF:
+			rtgt = hud.map_waypoint
+			if Vector2(rtgt.x - player.global_position.x, rtgt.z - player.global_position.z).length() < 12.0:
+				hud.map_waypoint = Vector3.INF
+				rtgt = Vector3.INF
+				_msg("Você chegou ao ponto marcado")
+		hud.map_route = route_path(player.global_position, rtgt) if rtgt != Vector3.INF and interior == "" else PackedVector3Array()
 	hud.clock.text = "%02d:%02d" % [int(tod), int(fmod(tod, 1.0) * 60.0)]
 	autosave_t += dt
 	if autosave_t > 60.0 and shot == "":
@@ -1128,6 +1191,8 @@ func _process(dt: float) -> void:
 		if msg_t <= 0: hud.hint.text = ""
 	elif shop_action in ["enter", "exit", "buy"]:
 		hud.hint.text = {"guns": "AMMU★NATION", "cars": "Concessionária", "clothes": "Loja de roupas"}[shop_near] + " · toque em " + hud.shop_label
+	elif player.swimming and player.underwater:
+		hud.hint.text = "Debaixo d'água · segure ⬆ (SUBIR) para voltar"
 	elif player.swimming:
 		hud.hint.text = "Nadando"
 	else:
@@ -1157,6 +1222,161 @@ func _test9(v: String) -> void:
 			player.body.rotation.y = 0.0
 			if frames % 5 == 0 and player.body.gun:
 				print("GUN ", frames, " barrel=", (player.body.gun.global_basis * Vector3(0, -1, 0)).snapped(Vector3.ONE * 0.01), " aiming=", player.body.aiming)
+	if v == "fullmap":
+		if frames == 6:
+			hud.map_waypoint = Vector3(120.0, 0, -100.0)
+		if frames == 10:
+			hud.open_map()
+			print("MAP paused_on_open=", get_tree().paused)
+			get_tree().paused = false     # o teste precisa continuar contando quadros
+			hud.map_zoom = 1.0
+		if frames == 14:
+			print("MAP full=", hud.map_full, " paused=", get_tree().paused, " route=", hud.map_route.size())
+	if v == "minimap":
+		if frames == 6:
+			hud.map_waypoint = Vector3(120.0, 0, -100.0)
+		if frames % 10 == 0:
+			print("MAP route=", hud.map_route.size())
+	if v == "aimreact":
+		if frames == 4:
+			combat.weapon = "pistol"
+			combat._equip()
+			hud.aim = true
+			var q = peds[0]
+			for pq in peds:
+				if pq.global_position.distance_to(player.global_position) < q.global_position.distance_to(player.global_position):
+					q = pq
+			set_meta("aq", q)
+		if frames > 4:
+			var q = get_meta("aq")
+			if is_instance_valid(q):
+				if frames < 8:
+					player.global_position = q.global_position + Vector3(0, 0, -6.0)
+				var to: Vector3 = q.global_position - player.global_position
+				cam_yaw = atan2(to.x, to.z) + PI
+				cam_pitch = -0.05
+				if frames == 20 and q.mode != "handsup":
+					q.reacted = false
+					q.mode = ""
+					q._rng.seed = 3
+					while true:
+						q.reacted = false
+						q.react_aim()
+						if q.mode == "handsup":
+							break
+						q._end_mode()
+						q.flee = 0.0
+				if frames % 5 == 0:
+					print("AIM ", frames, " mode=", q.mode, " flee=", snappedf(q.flee, 0.1), " reacted=", q.reacted, " rob=", hud.rob_avail, " money=", money, " hostage=", combat.hostage != null)
+				if frames == 30:
+					player.global_position = q.global_position + (player.global_position - q.global_position).normalized() * 2.5
+				if frames == 35:
+					combat.toggle_hostage()
+				if frames == 50:
+					combat.toggle_hostage()
+				if frames == 55:
+					q.mode = "handsup"
+					q.body.arm_pose = "handsup"
+					q.robbed = false
+				if frames == 60:
+					combat.rob_target()
+	if v == "brawl":
+		if frames == 4:
+			combat.weapon = "fist"
+			combat._equip()
+			var q = peds[0]
+			for pq in peds:
+				if pq.global_position.distance_to(player.global_position) < q.global_position.distance_to(player.global_position):
+					q = pq
+			set_meta("bq", q)
+			player.global_position = q.global_position + Vector3(0, 0, -3.0)
+			q.start_brawl()
+		if frames > 4:
+			var q = get_meta("bq")
+			if is_instance_valid(q):
+				var to: Vector3 = q.global_position - player.global_position
+				cam_yaw = atan2(to.x, to.z) + PI - 0.6
+				cam_pitch = -0.1
+				if frames % 6 == 0 and frames > 20:
+					combat.shoot()
+				if frames % 5 == 0:
+					print("BRW ", frames, " mode=", q.mode, " qhp=", snappedf(q.hp, 1), " down=", q.down, " knocked=", snappedf(q.knocked, 0.1), " php=", snappedf(hp, 1), " combo=", combat.combo)
+	if v == "carjump":
+		if frames == 4:
+			player.global_position = my_car.door_world()
+		if frames == 6:
+			_toggle_car()
+		if frames > 30 and frames < 60:
+			my_car.throttle = 1.0
+			my_car.linear_velocity = my_car.global_transform.basis.z * 14.0
+		if frames == 60:
+			_toggle_car()
+		if frames % 3 == 0 and frames > 55:
+			print("JMP ", frames, " st=", vehanim.state, " veh=", player.vehicle != null, " door=", snappedf(my_car.door_open, 0.01), " down=", snappedf(combat.down_t, 0.1), " spd=", snappedf(my_car.linear_velocity.length(), 0.1))
+	if v == "army":
+		if frames == 4:
+			wanted = 5
+			god = true
+		if frames % 15 == 0:
+			var tk = police.army.filter(func(a): return is_instance_valid(a) and a.kind == "tank")
+			var jt = police.army.filter(func(a): return is_instance_valid(a) and a.kind == "jet")
+			print("ARM ", frames, " tanks=", tk.size(), " jets=", jt.size(), " units=", police.units.size(), " kinds=", police.units.map(func(u): return u.kind), " cops=", police.cops.size(), " heavy=", police.cops.filter(func(c): return is_instance_valid(c) and c.hp > 200).size(), " heli_spd=", police.heli.ai_speed if police.heli and is_instance_valid(police.heli) else -1, " td=", snappedf(tk[0].global_position.distance_to(player.global_position), 1) if tk.size() > 0 else -1)
+		if frames == 200:
+			var tk2 = police.army.filter(func(a): return is_instance_valid(a) and a.kind == "tank")
+			if tk2.size() > 0:
+				cam_yaw = atan2(tk2[0].global_position.x - player.global_position.x, tk2[0].global_position.z - player.global_position.z) + PI
+	if v == "freedive":
+		if frames == 4:
+			player.global_position = Vector3(world2.SHORE_X + 60.0, 0.3, 30.0)
+		if frames > 6 and frames < 30:
+			hud.jump_held = true
+		if frames == 30:
+			hud.jump_held = false
+		if frames > 60 and frames < 75:
+			hud.rise_held = true
+		if frames == 75:
+			hud.rise_held = false
+		if frames % 6 == 0:
+			print("FDV ", frames, " y=", snappedf(player.global_position.y, 0.1), " uw=", player.underwater, " btn=", hud.buttons.has("rise"))
+	if v == "steps":
+		for spot in [Vector3(0, 0.3, 30), Vector3(200, 1.3, 0), Vector3(-300, 0.3, 120), world2.fish_spots[0][0], Vector3(world2.SHORE_X + 30, 0.3, 40)]:
+			if frames == 4:
+				player.global_position = spot
+				print("SURF ", spot, " ", _surface())
+	if v == "siren":
+		if frames == 4:
+			var pc = _spawn_car(my_car.global_position + Vector3(0, 0, 10), 0.0, Color.WHITE, true)
+			set_meta("pc", pc)
+			player.global_position = pc.door_world()
+		if frames == 6:
+			_toggle_car()
+		if frames == 40:
+			_toggle_siren()
+		if frames % 10 == 0:
+			print("SIR ", frames, " veh=", player.vehicle != null, " avail=", hud.siren_avail, " on=", hud.siren_on, " tgt=", snappedf(audio.sir_target, 0.01), " btn=", hud.buttons.has("siren"))
+	if v == "coast2":
+		if frames > 3:
+			player.global_position = Vector3(-100.0, 0.5, 208.0)
+			cam_yaw = PI + 0.4
+			cam_pitch = 0.35
+	if v == "aimcar":
+		if frames == 4:
+			combat.weapon = "pistol"
+			combat._equip()
+			hud.aim = true
+			var a = traffic_sys.agents.filter(func(x): return x.car.kind == "sedan" or x.car.kind == "hatch")[0]
+			set_meta("ac", a.car)
+			traffic_sys.rng.seed = 2
+		if frames > 4 and frames < 40:
+			var c = get_meta("ac")
+			player.global_position = c.global_position + c.global_transform.basis.z * 9.0 + Vector3(0, 0.3, 0)
+			var to: Vector3 = c.global_position - player.global_position
+			cam_yaw = atan2(to.x, to.z) + PI
+			cam_pitch = -0.05
+		if frames % 5 == 0:
+			var c2 = get_meta("ac")
+			var ag: Dictionary = traffic_sys._agent_of(c2)
+			print("ACR ", frames, " mode=", ag.get("mode", "-"), " agent=", not ag.is_empty(), " handsup=", peds.filter(func(q): return is_instance_valid(q) and q.mode == "handsup").size(), " spd=", snappedf(c2.linear_velocity.length(), 0.1))
 	if v == "sinkcar":
 		if frames == 4:
 			player.global_position = my_car.door_world()
@@ -1834,3 +2054,68 @@ func _shot_tick() -> void:
 		var info := {"draws": RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME), "prims": RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME), "fps": fps_show, "car_z": my_car.global_position.z, "car_x": my_car.global_position.x, "car_speed": my_car.linear_velocity.length(), "yaw": my_car.rotation.y, "up": my_car.global_transform.basis.y.y, "wanted": wanted, "police_d0": get_meta("pd0", -1.0), "pol": ([police_car.global_position, police_car.linear_velocity.length(), police_car.throttle, police_car.engine_force, police_car.brake, police_car.wheels.map(func(w): return w.is_in_contact())] if police_car else []), "police_d": (police_car.global_position.distance_to(player.global_position) if police_car else -1.0), "walk": (player.global_position - get_meta("p0", player.global_position)), "camdir": (get_meta("p0", player.global_position) - get_meta("c0", cam.global_position))}
 		print("SHOT ", JSON.stringify(info))
 		get_tree().quit()
+
+
+## caminho pelas ruas da grade (para o rastro do minimapa): perna até a rua mais próxima,
+## segue pelas ruas (no máximo 2 curvas) e sai na rua mais próxima do destino
+func route_path(a: Vector3, b: Vector3) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	var ext: float = city.N * city.CELL * 0.5
+	var roads: Array = hud.map_roads
+	var near_r := func(v: float) -> float:
+		var best: float = roads[0]
+		for r in roads:
+			if absf(r - v) < absf(best - v):
+				best = r
+		return best
+	var ca := Vector3(clampf(a.x, -ext, ext), 0, clampf(a.z, -ext, ext))
+	var cb := Vector3(clampf(b.x, -ext, ext), 0, clampf(b.z, -ext, ext))
+	out.append(a)
+	if ca.distance_to(a) > 1.0:
+		out.append(ca)
+	var rxa: float = near_r.call(ca.x)
+	var rza: float = near_r.call(ca.z)
+	var rxb: float = near_r.call(cb.x)
+	var rzb: float = near_r.call(cb.z)
+	var va := absf(ca.x - rxa) < absf(ca.z - rza)     # a está numa rua vertical (x fixo)
+	var vb := absf(cb.x - rxb) < absf(cb.z - rzb)
+	if va and vb:
+		var rzm: float = near_r.call((ca.z + cb.z) * 0.5)
+		out.append_array([Vector3(rxa, 0, ca.z), Vector3(rxa, 0, rzm), Vector3(rxb, 0, rzm), Vector3(rxb, 0, cb.z)])
+	elif va and not vb:
+		out.append_array([Vector3(rxa, 0, ca.z), Vector3(rxa, 0, rzb), Vector3(cb.x, 0, rzb)])
+	elif not va and vb:
+		out.append_array([Vector3(ca.x, 0, rza), Vector3(rxb, 0, rza), Vector3(rxb, 0, cb.z)])
+	else:
+		var rxm: float = near_r.call((ca.x + cb.x) * 0.5)
+		out.append_array([Vector3(ca.x, 0, rza), Vector3(rxm, 0, rza), Vector3(rxm, 0, rzb), Vector3(cb.x, 0, rzb)])
+	out.append(cb)
+	if cb.distance_to(b) > 1.0:
+		out.append(b)
+	return out
+
+func _toggle_siren() -> void:
+	var pv = player.vehicle
+	if pv and pv.get("police") == true:
+		pv.siren_on = not pv.siren_on
+		audio.play("click", null, -4.0)
+
+## piso sob o jogador (som dos passos)
+func _surface() -> String:
+	var p: Vector3 = player.global_position
+	if interior != "":
+		return "road"
+	if world2.is_water(p.x, p.z):
+		return "water" if p.y < world2.WATER_Y - 0.1 else "wood"
+	if p.y < world2.WATER_Y - 0.25 and world2.sea_dist(p.x, p.z) > -10.0:
+		return "water"
+	if p.x > world2.BEACH_X0:
+		return "sand"
+	var ext: float = city.N * city.CELL * 0.5 + 4.0
+	if absf(p.x) < ext and absf(p.z) < ext:
+		return "road"
+	if p.x < -150.0 and absf(p.z) < 14.0:
+		return "road"       # pista do aeroporto
+	if world2.sea_dist(p.x, p.z) > -26.0:
+		return "road"       # costão de pedra
+	return "grass"

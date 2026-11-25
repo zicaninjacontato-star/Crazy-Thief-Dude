@@ -56,6 +56,17 @@ func start_exit(c) -> void:
 		dur = 1.2
 		seated.pose = "kick"
 
+## pular do carro em movimento: abre a porta, se joga para fora e rola no chão
+func start_jump(c) -> void:
+	car = c
+	seated = main.seated
+	t = 0.0
+	state = "x_jump"
+	dur = 0.5
+	_from = seated.position
+	_to = _local_door(c) + Vector3(0.35, 0.15, 0)
+	_to.y = seated.position.y + 0.15
+
 func _go(s: String, d: float) -> void:
 	state = s
 	t = 0.0
@@ -144,6 +155,26 @@ func tick(dt: float) -> void:
 				car.set_door(0.0)
 				state = ""
 				main.anim_done()
+		"x_jump":
+			car.set_door(minf(1.0, k * 2.2))
+			var e3 := clampf((k - 0.3) / 0.7, 0.0, 1.0)
+			seated.position = _from.lerp(_to, e3)
+			seated.rotation.y = PI * 0.5 * minf(1.0, k * 1.6)
+			if k > 0.35 and seated.sitting:
+				seated.sitting = false
+				seated.crouching = true
+				seated.animate(0.0, 0.0)
+			if t >= dur:
+				var vel: Vector3 = car.linear_velocity
+				var side: Vector3 = car.global_transform.basis.x
+				var c2 = car
+				state = ""
+				main.finish_exit(car, car.door_world() + side * 0.6 + Vector3(0, 0.5, 0))
+				if main.player.body:
+					main.player.body.crouching = false
+				main.combat.knockdown(vel * 0.75 + side * 3.0 + Vector3(0, 2.2, 0), 2.6)
+				main.audio.play("door", c2.global_position, 2.0)
+				main.get_tree().create_timer(1.6).timeout.connect(func(): if is_instance_valid(c2) and c2 != main.player.vehicle: c2.set_door(0.0))
 		"x_kick":
 			seated.pose_t = k
 			seated.animate(0, dt)

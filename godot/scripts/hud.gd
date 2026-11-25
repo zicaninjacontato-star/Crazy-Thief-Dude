@@ -5,6 +5,9 @@ signal enter_pressed
 signal jump_pressed
 signal weapon_pressed
 signal shop_pressed
+signal siren_pressed
+signal rob_pressed
+signal hostage_pressed
 
 var joy := Vector2.ZERO
 var gas := false
@@ -42,6 +45,20 @@ var can_enter := false       # há veículo perto (mostra o botão do carro)
 var weapon_kind := "fist"
 var action_kind := ""        # enter / exit / buy / carry / drop / trunk
 var heli := false
+var rise_held := false        # SUBIR (debaixo d'água)
+var siren_avail := false      # dirigindo viatura
+var siren_on := false
+var rob_avail := false        # NPC rendido na mira
+var hostage_on := false
+var map_route: PackedVector3Array = PackedVector3Array()   # rastro até o destino
+var map_waypoint := Vector3.INF
+var map_full := false         # mapa em tela cheia
+var map_zoom := 1.0
+var map_pan := Vector2(-120.0, 0.0)
+var map_island := Rect2(-520.0, -200.0, 756.0, 400.0)
+var _mf_drag := -1
+var _mf_last := Vector2.ZERO
+var _mf_moved := 0.0
 var _fire_last := Vector2.ZERO
 var crosshair := false
 var input_block := false
@@ -63,6 +80,7 @@ var map_roadw := 14.0
 const R := 70.0
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS     # o mapa em tela cheia funciona com o jogo pausado
 	root = Control.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -88,9 +106,9 @@ func _ready() -> void:
 	big.add_theme_color_override("font_color", Color(0.85, 0.1, 0.1))
 	hint = _label(Vector2(0, 0), 22)
 	hint.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	hint.position = Vector2(-200, 70)
+	hint.position = Vector2(-350, 70)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.size = Vector2(400, 30)
+	hint.size = Vector2(700, 30)
 	mlabel = _label(Vector2(0, 0), 22)
 	mlabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	mlabel.size = Vector2(700, 60)
@@ -122,7 +140,16 @@ func _layout() -> void:
 		buttons["fire"] = Rect2(s.x - b * 1.2 - 24, s.y - b * 1.2 - 30, b * 1.2, b * 1.2)
 		buttons["jump"] = Rect2(s.x - b * 2.2 - 44, s.y - b - 30, b, b)
 		buttons["sprint"] = Rect2(s.x - b * 1.2 - 24, s.y - b * 2.3 - 50, b * 1.2, b * 0.8)
-		buttons["aim"] = Rect2(s.x - b * 2.2 - 44, s.y - b * 2.2 - 46, b, b)
+		if swim_mode:
+			buttons["rise"] = Rect2(s.x - b * 2.2 - 44, s.y - b * 2.2 - 46, b, b)
+		else:
+			buttons["aim"] = Rect2(s.x - b * 2.2 - 44, s.y - b * 2.2 - 46, b, b)
+		if rob_avail or hostage_on:
+			buttons["hostage"] = Rect2(s.x - b * 2.2 - 44, s.y * 0.38, b, b)
+		if rob_avail and not hostage_on:
+			buttons["rob"] = Rect2(s.x - b * 3.2 - 64, s.y * 0.38, b, b)
+	if driving and siren_avail:
+		buttons["siren"] = Rect2(s.x - b * 2 - 44, s.y * 0.38, b, b)
 	buttons["weapon"] = Rect2(s.x - 170, 122, 150, 78)
 	if shop_label != "" and not driving:
 		buttons["shop"] = Rect2(s.x - b - 24, s.y * 0.38 - b - 16, b, b)
@@ -136,8 +163,14 @@ func _input(e: InputEvent) -> void:
 	if input_block:
 		return
 	_layout()
+	if map_full:
+		_map_input(e)
+		return
 	if e is InputEventScreenTouch:
 		var p: Vector2 = e.position
+		if e.pressed and p.distance_to(Vector2(118, 128)) < 100.0 and not input_block:
+			open_map()
+			return
 		if e.pressed:
 			for k in buttons:
 				if buttons[k].has_point(p):
@@ -192,8 +225,18 @@ func _press(k: String, on: bool) -> void:
 			if on: weapon_pressed.emit()
 		"shop":
 			if on: shop_pressed.emit()
+		"rise": rise_held = on
+		"siren":
+			if on: siren_pressed.emit()
+		"rob":
+			if on: rob_pressed.emit()
+		"hostage":
+			if on: hostage_pressed.emit()
 
 func _draw_controls() -> void:
+	if map_full:
+		_draw_full_map()
+		return
 	_layout()
 	var s := root.get_viewport_rect().size
 	var c := _joy_center if _joy_id >= 0 else Vector2(150, s.y - 150)
@@ -212,7 +255,7 @@ func _draw_controls() -> void:
 	var font := ThemeDB.fallback_font
 	for k in buttons:
 		var r: Rect2 = buttons[k]
-		var on: bool = k in _btn_ids.values() or (k == "aim" and aim)
+		var on: bool = k in _btn_ids.values() or (k == "aim" and aim) or (k == "siren" and siren_on)
 		var c2 := r.get_center()
 		var rad := minf(r.size.x, r.size.y) * 0.5
 		var white := Color(1, 1, 1, 0.92)
@@ -234,6 +277,7 @@ func _draw_controls() -> void:
 			"gas": ik = "up" if heli else "gas"
 			"brake": ik = "down" if heli else "brake"
 			"shop": ik = "a_" + action_kind
+			"hostage": ik = "release" if hostage_on else "hostage"
 		_icon(ik, c2, rad * 0.62, white)
 
 ## ícones vetoriais dos botões
@@ -283,6 +327,27 @@ func _icon(kind: String, c: Vector2, r: float, col: Color) -> void:
 				root.draw_line(c + Vector2(0.7, -0.6) * r, c + Vector2(0.7, 0.7) * r, Color(1, 0.4, 0.4), w)
 		"a_trunk":
 			_car_icon(c + Vector2(0, 0.15) * r, r * 0.9, col, true)
+		"rise":
+			root.draw_colored_polygon(PackedVector2Array([c + Vector2(0, -0.85) * r, c + Vector2(0.6, -0.15) * r, c + Vector2(-0.6, -0.15) * r]), col)
+			root.draw_line(c + Vector2(0, -0.2) * r, c + Vector2(0, 0.55) * r, col, w * 1.4)
+			for i in 3:
+				root.draw_arc(c + Vector2((i - 1) * 0.45, 0.8) * r, r * 0.22, PI, TAU, 8, Color(0.5, 0.8, 1.0), w * 0.6)
+		"siren":
+			root.draw_rect(Rect2(c + Vector2(-0.8, 0.1) * r, Vector2(1.6, 0.35) * r), col)
+			root.draw_circle(c + Vector2(-0.35, -0.1) * r, r * 0.3, Color(1, 0.2, 0.2) if siren_on else Color(0.5, 0.2, 0.2))
+			root.draw_circle(c + Vector2(0.35, -0.1) * r, r * 0.3, Color(0.25, 0.45, 1.0) if siren_on else Color(0.2, 0.25, 0.5))
+			if siren_on:
+				for a in [-0.9, -0.5, 0.5, 0.9]:
+					var d := Vector2(sin(a), -cos(a))
+					root.draw_line(c + Vector2(0, -0.1) * r + d * r * 0.6, c + Vector2(0, -0.1) * r + d * r * 0.95, col, w * 0.7)
+		"rob":
+			root.draw_rect(Rect2(c + Vector2(-0.7, -0.35) * r, Vector2(1.4, 0.8) * r), Color(0.3, 0.75, 0.35))
+			root.draw_string(ThemeDB.fallback_font, c + Vector2(-0.25, 0.3) * r, "$", HORIZONTAL_ALIGNMENT_LEFT, -1, int(r * 0.9), Color(0.05, 0.25, 0.08))
+		"hostage", "release":
+			_figure(c + Vector2(-0.3, 0.05) * r, r * 0.8, col, w, [Vector2(-0.4, -0.9), Vector2(0.4, -0.9)], [Vector2(-0.3, 0.9), Vector2(0.3, 0.9)], 0.0)
+			_poly(c + Vector2(0.55, -0.2) * r, r * 0.55, [[-0.8, -0.35], [0.8, -0.35], [0.8, 0.0], [-0.1, 0.0], [-0.25, 0.75], [-0.65, 0.75], [-0.5, 0.0], [-0.8, 0.0]], col)
+			if kind == "release":
+				root.draw_line(c + Vector2(-0.85, -0.85) * r, c + Vector2(0.85, 0.85) * r, Color(1, 0.35, 0.3), w * 1.2)
 		"w_fist":
 			root.draw_circle(c + Vector2(0, 0.1) * r, r * 0.55, col)
 			for i in 4:
@@ -342,12 +407,17 @@ func _car_icon(c: Vector2, r: float, col: Color, open_trunk: bool) -> void:
 
 func _process(_dt: float) -> void:
 	var s := root.get_viewport_rect().size
+	for ch in root.get_children():
+		ch.visible = not map_full
+	if map_full:
+		root.queue_redraw()
+		return
 	flash = maxf(0.0, flash - _dt)
 	big.text = wasted
 	big.position = Vector2(s.x * 0.5 - 300, s.y * 0.38)
 	money.position = Vector2(s.x - 300, 46)
 	stars.position = Vector2(s.x - 232, 88)
-	hint.position = Vector2(s.x * 0.5 - 200, 70)
+	hint.position = Vector2(s.x * 0.5 - 350, 70)
 	mlabel.position = Vector2(s.x * 0.5 - 350, s.y - 70)
 	var tt := ""
 	if mission_timer > 0.0:
@@ -383,12 +453,28 @@ func _draw_minimap() -> void:
 	var R := 100.0
 	var sc := R / 90.0
 	root.draw_circle(C, R + 4, Color(0, 0, 0, 0.6))
-	root.draw_circle(C, R, Color(0.24, 0.33, 0.22))
+	root.draw_circle(C, R, Color(0.12, 0.33, 0.5))
 	var f := Vector2(sin(map_yaw), cos(map_yaw))
 	var rt := Vector2(-f.y, f.x)
 	var tr := func(w: Vector3) -> Vector2:
 		var rel := Vector2(w.x - map_player.x, w.z - map_player.z)
 		return C + Vector2(rel.dot(rt), -rel.dot(f)) * sc
+	# terra (recortada no círculo): costão, grama e areia da praia
+	var circ := PackedVector2Array()
+	for i in 40:
+		circ.append(C + Vector2(cos(i * TAU / 40.0), sin(i * TAU / 40.0)) * R)
+	var lands: Array = []
+	for r in preload("res://scripts/world2.gd").land_rects():
+		lands.append([r.grow(24.0), Color(0.42, 0.4, 0.37)])
+	for r in preload("res://scripts/world2.gd").land_rects():
+		lands.append([r, Color(0.24, 0.33, 0.22)])
+	lands.append([Rect2(172.0, -224.0, 64.0, 448.0), Color(0.78, 0.7, 0.5)])
+	for L in lands:
+		var r2: Rect2 = L[0]
+		var poly := PackedVector2Array([tr.call(Vector3(r2.position.x, 0, r2.position.y)), tr.call(Vector3(r2.end.x, 0, r2.position.y)), tr.call(Vector3(r2.end.x, 0, r2.end.y)), tr.call(Vector3(r2.position.x, 0, r2.end.y))])
+		for cp in Geometry2D.intersect_polygons(poly, circ):
+			if cp.size() >= 3:
+				root.draw_colored_polygon(cp, L[1])
 	var rw := 90.0
 	for c in map_roads:
 		for axis in 2:
@@ -405,6 +491,24 @@ func _draw_minimap() -> void:
 				a = Vector3(map_player.x - h, 0, c)
 				b = Vector3(map_player.x + h, 0, c)
 			root.draw_line(tr.call(a), tr.call(b), Color(0.16, 0.16, 0.18), map_roadw * sc)
+	if map_route.size() > 1:
+		var pts := PackedVector2Array()
+		for q in map_route:
+			pts.append(tr.call(q))
+		var clip := PackedVector2Array()
+		for i in pts.size():
+			if pts[i].distance_to(C) < R - 2:
+				clip.append(pts[i])
+			elif clip.size() > 0:
+				clip.append(C + (pts[i] - C).limit_length(R - 2))
+				break
+		if clip.size() > 1:
+			root.draw_polyline(clip, Color(0.75, 0.3, 1.0, 0.95), 5.0)
+	if map_waypoint != Vector3.INF:
+		var wp: Vector2 = tr.call(map_waypoint)
+		if wp.distance_to(C) > R - 8:
+			wp = C + (wp - C).normalized() * (R - 8)
+		_pin(wp, 1.0)
 	for bl in map_blips:
 		var bp: Vector2 = tr.call(bl.pos)
 		if bp.distance_to(C) > R - 7:
@@ -418,3 +522,149 @@ func _draw_minimap() -> void:
 	# seta do jogador (sempre para cima, o mapa gira)
 	root.draw_colored_polygon(PackedVector2Array([C + Vector2(0, -11), C + Vector2(8, 8), C + Vector2(0, 3), C + Vector2(-8, 8)]), Color(1, 1, 1))
 	root.draw_arc(C, R, 0, TAU, 64, Color(1, 1, 1, 0.8), 3.0)
+
+func _pin(p: Vector2, k: float) -> void:
+	root.draw_circle(p + Vector2(0, -12) * k, 8.0 * k, Color(0.75, 0.3, 1.0))
+	root.draw_colored_polygon(PackedVector2Array([p, p + Vector2(-6, -9) * k, p + Vector2(6, -9) * k]), Color(0.75, 0.3, 1.0))
+	root.draw_circle(p + Vector2(0, -12) * k, 3.5 * k, Color(1, 1, 1))
+
+# ---------------------------------------------------------------- mapa em tela cheia
+func open_map() -> void:
+	map_full = true
+	map_pan = Vector2(map_player.x, map_player.z)
+	map_zoom = 1.0
+	get_tree().paused = true
+	root.queue_redraw()
+
+func close_map() -> void:
+	map_full = false
+	_mf_drag = -1
+	get_tree().paused = false
+	root.queue_redraw()
+
+func _mf_scale() -> float:
+	var s := root.get_viewport_rect().size
+	return minf(s.x / 900.0, s.y / 560.0) * map_zoom
+
+func _mf_to_screen(w: Vector3) -> Vector2:
+	var s := root.get_viewport_rect().size
+	return s * 0.5 + (Vector2(w.x, w.z) - map_pan) * _mf_scale()
+
+func _mf_to_world(p: Vector2) -> Vector3:
+	var s := root.get_viewport_rect().size
+	var q := (p - s * 0.5) / _mf_scale() + map_pan
+	return Vector3(q.x, 0, q.y)
+
+func _mf_buttons() -> Dictionary:
+	var s := root.get_viewport_rect().size
+	return {"close": Rect2(s.x - 90, 20, 70, 70), "zin": Rect2(s.x - 90, 110, 70, 70), "zout": Rect2(s.x - 90, 190, 70, 70), "clear": Rect2(s.x - 90, 270, 70, 70)}
+
+func _map_input(e: InputEvent) -> void:
+	var pos := Vector2.ZERO
+	var pressed := false
+	var released := false
+	var idx := 0
+	if e is InputEventScreenTouch:
+		pos = e.position
+		idx = e.index
+		pressed = e.pressed
+		released = not e.pressed
+	elif e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
+		pos = e.position
+		pressed = e.pressed
+		released = not e.pressed
+		idx = 99
+	elif e is InputEventMouseButton and e.pressed and e.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
+		map_zoom = clampf(map_zoom * (1.2 if e.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / 1.2), 0.6, 6.0)
+		root.queue_redraw()
+		return
+	elif e is InputEventScreenDrag or e is InputEventMouseMotion:
+		if _mf_drag >= 0:
+			var d: Vector2 = e.relative
+			map_pan -= d / _mf_scale()
+			_mf_moved += d.length()
+			root.queue_redraw()
+		return
+	elif e is InputEventMagnifyGesture:
+		map_zoom = clampf(map_zoom * e.factor, 0.6, 6.0)
+		root.queue_redraw()
+		return
+	else:
+		return
+	if pressed:
+		for k in _mf_buttons():
+			if _mf_buttons()[k].has_point(pos):
+				match k:
+					"close": close_map()
+					"zin": map_zoom = minf(6.0, map_zoom * 1.4)
+					"zout": map_zoom = maxf(0.6, map_zoom / 1.4)
+					"clear": map_waypoint = Vector3.INF
+				root.queue_redraw()
+				return
+		_mf_drag = idx
+		_mf_last = pos
+		_mf_moved = 0.0
+	elif released and idx == _mf_drag:
+		_mf_drag = -1
+		if _mf_moved < 12.0:
+			# toque curto = marca/desmarca o ponto
+			var w := _mf_to_world(pos)
+			if map_waypoint != Vector3.INF and _mf_to_screen(map_waypoint).distance_to(pos) < 26.0:
+				map_waypoint = Vector3.INF
+			else:
+				map_waypoint = w
+		root.queue_redraw()
+
+func _draw_full_map() -> void:
+	var s := root.get_viewport_rect().size
+	var sc := _mf_scale()
+	root.draw_rect(Rect2(Vector2.ZERO, s), Color(0.1, 0.32, 0.5))
+	var rects: Array = preload("res://scripts/world2.gd").land_rects()
+	for r in rects:
+		var i0 := _mf_to_screen(Vector3(r.position.x, 0, r.position.y))
+		root.draw_rect(Rect2(i0 - Vector2(24, 24) * sc, (r.size + Vector2(48, 48)) * sc), Color(0.45, 0.43, 0.4))
+	for r in rects:
+		root.draw_rect(Rect2(_mf_to_screen(Vector3(r.position.x, 0, r.position.y)), r.size * sc), Color(0.26, 0.4, 0.24))
+	var b0 := _mf_to_screen(Vector3(172.0, 0, -224.0))
+	root.draw_rect(Rect2(b0, Vector2(64.0, 448.0) * sc), Color(0.82, 0.74, 0.52))
+	# aeroporto
+	var a0 := _mf_to_screen(Vector3(-500.0, 0, -12.0))
+	root.draw_rect(Rect2(a0, Vector2(340.0, 24.0) * sc), Color(0.2, 0.2, 0.22))
+	# quadras e ruas
+	var e0 := _mf_to_screen(Vector3(-map_ext, 0, -map_ext))
+	root.draw_rect(Rect2(e0, Vector2(map_ext, map_ext) * 2.0 * sc), Color(0.55, 0.55, 0.52))
+	for c in map_roads:
+		root.draw_line(_mf_to_screen(Vector3(c, 0, -map_ext)), _mf_to_screen(Vector3(c, 0, map_ext)), Color(0.16, 0.16, 0.18), map_roadw * sc)
+		root.draw_line(_mf_to_screen(Vector3(-map_ext, 0, c)), _mf_to_screen(Vector3(map_ext, 0, c)), Color(0.16, 0.16, 0.18), map_roadw * sc)
+	if map_route.size() > 1:
+		var pts := PackedVector2Array()
+		for q in map_route:
+			pts.append(_mf_to_screen(q))
+		root.draw_polyline(pts, Color(0.75, 0.3, 1.0, 0.95), 6.0)
+	var font := ThemeDB.fallback_font
+	for bl in map_blips:
+		var bp := _mf_to_screen(bl.pos)
+		root.draw_circle(bp, 9, Color(0, 0, 0, 0.7))
+		root.draw_circle(bp, 7, bl.col)
+	if map_waypoint != Vector3.INF:
+		_pin(_mf_to_screen(map_waypoint), 1.6)
+	var pp := _mf_to_screen(map_player)
+	var f := Vector2(sin(map_yaw), cos(map_yaw))
+	var rt := Vector2(-f.y, f.x)
+	# seta do jogador apontando para onde a câmera olha (mapa fixo, norte para cima)
+	var fw := Vector2(f.x, f.y).normalized()
+	var sd := Vector2(-fw.y, fw.x)
+	root.draw_colored_polygon(PackedVector2Array([pp + fw * 16, pp - fw * 10 + sd * 10, pp - fw * 4, pp - fw * 10 - sd * 10]), Color(1, 1, 1))
+	root.draw_string(font, Vector2(24, 44), "MAPA  ·  toque para marcar um ponto  ·  arraste para mover", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1, 1, 1))
+	var names := {"close": "X", "zin": "+", "zout": "−", "clear": "⌫"}
+	for k in _mf_buttons():
+		var r: Rect2 = _mf_buttons()[k]
+		root.draw_circle(r.get_center(), 34, Color(0, 0, 0, 0.55))
+		root.draw_arc(r.get_center(), 34, 0, TAU, 32, Color(1, 1, 1, 0.8), 2.5)
+		root.draw_string(font, r.position + Vector2(0, 48), names[k], HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 36, Color(1, 1, 1))
+	# legenda
+	var ly := s.y - 120.0
+	for lg in [[Color(1, 0.85, 0.2), "Missão / passageiro"], [Color(0.3, 1, 0.4), "Lojas"], [Color(0.75, 0.3, 1.0), "Seu ponto e rota"], [Color(0.2, 0.45, 1.0), "Polícia"]]:
+		root.draw_circle(Vector2(36, ly), 8, lg[0])
+		root.draw_string(font, Vector2(54, ly + 7), lg[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 1, 1))
+		ly += 26.0

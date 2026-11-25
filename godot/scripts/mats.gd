@@ -303,3 +303,16 @@ static func wood() -> StandardMaterial3D:
 	_world(m, 3.0)
 	_cache["wood"] = m
 	return m
+
+## rocha do costão (triplanar)
+static func rock(c := Color(0.45, 0.43, 0.4)) -> StandardMaterial3D:
+	var key := "rock" + c.to_html()
+	if _cache.has(key): return _cache[key]
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = noise_tex(0.05, 61, FastNoiseLite.TYPE_CELLULAR, 512, false, 0, ramp(c.darkened(0.35), c.lightened(0.15)))
+	m.normal_enabled = true
+	m.normal_texture = noise_tex(0.3, 62, FastNoiseLite.TYPE_CELLULAR, 512, true, 3.0)
+	m.roughness = 0.92
+	_world(m, 4.0)
+	_cache[key] = m
+	return m

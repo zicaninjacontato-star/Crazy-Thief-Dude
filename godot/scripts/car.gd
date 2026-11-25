@@ -18,6 +18,7 @@ var police := false
 var ai_target: Node3D = null
 var driver: Node = null
 var _lights: Array = []
+var siren_on := false      # sirene + giroflex (viaturas da polícia ligam; o jogador liga/desliga)
 var _t := 0.0
 var wheels: Array = []
 var body_size := Vector3(1.8, 1.4, 4.6)
@@ -389,7 +390,7 @@ func _physics_process(dt: float) -> void:
 	_t += dt
 	if police:
 		for k in _lights.size():
-			_lights[k].visible = int(_t * 6.0 + k) % 2 == 0
+			_lights[k].visible = siren_on and int(_t * 6.0 + k) % 2 == 0
 	# batida: variação brusca de velocidade
 	var dvv := (linear_velocity - _lastv).length()
 	_dv_local = global_transform.basis.inverse() * (linear_velocity - _lastv)

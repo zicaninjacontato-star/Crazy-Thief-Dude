@@ -44,17 +44,39 @@ func _process(dt: float) -> void:
 		var wm: StandardMaterial3D = water.material_override
 		wm.uv1_offset = Vector3(_wt * 0.004, _wt * 0.0025, 0)
 
-const ISL_X0 := -600.0       # ilha: x de ISL_X0 até SHORE_X, z de ISL_Z0 até ISL_Z1
-const ISL_Z0 := -600.0
-const ISL_Z1 := 600.0
+const ISL_X0 := -180.0       # ilha: cidade + praia (x de ISL_X0 até SHORE_X, z de ISL_Z0 até ISL_Z1)
+const ISL_Z0 := -200.0
+const ISL_Z1 := 200.0
+const PEN_X0 := -520.0       # península estreita a oeste só com o aeroporto (z de −PEN_Z a PEN_Z)
+const PEN_Z := 50.0
+
+## retângulos de terra (o resto é mar)
+static func land_rects() -> Array:
+	return [Rect2(ISL_X0, ISL_Z0, SHORE_X - ISL_X0, ISL_Z1 - ISL_Z0), Rect2(PEN_X0, -PEN_Z, ISL_X0 - PEN_X0 + 2.0, PEN_Z * 2.0)]
+
+## bordas de costão: [início, fim, normal para o mar]
+static func rim_edges() -> Array:
+	return [
+		[Vector3(ISL_X0, 0, ISL_Z1), Vector3(SHORE_X - 6.0, 0, ISL_Z1), Vector3(0, 0, 1)],
+		[Vector3(ISL_X0, 0, ISL_Z0), Vector3(SHORE_X - 6.0, 0, ISL_Z0), Vector3(0, 0, -1)],
+		[Vector3(ISL_X0, 0, PEN_Z), Vector3(ISL_X0, 0, ISL_Z1), Vector3(-1, 0, 0)],
+		[Vector3(ISL_X0, 0, ISL_Z0), Vector3(ISL_X0, 0, -PEN_Z), Vector3(-1, 0, 0)],
+		[Vector3(PEN_X0, 0, PEN_Z), Vector3(ISL_X0, 0, PEN_Z), Vector3(0, 0, 1)],
+		[Vector3(PEN_X0, 0, -PEN_Z), Vector3(ISL_X0, 0, -PEN_Z), Vector3(0, 0, -1)],
+		[Vector3(PEN_X0, 0, -PEN_Z), Vector3(PEN_X0, 0, PEN_Z), Vector3(-1, 0, 0)]]
+var fish_spots: Array = []   # [pos do pescador, yaw]
 
 ## distância (m) da água até a ilha (0 = na beira); negativo = em terra
 func sea_dist(x: float, z: float) -> float:
-	var dx := maxf(x - SHORE_X, ISL_X0 - 24.0 - x)
-	var dz := maxf(z - (ISL_Z1 + 24.0), (ISL_Z0 - 24.0) - z)
-	if dx > 0.0 and dz > 0.0:
-		return Vector2(dx, dz).length()
-	return maxf(dx, dz)
+	# leste: a água começa na linha da praia; nos outros lados, 24 m depois da borda (costão)
+	var best := 1e9
+	for r in land_rects():
+		var x1: float = SHORE_X if r.end.x >= SHORE_X else r.end.x + 24.0
+		var dx := maxf(x - x1, r.position.x - 24.0 - x)
+		var dz := maxf(z - (r.end.y + 24.0), (r.position.y - 24.0) - z)
+		var d := Vector2(dx, dz).length() if dx > 0.0 and dz > 0.0 else maxf(dx, dz)
+		best = minf(best, d)
+	return best
 
 func is_water(x: float, z: float) -> bool:
 	if absf(x) > 2950.0 or absf(z) > 3450.0:
@@ -155,11 +177,17 @@ static func marker(parent: Node, pos: Vector3, col: Color, r := 1.2) -> MeshInst
 func _beach() -> void:
 	# ilha: praia larga a leste e faixas de areia com rampa até o leito nos outros 3 lados
 	var east := [[BEACH_X0, 0.0], [BEACH_X0 + 22.0, 1.1], [SHORE_X - 6.0, 1.1], [SHORE_X + 8.0, 0.0], [SHORE_X + 70.0, SEA_FLOOR], [SHORE_X + 110.0, SEA_FLOOR]]
-	var rim := [[0.0, 0.0], [10.0, 1.1], [20.0, 1.1], [30.0, 0.0], [90.0, SEA_FLOOR], [120.0, SEA_FLOOR]]
+	# costão de pedra nos outros 3 lados (sem praia): rampa de rocha que cai para o fundo
+	var rim := [[0.0, 0.0], [8.0, 0.5], [16.0, 0.9], [22.0, 0.6], [25.0, -0.8], [60.0, SEA_FLOOR], [120.0, SEA_FLOOR]]
 	_strip("x", 1.0, 0.0, east, ISL_Z0 - 120.0, ISL_Z1 + 120.0)
-	_strip("x", -1.0, ISL_X0, rim, ISL_Z0 - 120.0, ISL_Z1 + 120.0)
-	_strip("z", 1.0, ISL_Z1, rim, ISL_X0 - 120.0, SHORE_X + 10.0)
-	_strip("z", -1.0, ISL_Z0, rim, ISL_X0 - 120.0, SHORE_X + 10.0)
+	_strip("z", 1.0, ISL_Z1, rim, ISL_X0 - 120.0, SHORE_X - 6.0, M.rock(Color(0.32, 0.3, 0.27)))
+	_strip("z", -1.0, ISL_Z0, rim, ISL_X0 - 120.0, SHORE_X - 6.0, M.rock(Color(0.32, 0.3, 0.27)))
+	_strip("x", -1.0, ISL_X0, rim, PEN_Z, ISL_Z1 + 120.0, M.rock(Color(0.32, 0.3, 0.27)))
+	_strip("x", -1.0, ISL_X0, rim, ISL_Z0 - 120.0, -PEN_Z, M.rock(Color(0.32, 0.3, 0.27)))
+	_strip("z", 1.0, PEN_Z, rim, PEN_X0 - 120.0, ISL_X0, M.rock(Color(0.32, 0.3, 0.27)))
+	_strip("z", -1.0, -PEN_Z, rim, PEN_X0 - 120.0, ISL_X0, M.rock(Color(0.32, 0.3, 0.27)))
+	_strip("x", -1.0, PEN_X0, rim, -PEN_Z - 120.0, PEN_Z + 120.0, M.rock(Color(0.32, 0.3, 0.27)))
+	_rocks()
 	# leito do mar em volta de tudo (−12 m) e chão das salas das lojas
 	var fl := CollisionShape3D.new()
 	var fb := BoxShape3D.new()
@@ -180,10 +208,17 @@ func _beach() -> void:
 	bed.material_override = M.sand()
 	bed.position = Vector3(0, SEA_FLOOR, 0)
 	add_child(bed)
-	# mar nos 4 lados (sem cobrir a ilha)
+	# mar em volta (planos que não cobrem a terra: faixas acima/abaixo e dos lados da península)
 	var wm := M.water()
-	for r in [Rect2(SHORE_X - 4.0, -3500.0, 3000.0 - SHORE_X + 4.0, 7000.0), Rect2(-3000.0, -3500.0, 3000.0 + ISL_X0 - 25.0, 7000.0),
-			Rect2(ISL_X0 - 25.0, ISL_Z1 + 25.0, SHORE_X - 4.0 - ISL_X0 + 25.0, 3500.0 - ISL_Z1 - 25.0), Rect2(ISL_X0 - 25.0, -3500.0, SHORE_X - 4.0 - ISL_X0 + 25.0, 3500.0 + ISL_Z0 - 25.0)]:
+	var o := 25.0
+	var rs := [
+		Rect2(SHORE_X - 4.0, -3500.0, 3000.0 - SHORE_X + 4.0, 7000.0),                       # leste
+		Rect2(-3000.0, -3500.0, 3000.0 + SHORE_X - 4.0, 3500.0 + ISL_Z0 - o),                 # sul
+		Rect2(-3000.0, ISL_Z1 + o, 3000.0 + SHORE_X - 4.0, 3500.0 - ISL_Z1 - o),              # norte
+		Rect2(-3000.0, ISL_Z0 - o, 3000.0 + PEN_X0 - o, ISL_Z1 - ISL_Z0 + 2.0 * o),           # oeste da península
+		Rect2(PEN_X0 - o, PEN_Z + o, ISL_X0 - PEN_X0, ISL_Z1 - PEN_Z),                        # ao norte da península
+		Rect2(PEN_X0 - o, ISL_Z0 - o, ISL_X0 - PEN_X0, ISL_Z1 - PEN_Z)]                       # ao sul da península
+	for r in rs:
 		var wmi := MeshInstance3D.new()
 		var pm := PlaneMesh.new()
 		pm.size = r.size
@@ -200,14 +235,14 @@ func _beach() -> void:
 	var cols := [Color(0.9, 0.2, 0.15), Color(0.15, 0.45, 0.85), Color(0.95, 0.8, 0.1), Color(0.2, 0.7, 0.4)]
 	for k in 22:
 		var x := rng.randf_range(BEACH_X0 + 26.0, SHORE_X - 9.0)
-		var z := rng.randf_range(-300.0, 300.0)
+		var z := rng.randf_range(-170.0, 170.0)
 		var c: Color = cols[k % cols.size()]
 		_box("beach", Vector3(0.06, 2.4, 0.06), Vector3(x, 2.3, z), M.plain(Color(0.9, 0.9, 0.9), 0.5), false)
 		_box("beach", Vector3(2.6, 0.12, 2.6), Vector3(x, 3.45, z), M.plain(c, 0.6), false, rng.randf() * PI)
 		_box("beach", Vector3(1.8, 0.03, 0.9), Vector3(x + 1.2, 1.13, z + 0.6), M.plain(cols[(k + 1) % cols.size()], 0.8), false, rng.randf() * PI)
 	for k in 30:
 		var x := rng.randf_range(BEACH_X0 + 6.0, BEACH_X0 + 24.0)
-		var z := rng.randf_range(-400.0, 400.0)
+		var z := rng.randf_range(-185.0, 185.0)
 		var y := clampf((x - BEACH_X0) / 22.0, 0.0, 1.0) * 1.1
 		var h := rng.randf_range(6.0, 8.5)
 		for q in 6:
@@ -230,7 +265,7 @@ func _beach() -> void:
 			_box("beach", Vector3(0.3, 3.0, 0.3), Vector3(x, 0.3, pz + 1.8 * s), M.wood(), false)
 	_box("beach", Vector3(4.0, 0.25, 16.0), Vector3(SHORE_X + 61.0, 1.6, pz + 8.0), M.wood(), true)
 	boat_spots = [[Vector3(SHORE_X + 52.0, 0.4, pz + 6.5), PI * 0.5], [Vector3(SHORE_X + 52.0, 0.4, pz - 5.0), PI * 0.5], [Vector3(SHORE_X + 70.0, 0.4, pz + 12.0), 0.0]]
-	beach_loop = [Vector3(BEACH_X0 + 30.0, 1.1, -200.0), Vector3(SHORE_X - 8.0, 1.1, -200.0), Vector3(SHORE_X - 8.0, 1.1, 200.0), Vector3(BEACH_X0 + 30.0, 1.1, 200.0)]
+	beach_loop = [Vector3(BEACH_X0 + 30.0, 1.1, -170.0), Vector3(SHORE_X - 8.0, 1.1, -170.0), Vector3(SHORE_X - 8.0, 1.1, 170.0), Vector3(BEACH_X0 + 30.0, 1.1, 170.0)]
 
 # ---------------------------------------------------------------- aeroporto
 func _airfield() -> void:
@@ -240,31 +275,31 @@ func _airfield() -> void:
 		_box("air", Vector3(6.0, 0.02, 0.5), Vector3(AIR_X - 160.0 + k * 14.0, 0.07, 0), M.plain(Color(0.92, 0.92, 0.9), 0.6), false)
 	for s in [-1.0, 1.0]:
 		_box("air", Vector3(340.0, 0.02, 0.35), Vector3(AIR_X, 0.07, 11.0 * s), M.plain(Color(0.92, 0.92, 0.9), 0.6), false)
-	# pista de táxi até a cidade
-	_box("air", Vector3(150.0, 0.06, 14.0), Vector3(-240.0, 0.03, 40.0), asph, false)
-	# hangar
-	var hx := -250.0
-	var hz := 75.0
-	_box("air", Vector3(40.0, 12.0, 0.6), Vector3(hx, 6.0, hz + 14.0), M.concrete(Color(0.55, 0.57, 0.6)), true)
+	# pátio de concreto entre a pista e o hangar
+	_box("air", Vector3(60.0, 0.05, 20.0), Vector3(-300.0, 0.025, -22.0), M.concrete(Color(0.5, 0.5, 0.5)), false)
+	# hangar (ao sul da pista, porta virada para ela)
+	var hx := -300.0
+	var hz := -30.0
+	_box("air", Vector3(40.0, 12.0, 0.6), Vector3(hx, 6.0, hz - 14.0), M.concrete(Color(0.55, 0.57, 0.6)), true)
 	for s in [-1.0, 1.0]:
 		_box("air", Vector3(0.6, 12.0, 28.0), Vector3(hx + 20.0 * s, 6.0, hz), M.concrete(Color(0.55, 0.57, 0.6)), true)
 	_box("air", Vector3(41.0, 0.8, 29.0), Vector3(hx, 12.3, hz), M.plain(Color(0.35, 0.38, 0.42), 0.4, 0.6), true)
 	_box("air", Vector3(40.0, 0.06, 28.0), Vector3(hx, 0.03, hz), M.concrete(Color(0.5, 0.5, 0.5)), false)
-	_label("HANGAR", Vector3(hx, 10.5, hz - 14.4), 160, Color(1, 0.85, 0.2), PI)
+	_label("HANGAR", Vector3(hx, 10.5, hz + 14.4), 160, Color(1, 0.85, 0.2), 0.0)
 	# torre de controle
 	var tx := -215.0
-	var tz := -45.0
+	var tz := 32.0
 	_box("air", Vector3(5.0, 18.0, 5.0), Vector3(tx, 9.0, tz), M.concrete(Color(0.82, 0.82, 0.8)), true)
 	_box("air", Vector3(8.0, 3.5, 8.0), Vector3(tx, 19.8, tz), M.plain(Color(0.15, 0.25, 0.3), 0.05, 0.8), true)
 	_box("air", Vector3(8.6, 0.5, 8.6), Vector3(tx, 21.8, tz), M.concrete(Color(0.82, 0.82, 0.8)), false)
 	# heliponto
-	var px := -205.0
-	var pz := 40.0
+	var px := -420.0
+	var pz := 2.0
 	_box("air", Vector3(18.0, 0.12, 18.0), Vector3(px, 0.06, pz + 30.0), M.concrete(Color(0.35, 0.36, 0.38)), false)
 	_box("air", Vector3(1.2, 0.03, 8.0), Vector3(px - 2.5, 0.13, pz + 30.0), M.plain(Color(0.95, 0.85, 0.1), 0.6), false)
 	_box("air", Vector3(1.2, 0.03, 8.0), Vector3(px + 2.5, 0.13, pz + 30.0), M.plain(Color(0.95, 0.85, 0.1), 0.6), false)
 	_box("air", Vector3(4.0, 0.03, 1.2), Vector3(px, 0.13, pz + 30.0), M.plain(Color(0.95, 0.85, 0.1), 0.6), false)
-	plane_spots = [[Vector3(-195.0, 0.0, 0.0), -PI * 0.5], [Vector3(hx, 0.0, hz), PI]]
+	plane_spots = [[Vector3(-195.0, 0.0, 0.0), -PI * 0.5], [Vector3(hx, 0.0, hz), 0.0]]
 	heli_spots = [[Vector3(px, 0.15, pz + 30.0), -PI * 0.5]]
 	_label("AEROPORTO", Vector3(-185.0, 6.0, 20.0), 200, Color(0.9, 0.95, 1.0), PI * 0.5, 0.012)
 
@@ -362,7 +397,7 @@ func _interior(type: String, o: Vector3) -> void:
 
 
 ## faixa de areia com rampa: eixo "x" (perfil em x, extensão em z) ou "z"; sign = para fora da ilha
-func _strip(axis: String, sgn: float, edge: float, prof: Array, a0: float, a1: float) -> void:
+func _strip(axis: String, sgn: float, edge: float, prof: Array, a0: float, a1: float, mat: Material = null) -> void:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for i in prof.size() - 1:
@@ -386,10 +421,65 @@ func _strip(axis: String, sgn: float, edge: float, prof: Array, a0: float, a1: f
 	var sm := st.commit()
 	var mi := MeshInstance3D.new()
 	mi.mesh = sm
-	mi.material_override = M.sand()
+	mi.material_override = mat if mat else M.sand()
 	add_child(mi)
 	var cs := CollisionShape3D.new()
 	var shp := sm.create_trimesh_shape()
 	shp.backface_collision = true
 	cs.shape = shp
 	body.add_child(cs)
+
+# ---------------------------------------------------------------- costão: pedras, pontos de pesca e farol
+func _rocks() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 515
+	var rk := M.rock(Color(0.5, 0.48, 0.44))
+	var rk2 := M.rock(Color(0.42, 0.38, 0.33))
+	# pedras ao longo das bordas de costão
+	var edges := []
+	for re in rim_edges():
+		var a0: Vector3 = re[0]
+		var a1: Vector3 = re[1]
+		var L := a0.distance_to(a1)
+		var t := 0.0
+		while t < L:
+			edges.append([a0.lerp(a1, t / L), re[2]])
+			t += rng.randf_range(5.0, 9.0)
+	for e in edges:
+		var out: Vector3 = e[1]
+		var k := rng.randi_range(1, 3)
+		for q in k:
+			var d := rng.randf_range(6.0, 26.0)
+			var sz := Vector3(rng.randf_range(1.5, 4.5), rng.randf_range(1.0, 3.2), rng.randf_range(1.5, 4.5)) * (1.0 + d / 40.0)
+			var side := Vector3(out.z, 0, -out.x) * rng.randf_range(-3.0, 3.0)
+			var pos: Vector3 = e[0] + out * d + side
+			var gy := 0.6 if d < 22.0 else -1.0
+			pos.y = gy + sz.y * 0.3
+			_box("rocks", sz, pos, rk if rng.randf() < 0.6 else rk2, d < 20.0 and sz.y > 1.6, rng.randf() * PI)
+	# pontos de pesca: deque de madeira saindo do costão, banco, balde e pescador com vara
+	var spots := [[Vector3(-90.0, 0, ISL_Z1), Vector3(0, 0, 1)], [Vector3(70.0, 0, ISL_Z1), Vector3(0, 0, 1)],
+			[Vector3(-60.0, 0, ISL_Z0), Vector3(0, 0, -1)], [Vector3(110.0, 0, ISL_Z0), Vector3(0, 0, -1)], [Vector3(ISL_X0, 0, 130.0), Vector3(-1, 0, 0)],
+			[Vector3(-380.0, 0, PEN_Z), Vector3(0, 0, 1)], [Vector3(-260.0, 0, -PEN_Z), Vector3(0, 0, -1)]]
+	for sp in spots:
+		var o: Vector3 = sp[0]
+		var out: Vector3 = sp[1]
+		var yaw := atan2(out.x, out.z)
+		var len_ := 30.0
+		var mid := o + out * (len_ * 0.5 + 6.0)
+		var dims := Vector3(3.0, 0.25, len_) if absf(out.z) > 0.5 else Vector3(len_, 0.25, 3.0)
+		_box("rocks", dims, mid + Vector3(0, 1.6, 0), M.wood(), true)
+		var tip := o + out * (len_ + 5.0)
+		for t in range(0, int(len_), 5):
+			for s2 in [-1.0, 1.0]:
+				var side: Vector3 = Vector3(out.z, 0, -out.x) * 1.4 * s2
+				_box("rocks", Vector3(0.25, 3.4, 0.25), o + out * (8.0 + t) + side + Vector3(0, 0.0, 0), M.wood(), false)
+		_box("rocks", Vector3(1.6, 0.5, 0.5), tip - out * 1.5 + Vector3(0, 2.0, 0), M.wood(), false, yaw + PI * 0.5)
+		_box("rocks", Vector3(0.4, 0.45, 0.4), tip - out * 1.0 + Vector3(0.9, 1.95, 0), M.plain(Color(0.2, 0.45, 0.8), 0.5), false)
+		fish_spots.append([tip - out * 1.2 + Vector3(0, 1.75, 0), yaw])
+	# farol no canto noroeste
+	var lh := Vector3(PEN_X0 + 6.0, 0.0, PEN_Z - 8.0)
+	for i in 6:
+		var w := 4.2 - i * 0.35
+		_box("rocks", Vector3(w, 3.0, w), lh + Vector3(0, 1.5 + i * 3.0, 0), M.plain(Color(0.92, 0.92, 0.9) if i % 2 == 0 else Color(0.8, 0.12, 0.1), 0.6), true)
+	_box("rocks", Vector3(2.4, 2.0, 2.4), lh + Vector3(0, 19.0, 0), M.emissive(Color(1.0, 0.9, 0.5), 2.5), false)
+	_box("rocks", Vector3(3.0, 0.4, 3.0), lh + Vector3(0, 20.2, 0), M.plain(Color(0.15, 0.15, 0.15), 0.5), false)
