@@ -18,6 +18,7 @@ var aiming := false
 var punch_t := 0.0
 var punch_kind := 0      # 0 direto direita, 1 direto esquerda, 2 chute
 var swimming := false
+var moto_pose := false
 var guard := false       # guarda alta (modo luta)
 var throw_t := 0.0
 var gun: Node3D
@@ -186,6 +187,19 @@ func animate(speed: float, dt: float) -> void:
 			fo[k].rotation.x = -0.3
 		return
 	bones.hips.rotation.x = 0.0
+	if sitting and moto_pose:
+		# moto: pernas abertas apoiadas nas pedaleiras, braços no guidão
+		for k in 2:
+			var sg := 1.0 if k == 0 else -1.0
+			th[k].rotation.x = -1.15
+			th[k].rotation.z = sg * 0.18
+			sh[k].rotation.x = 1.55
+			up[k].rotation.x = -1.05
+			up[k].rotation.z = sg * 0.12
+			fo[k].rotation.x = -0.35
+		bones.chest.rotation.x = 0.15
+		bones.head.rotation.x = -0.1
+		return
 	if sitting:
 		for k in 2:
 			th[k].rotation.x = -1.45

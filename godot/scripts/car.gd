@@ -46,6 +46,9 @@ var door_node: Node3D
 var door_cover: MeshInstance3D
 var door_open := 0.0
 var parked := false
+var broken_wheels: Array = []
+var lights_broken := false
+const VMAX := {"hatch": 150.0, "sedan": 165.0, "suv": 155.0, "pickup": 150.0, "sport": 230.0, "police": 190.0, "taxi": 160.0, "moto": 175.0, "bus": 90.0}
 
 ## kind: sedan, hatch, suv, pickup, sport ou police (modelo gerado por carmodel.gd).
 func setup(kind: String, paint: Color) -> void:
@@ -193,12 +196,12 @@ func take_damage(d: float) -> void:
 	if dead or d <= 0.0:
 		return
 	hp -= d
-	if hp < 45.0 and _smoke == null:
+	if hp < 35.0 and _smoke == null:
 		_smoke = FX.smoke_emitter(model_root, Vector3(0, body_size.y * 0.6, body_size.z * 0.38))
-	if hp < 18.0 and _fire == null:
+	if hp < 12.0 and _fire == null:
 		_fire = FX.fire_emitter(model_root, Vector3(0, body_size.y * 0.55, body_size.z * 0.38))
-		_fire_t = 4.5
-	if hp <= -25.0:
+		_fire_t = 6.0
+	if hp <= -30.0:
 		explode()
 
 func explode() -> void:
@@ -222,6 +225,46 @@ func explode() -> void:
 	apply_torque_impulse(Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)) * mass * 1.5)
 	destroyed.emit(self)
 	get_tree().create_timer(14.0).timeout.connect(func(): if is_instance_valid(_fire): _fire.emitting = false)
+
+var _lastv_prev := Vector3.INF
+var _dv_local := Vector3.ZERO
+
+## batida: amassa do lado do impacto, quebra faróis (frente) e, se forte, solta uma roda
+func _impact(dv: float) -> void:
+	_dent(dv)
+	var ld := _dv_local
+	var front := ld.z < -absf(ld.x) * 0.6     # perdeu velocidade para a frente = bateu de frente
+	var back := ld.z > absf(ld.x) * 0.6
+	if model_root:
+		var k := clampf((dv - 9.0) * 0.005, 0.0, 0.05)
+		if front:
+			model_root.position.z -= k * body_size.z * 0.5
+		elif back:
+			model_root.position.z += k * body_size.z * 0.5
+		else:
+			model_root.scale.x = maxf(0.9, model_root.scale.x - k)
+	if front and dv > 11.0 and not lights_broken:
+		lights_broken = true
+		var lf := model_root.find_child("lights_front", true, false)
+		if lf:
+			lf.visible = false
+		FX.sparks(get_tree().current_scene, global_transform * Vector3(0, 0.7, body_size.z * 0.5))
+	if dv > 15.0 and randf() < 0.45 and wheels.size() >= 4 and broken_wheels.size() < 2:
+		var side := -signf(ld.x) if absf(ld.x) > 2.0 else (1.0 if randf() < 0.5 else -1.0)
+		var best: VehicleWheel3D = null
+		for w in wheels:
+			if w in broken_wheels:
+				continue
+			if signf(w.position.x) == side and ((w.position.z > 0.0) == (not back)):
+				best = w
+		if best:
+			broken_wheels.append(best)
+			for n in best.get_children():
+				if n is Node3D:
+					n.visible = false
+			best.wheel_friction_slip = 0.45
+			best.suspension_stiffness *= 0.35
+			FX.debris(get_tree().current_scene, best.global_position, Color(0.06, 0.06, 0.06), linear_velocity * 0.6 + Vector3(side * 3.0, 4.0, 0), Vector3(0.24, wheel_r * 2.0, wheel_r * 2.0))
 
 func _dent(dv: float) -> void:
 	if model_root == null:
@@ -258,13 +301,15 @@ func _physics_process(dt: float) -> void:
 			_lights[k].visible = int(_t * 6.0 + k) % 2 == 0
 	# batida: variação brusca de velocidade
 	var dvv := (linear_velocity - _lastv).length()
+	_dv_local = global_transform.basis.inverse() * (linear_velocity - _lastv)
 	_lastv = linear_velocity
 	_crash_cd -= dt
-	if dvv > 6.5 and _crash_cd <= 0.0 and _t > 1.0:
-		_crash_cd = 0.3
-		take_damage((dvv - 6.5) * (1.6 if kind == "bus" else 4.5))
-		_dent(dvv)
+	if dvv > 9.0 and _crash_cd <= 0.0 and _t > 1.0:
+		_crash_cd = 0.35
+		take_damage((dvv - 9.0) * (0.9 if kind == "bus" else 2.3))
+		_impact(dvv)
 		crashed.emit(self, dvv)
+	_lastv_prev = linear_velocity
 	if _fire_t > 0.0 and not dead:
 		_fire_t -= dt
 		if _fire_t <= 0.0:
@@ -288,6 +333,13 @@ func _physics_process(dt: float) -> void:
 		else:
 			eng = throttle * max_engine * 0.45
 	brk = maxf(brk, brake_in * max_brake)
+	# limite de velocidade por modelo (e ré até 30 km/h)
+	var vmax: float = VMAX.get(kind, 160.0) / 3.6
+	if fs > vmax and eng > 0.0:
+		eng = 0.0
+		brk = maxf(brk, max_brake * 0.05)
+	if fs < -8.0 and eng < 0.0:
+		eng = 0.0
 	if handbrake:
 		brk = max_brake * 0.6
 	engine_force = eng
@@ -304,7 +356,7 @@ func _physics_process(dt: float) -> void:
 		if lean:
 			lean.rotation.z = lerpf(lean.rotation.z, -steering * clampf(absf(fs) / 12.0, 0.0, 1.0) * 0.9, minf(1.0, dt * 5.0))
 	for w in wheels:
-		if w.use_as_traction:
+		if w.use_as_traction and not (w in broken_wheels):
 			w.wheel_friction_slip = 1.6 if handbrake else 2.6
 
 func _ai(dt: float) -> void:

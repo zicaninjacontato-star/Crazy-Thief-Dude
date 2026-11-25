@@ -249,7 +249,7 @@ func _station() -> void:
 	_label("DELEGACIA", c + Vector3(0, 5.3, 2.25), 180, Color(0.85, 0.92, 1.0), PI, 0.012)
 	for s in [-1.0, 1.0]:
 		_box("st", Vector3(0.4, 0.4, 0.4), c + Vector3(7.5 * s, 4.75, 2.2), M.emissive(Color(0.15, 0.35, 1.0), 3.0), false)
-	var road_z: float = c.z - 4.4
+	var road_z: float = c.z - 2.7     # junto ao meio-fio (fora da faixa de rolamento)
 	for k in 3:
 		station_cars.append([Vector3(c.x - 10.0 + k * 7.0, 0.7, road_z), PI * 0.5])
 

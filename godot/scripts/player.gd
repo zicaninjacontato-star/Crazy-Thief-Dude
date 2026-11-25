@@ -27,6 +27,8 @@ func _ready() -> void:
 	add_child(cs)
 	rebuild_body()
 	floor_snap_length = 0.3
+	collision_layer = 2
+	collision_mask = 1
 
 const OUTFIT0 := {"shirt": "216b42", "pants": "1f2945", "hair": "291a0f", "jacket": "", "hat": 0, "hat_c": "1a1a1f", "glasses": false}
 var outfit: Dictionary = OUTFIT0.duplicate()

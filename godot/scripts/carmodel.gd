@@ -145,6 +145,8 @@ static func build(kind: String, paint: Color) -> Dictionary:
 	var det := SurfaceTool.new()
 	det.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var lit := SurfaceTool.new()
+	var litf := SurfaceTool.new()
+	litf.begin(Mesh.PRIMITIVE_TRIANGLES)
 	lit.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var zf := L * 0.5
 	var yf: float = _top(top, zf - 0.15)
@@ -155,7 +157,7 @@ static func build(kind: String, paint: Color) -> Dictionary:
 	var pc: Color = Color(0.04, 0.04, 0.05) if police else paint
 	var za := _first_cabin_z(top, belt, true)
 	for s in [-1.0, 1.0]:
-		_ell(lit, Vector3(hwf * 0.72 * s, yf - 0.1, zf - 0.07), Vector3(0.36, 0.1, 0.12), head_c)
+		_ell(litf, Vector3(hwf * 0.72 * s, yf - 0.1, zf - 0.07), Vector3(0.36, 0.1, 0.12), head_c)
 		_ell(lit, Vector3(hwf * 0.75 * s, _top(top, -zf + 0.15) - 0.1, -zf + 0.06), Vector3(0.34, 0.09, 0.1), tail_c)
 		_ell(det, Vector3((W * 0.5 + 0.06) * s, belt + 0.1, za - 0.15), Vector3(0.14, 0.09, 0.2), pc)
 		_ell(det, Vector3((W * 0.5 - 0.01) * s, belt - 0.08, 0.25), Vector3(0.03, 0.03, 0.14), chrome)
@@ -183,6 +185,8 @@ static func build(kind: String, paint: Color) -> Dictionary:
 			_box(det, Vector3(0.02, 0.08, 0.16), Vector3(-W * 0.5 + 0.02, 0.62, zz * 0.18), Color(0.05, 0.05, 0.05) if zz % 2 == 0 else Color(0.95, 0.95, 0.95))
 	_commit(root, det, vc_mat())
 	_commit(root, lit, vc_lit())
+	_commit(root, litf, vc_lit())
+	root.get_child(root.get_child_count() - 1).name = "lights_front"
 	# --- rodas (1 malha cada: pneu + aro + raios) ---
 	var wheels := []
 	var tire := CylinderMesh.new()

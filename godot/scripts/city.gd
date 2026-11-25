@@ -205,6 +205,9 @@ func _park(cx: float, cz: float, inner: float) -> void:
 
 var _trees: Array = []
 var _lamps: Array = []
+var props: Array = []        # postes e árvores quebráveis
+var pmm := {}                # MultiMeshInstance3D: pole, head, trunk, crown
+var _pgrid := {}
 
 func _markings() -> void:
 	# faixas tracejadas no centro de cada rua e faixas de pedestres nos cruzamentos
@@ -231,6 +234,7 @@ func _markings() -> void:
 			for side in [-1.0, 1.0]:
 				for st in range(-5, 6):
 					zebra.append(Transform3D(Basis(), Vector3(road + st * 1.2, 0.012, cross + side * (ROADW * 0.5 + 1.5))))
+					zebra.append(Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(cross + side * (ROADW * 0.5 + 1.5), 0.012, road + st * 1.2)))
 	_multimesh(_mesh_box(Vector3(0.15, 0.02, 3.0)), M.plain(Color(0.85, 0.75, 0.2), 0.6), dash)
 	_multimesh(_mesh_box(Vector3(0.6, 0.02, 2.6)), M.plain(Color(0.86, 0.86, 0.84), 0.6), zebra)
 
@@ -248,6 +252,7 @@ func _props() -> void:
 				var o := s * (BLOCK / 5.0)
 				for p in [Vector3(cx + o, 0.15, cz - r), Vector3(cx + o, 0.15, cz + r), Vector3(cx - r, 0.15, cz + o), Vector3(cx + r, 0.15, cz + o)]:
 					if s % 2 == 0:
+						props.append({"type": "lamp", "pos": p, "idx": lamps.size(), "shape": _prop_shape(p, 0.15, 7.0), "alive": true})
 						lamps.append(Transform3D(Basis(), p + Vector3(0, 3.5, 0)))
 						heads.append(Transform3D(Basis(), p + Vector3(0, 7.0, 0)))
 						_lamps.append(p)
@@ -256,42 +261,127 @@ func _props() -> void:
 						var sc := rng.randf_range(0.85, 1.25)
 						crowns.append(Transform3D(Basis().scaled(Vector3(sc, sc * 0.9, sc)), p + Vector3(0, 4.2, 0)))
 						_trees.append(p)
-						var cs := CollisionShape3D.new()
-						var cy := CylinderShape3D.new()
-						cy.radius = 0.25
-						cy.height = 3.0
-						cs.shape = cy
-						cs.position = p + Vector3(0, 1.5, 0)
-						body.add_child(cs)
+						props.append({"type": "tree", "pos": p, "idx": trunks.size() - 1, "shape": _prop_shape(p, 0.25, 3.0), "alive": true, "sc": sc})
 	var pole := CylinderMesh.new()
 	pole.top_radius = 0.07
 	pole.bottom_radius = 0.11
 	pole.height = 7.0
 	pole.radial_segments = 8
 	pole.rings = 1
-	_multimesh(pole, M.plain(Color(0.18, 0.19, 0.2), 0.4, 0.8), lamps)
+	pmm["pole"] = _multimesh(pole, M.plain(Color(0.18, 0.19, 0.2), 0.4, 0.8), lamps)
 	lamp_mat = M.emissive(Color(1.0, 0.86, 0.62), 1.5).duplicate()
-	_multimesh(_mesh_box(Vector3(0.5, 0.18, 0.9)), lamp_mat, heads)
+	pmm["head"] = _multimesh(_mesh_box(Vector3(0.5, 0.18, 0.9)), lamp_mat, heads)
 	var trunk := CylinderMesh.new()
 	trunk.top_radius = 0.14
 	trunk.bottom_radius = 0.22
 	trunk.height = 3.0
 	trunk.radial_segments = 8
 	trunk.rings = 1
-	_multimesh(trunk, M.bark(), trunks)
+	pmm["trunk"] = _multimesh(trunk, M.bark(), trunks)
 	var crown := SphereMesh.new()
 	crown.radius = 2.2
 	crown.height = 3.6
 	crown.radial_segments = 12
 	crown.rings = 7
-	_multimesh(crown, M.leaves(), crowns)
+	pmm["crown"] = _multimesh(crown, M.leaves(), crowns)
+	for i in props.size():
+		var k := _pcell(props[i].pos)
+		if not _pgrid.has(k):
+			_pgrid[k] = []
+		_pgrid[k].append(i)
 
 func _mesh_box(size: Vector3) -> BoxMesh:
 	var b := BoxMesh.new()
 	b.size = size
 	return b
 
-func _multimesh(mesh: Mesh, mat: Material, xf: Array) -> void:
+func _prop_shape(p: Vector3, r: float, h: float) -> CollisionShape3D:
+	var cs := CollisionShape3D.new()
+	var cy := CylinderShape3D.new()
+	cy.radius = r
+	cy.height = h
+	cs.shape = cy
+	cs.position = p + Vector3(0, h * 0.5, 0)
+	body.add_child(cs)
+	return cs
+
+func _pcell(p: Vector3) -> Vector2i:
+	return Vector2i(floori(p.x / 10.0), floori(p.z / 10.0))
+
+## postes e árvores perto de 'p' (índices em props)
+func props_near(p: Vector3) -> Array:
+	var c := _pcell(p)
+	var out := []
+	for dx in [-1, 0, 1]:
+		for dz in [-1, 0, 1]:
+			var k := c + Vector2i(dx, dz)
+			if _pgrid.has(k):
+				for i in _pgrid[k]:
+					if props[i].alive:
+						out.append(i)
+	return out
+
+## derruba um poste/árvore: some da MultiMesh e vira corpo rígido empurrado pela batida
+func break_prop(i: int, vel: Vector3) -> void:
+	var pr: Dictionary = props[i]
+	if not pr.alive:
+		return
+	pr.alive = false
+	pr.shape.queue_free()
+	var zero := Transform3D(Basis().scaled(Vector3(0.001, 0.001, 0.001)), Vector3(0, -50, 0))
+	var rb := RigidBody3D.new()
+	rb.collision_layer = 4
+	rb.collision_mask = 1
+	var p: Vector3 = pr.pos
+	if pr.type == "lamp":
+		pmm.pole.multimesh.set_instance_transform(pr.idx, zero)
+		pmm.head.multimesh.set_instance_transform(pr.idx, zero)
+		_lamps.erase(p)
+		rb.mass = 90.0
+		_rb_part(rb, pmm.pole.multimesh.mesh, pmm.pole.material_override, Vector3(0, 3.5, 0), Basis())
+		_rb_part(rb, pmm.head.multimesh.mesh, pmm.head.material_override, Vector3(0, 7.0, 0), Basis())
+		var cs := CollisionShape3D.new()
+		var bx := BoxShape3D.new()
+		bx.size = Vector3(0.25, 7.0, 0.25)
+		cs.shape = bx
+		cs.position = Vector3(0, 3.5, 0)
+		rb.add_child(cs)
+	else:
+		pmm.trunk.multimesh.set_instance_transform(pr.idx, zero)
+		pmm.crown.multimesh.set_instance_transform(pr.idx, zero)
+		_trees.erase(p)
+		rb.mass = 350.0
+		var sc: float = pr.sc
+		_rb_part(rb, pmm.trunk.multimesh.mesh, pmm.trunk.material_override, Vector3(0, 1.5, 0), Basis())
+		_rb_part(rb, pmm.crown.multimesh.mesh, pmm.crown.material_override, Vector3(0, 4.2, 0), Basis().scaled(Vector3(sc, sc * 0.9, sc)))
+		var cs2 := CollisionShape3D.new()
+		var bx2 := BoxShape3D.new()
+		bx2.size = Vector3(0.45, 3.0, 0.45)
+		cs2.shape = bx2
+		cs2.position = Vector3(0, 1.5, 0)
+		rb.add_child(cs2)
+		var cs3 := CollisionShape3D.new()
+		var sp := SphereShape3D.new()
+		sp.radius = 1.6
+		cs3.shape = sp
+		cs3.position = Vector3(0, 4.2, 0)
+		rb.add_child(cs3)
+	rb.center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
+	rb.center_of_mass = Vector3(0, 2.0, 0)
+	get_parent().add_child(rb)
+	rb.global_position = p + Vector3(0, 0.02, 0)
+	var dir := Vector3(vel.x, 0, vel.z)
+	rb.apply_impulse(dir * rb.mass * 0.45, Vector3(0, 2.5, 0))
+	rb.get_tree().create_timer(60.0).timeout.connect(rb.queue_free)
+
+func _rb_part(rb: RigidBody3D, mesh: Mesh, mat: Material, pos: Vector3, b: Basis) -> void:
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.material_override = mat
+	mi.transform = Transform3D(b, pos)
+	rb.add_child(mi)
+
+func _multimesh(mesh: Mesh, mat: Material, xf: Array) -> MultiMeshInstance3D:
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.mesh = mesh
@@ -302,6 +392,7 @@ func _multimesh(mesh: Mesh, mat: Material, xf: Array) -> void:
 	mmi.multimesh = mm
 	mmi.material_override = mat
 	add_child(mmi)
+	return mmi
 
 ## hospital e delegacia: placas grandes na calçada e pontos de reaparecimento
 func _landmarks() -> void:

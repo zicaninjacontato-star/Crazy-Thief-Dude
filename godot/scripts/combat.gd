@@ -63,6 +63,8 @@ func label() -> String:
 	return d.name if weapon == "fist" else "%s  %d" % [d.name, ammo.get(weapon, 0)]
 
 func _process(dt: float) -> void:
+	if main.god:
+		main.hp = 100.0
 	cool -= dt
 	aim_t -= dt
 	combo_t -= dt
@@ -436,7 +438,7 @@ func _get_up() -> void:
 	_equip()
 	p.global_position = Vector3(hips.x, maxf(hips.y - 0.9, p.global_position.y if p.global_position.y > 0.5 else 0.05), hips.z)
 	p.velocity = Vector3.ZERO
-	p.collision_layer = 1
+	p.collision_layer = 2
 	p.collision_mask = 1
 
 func _die() -> void:
@@ -479,7 +481,7 @@ func _respawn(pos: Vector3, text: String) -> void:
 	p.swimming = false
 	p.global_position = pos
 	p.velocity = Vector3.ZERO
-	p.collision_layer = 1
+	p.collision_layer = 2
 	p.collision_mask = 1
 	main.hp = 100.0
 	main.cam_yaw = 0.0

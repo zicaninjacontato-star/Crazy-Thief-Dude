@@ -171,7 +171,8 @@ func _press(k: String, on: bool) -> void:
 		"brake": brk = on
 		"sprint": sprint = on
 		"fire": fire = on
-		"aim": aim = on
+		"aim":
+			if on: aim = not aim
 		"weapon":
 			if on: weapon_pressed.emit()
 		"shop":
@@ -188,7 +189,7 @@ func _draw_controls() -> void:
 		root.draw_rect(Rect2(Vector2.ZERO, s), Color(0.8, 0, 0, flash))
 	_draw_minimap()
 	_draw_bars(s)
-	var names := {"enter": "CARRO", "jump": "PULO", "sprint": "CORRER", "gas": gas_name, "brake": brk_name, "fire": "ATIRAR", "weapon": weapon_text, "shop": shop_label, "aim": "MIRA"}
+	var names := {"enter": "CARRO", "jump": "PULO", "sprint": "CORRER", "gas": gas_name, "brake": brk_name, "fire": "ATIRAR", "weapon": weapon_text, "shop": shop_label, "aim": "MIRA ✓" if aim else "MIRA"}
 	if crosshair:
 		var cc := s * 0.5
 		for v in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
@@ -197,7 +198,7 @@ func _draw_controls() -> void:
 	var font := ThemeDB.fallback_font
 	for k in buttons:
 		var r: Rect2 = buttons[k]
-		var on: bool = k in _btn_ids.values()
+		var on: bool = k in _btn_ids.values() or (k == "aim" and aim)
 		root.draw_rect(r, Color(1, 1, 1, 0.35 if on else 0.18))
 		root.draw_rect(r, Color(1, 1, 1, 0.7), false, 2.0)
 		root.draw_string(font, r.position + Vector2(0, r.size.y * 0.58), names[k], HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 18, Color(1, 1, 1))

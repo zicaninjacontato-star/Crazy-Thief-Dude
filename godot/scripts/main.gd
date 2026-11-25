@@ -17,6 +17,7 @@ const Arcade := preload("res://scripts/arcade.gd")
 const World2 := preload("res://scripts/world2.gd")
 const Missions := preload("res://scripts/missions.gd")
 const VehAnim := preload("res://scripts/vehanim.gd")
+const Traffic := preload("res://scripts/traffic.gd")
 
 var city: Node3D
 var player: CharacterBody3D
@@ -62,7 +63,6 @@ var autosave_t := 0.0
 var tod := 10.0          # hora do dia (0-24)
 var quality := 1
 var daynight: Node
-var buses: Array = []   # {car, i, mk, stop_t, drv}
 var police: Node
 var world2: Node3D
 var missions: Node
@@ -71,6 +71,8 @@ var interior := ""         # tipo da loja em que o jogador está ("" = rua)
 var _int_from := Vector3.ZERO
 var shop_action := ""      # "enter" / "exit" / "buy"
 var shark: Node3D
+var traffic_sys: Node
+var god := false           # código: vida infinita
 var shark_t := 0.0
 
 func _ready() -> void:
@@ -114,53 +116,14 @@ func _ready() -> void:
 	hud.jump_pressed.connect(func(): player.jump())
 	# carro do jogador estacionado ao lado
 	var road_x: float = city._center(2) - city.CELL * 0.5
-	my_car = _spawn_car(Vector3(road_x + 2.6, 0.6, city._center(2) + 4.0), 0.0, Color(0.06, 0.2, 0.55), false, "sport")
+	my_car = _spawn_car(Vector3(road_x + 5.9, 0.6, city._center(2) + 4.0), 0.0, Color(0.06, 0.2, 0.55), false, "sport")
 	var palette := [Color(0.55, 0.02, 0.03), Color(0.85, 0.85, 0.86), Color(0.05, 0.05, 0.06), Color(0.75, 0.45, 0.05), Color(0.2, 0.22, 0.25)]
 	for k in 5:
 		var rx: float = city._center(rng.randi_range(0, 4)) + city.CELL * 0.5 * (1 if rng.randf() < 0.5 else -1)
-		_spawn_car(Vector3(rx + 5.6, 0.6, rng.randf_range(-120, 120)), 0.0 if rng.randf() < 0.5 else PI, palette[k % palette.size()])
-	# trânsito: 3 carros rodando em volta da quadra central
-	for k in 3:
-		var c = _spawn_car(Vector3(0, 0.6, 0), 0.0, palette[(k + 2) % palette.size()])
-		var loop := _block_loop(2, 2, k)
-		c.position = loop[0]
-		var mk := Marker3D.new()
-		add_child(mk)
-		c.ai_target = mk
-		c.max_engine = 3000.0
-		traffic.append({"car": c, "loop": loop, "i": 1, "mk": mk})
-	# moto no trânsito e motos estacionadas
-	var mc = _spawn_car(Vector3(0, 0.6, 0), 0.0, Color(0.75, 0.08, 0.06), false, "moto")
-	var mloop := _block_loop(1, 2, 1)
-	mc.position = mloop[0]
-	var mmk := Marker3D.new()
-	add_child(mmk)
-	mc.ai_target = mmk
-	mc.max_engine = 900.0
-	traffic.append({"car": mc, "loop": mloop, "i": 1, "mk": mmk})
+		_spawn_car(Vector3(rx + 5.9, 0.6, rng.randf_range(-120, 120)), 0.0 if rng.randf() < 0.5 else PI, palette[k % palette.size()])
 	var mcols := [Color(0.05, 0.05, 0.06), Color(0.95, 0.6, 0.05), Color(0.1, 0.3, 0.75)]
 	for k in 3:
-		_spawn_car(my_car.global_position + Vector3(0.9, 0, -8.0 - k * 3.2), 0.0, mcols[k], false, "moto")
-	# ônibus na linha (2, em lados opostos do circuito)
-	for k in 2:
-		var b = _spawn_car(Vector3(0, 0.8, 0), 0.0, [Color(0.1, 0.45, 0.2), Color(0.7, 0.12, 0.1)][k], false, "bus")
-		var i0: int = k * 4
-		var p0: Vector3 = city.bus_route[i0].p
-		var p1: Vector3 = city.bus_route[(i0 + 1) % 8].p
-		b.global_position = p0.lerp(p1, 0.25) + Vector3(0, 0.8, 0)
-		b.rotation.y = atan2(p1.x - p0.x, p1.z - p0.z)
-		var bmk := Marker3D.new()
-		add_child(bmk)
-		b.ai_target = bmk
-		b.max_engine = 16000.0
-		var drv := Humanoid.new()
-		drv.build(Color(0.55, 0.6, 0.7), Color(0.12, 0.14, 0.2), Color(0.7, 0.5, 0.36), Color(0.1, 0.08, 0.06))
-		drv.sitting = true
-		drv.scale = Vector3.ONE * 0.85
-		drv.position = Vector3(b.seat.x, b.seat.y + 0.07 - 0.98 * 0.85, b.seat.z)
-		b.add_child(drv)
-		drv.animate(0, 0)
-		buses.append({"car": b, "i": (i0 + 1) % 8, "mk": bmk, "stop_t": 0.0, "drv": drv})
+		_spawn_car(my_car.global_position + Vector3(0.3, 0, -8.0 - k * 3.2), 0.0, mcols[k], false, "moto")
 	# pedestres
 	for k in 26:
 		var p := Ped.new()
@@ -325,8 +288,30 @@ func _spawn_arcade(kind: String, pos: Vector3, yaw: float, paint: Color):
 ## táxis, barcos, aviões, helicóptero, viaturas da delegacia, banhistas
 func _spawn_extras() -> void:
 	var road_x: float = city._center(2) - city.CELL * 0.5
-	_spawn_car(Vector3(road_x + 2.6, 0.7, city._center(2) + 14.0), 0.0, Color.YELLOW, false, "taxi")
-	_spawn_car(Vector3(city._center(1) - city.CELL * 0.5 - 2.6, 0.7, city._center(3)), PI, Color.YELLOW, false, "taxi")
+	_spawn_car(Vector3(road_x + 5.9, 0.7, city._center(2) + 14.0), 0.0, Color.YELLOW, false, "taxi")
+	_spawn_car(Vector3(city._center(1) - city.CELL * 0.5 - 5.9, 0.7, city._center(3)), PI, Color.YELLOW, false, "taxi")
+	# trânsito com regras (traffic.gd): carros, motos, táxis e 2 ônibus na linha
+	traffic_sys = Traffic.new()
+	add_child(traffic_sys)
+	traffic_sys.setup(self)
+	var palette := [Color(0.55, 0.02, 0.03), Color(0.85, 0.85, 0.86), Color(0.05, 0.05, 0.06), Color(0.75, 0.45, 0.05), Color(0.2, 0.22, 0.25), Color(0.1, 0.25, 0.55), Color(0.3, 0.4, 0.3)]
+	var used := {str(Vector2i(1, 3)) + str(Vector2i(0, 1)): true, str(Vector2i(4, 2)) + str(Vector2i(0, -1)): true}
+	var kinds := ["sedan", "hatch", "suv", "pickup", "sedan", "hatch", "taxi", "sport", "sedan", "suv", "moto", "moto", "moto", "hatch", "pickup", "taxi"]
+	for k in kinds.size():
+		var n := Vector2i(rng.randi_range(0, city.N), rng.randi_range(0, city.N))
+		var dirs := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+		var d: Vector2i = dirs[rng.randi() % 4]
+		var tries := 0
+		while (not traffic_sys._valid(n - d) or used.has(str(n) + str(d))) and tries < 40:
+			n = Vector2i(rng.randi_range(0, city.N), rng.randi_range(0, city.N))
+			d = dirs[rng.randi() % 4]
+			tries += 1
+		used[str(n) + str(d)] = true
+		var c = _spawn_car(Vector3(0, 0.7, 0), 0.0, palette[k % palette.size()], false, kinds[k])
+		traffic_sys.add_agent(c, n, d)
+	for k in 2:
+		var b = _spawn_car(Vector3(0, 0.9, 0), 0.0, [Color(0.1, 0.45, 0.2), Color(0.7, 0.12, 0.1)][k], false, "bus")
+		traffic_sys.add_agent(b, Vector2i(1, 3) if k == 0 else Vector2i(4, 2), Vector2i(0, 1) if k == 0 else Vector2i(0, -1), true)
 	var bcols := [Color(0.1, 0.3, 0.7), Color(0.75, 0.1, 0.1), Color(0.1, 0.5, 0.3)]
 	for i in world2.boat_spots.size():
 		var bs: Array = world2.boat_spots[i]
@@ -615,24 +600,16 @@ func finish_enter(best) -> Node3D:
 	best.ai_target = null
 	best.driver = player
 	# roubo: tráfego, ônibus e viaturas
-	for t in traffic.duplicate():
-		if t.car == best:
-			traffic.erase(t)
-			_spawn_fleeing(best)
-	for b in buses.duplicate():
-		if b.car == best:
-			if is_instance_valid(b.drv):
-				b.drv.queue_free()
-			buses.erase(b)
-			_spawn_fleeing(best)
+	if traffic_sys.release(best):
+		_spawn_fleeing(best)
 	if best.police:
 		_add_wanted(1)
 	seated = player.make_body()
 	seated.sitting = true
 	seated.scale = Vector3.ONE * 0.85
-	seated.position = Vector3(best.seat.x, best.seat.y + 0.07 - 0.98 * 0.85, best.seat.z)
+	seated.position = seat_pos(best)
+	seated.moto_pose = best.kind == "moto"
 	if best.lean:
-		seated.rotation.x = 0.35     # moto: inclinado para a frente
 		best.lean.add_child(seated)
 	else:
 		best.add_child(seated)
@@ -640,6 +617,13 @@ func finish_enter(best) -> Node3D:
 	if combat.weapon != "fist":
 		seated.give_gun(preload("res://scripts/weapons.gd").gun_mesh(combat.weapon))
 	return seated
+
+## posição dos pés do boneco sentado (escala 0,85) para o quadril ficar no banco
+func seat_pos(c) -> Vector3:
+	var s: Vector3 = c.seat
+	if c.kind == "moto":
+		return Vector3(0, 0.84 - 0.98 * 0.85 + 0.04, -0.22)
+	return Vector3(s.x, s.y + 0.07 - 0.98 * 0.85, s.z)
 
 func anim_done() -> void:
 	if player.vehicle:
@@ -667,7 +651,7 @@ func finish_exit(c, pos: Vector3) -> void:
 	c.driver = null
 	player.vehicle = null
 	player.visible = true
-	player.collision_layer = 1
+	player.collision_layer = 2
 	player.collision_mask = 1
 	player.process_mode = Node.PROCESS_MODE_INHERIT
 	player.global_position = pos + Vector3(0, 0.3, 0)
@@ -693,6 +677,7 @@ func _unhandled_input(e: InputEvent) -> void:
 	if e.is_action_pressed("weapon"): combat.cycle()
 	if e.is_action_pressed("shop"): _shop_action()
 	if e.is_action_pressed("pause"): ui.show_pause()
+	if e.is_action_pressed("aim"): hud.aim = not hud.aim
 
 func _physics_process(dt: float) -> void:
 	var k := Vector2(Input.get_axis("move_l", "move_r"), Input.get_axis("move_b", "move_f"))
@@ -705,7 +690,7 @@ func _physics_process(dt: float) -> void:
 		player.move_input = Vector2(mv.x, mv.y)
 		player.cam_yaw = cam_yaw + PI
 		player.sprint = hud.sprint or Input.is_action_pressed("sprint")
-	elif not shot_view in ["drive", "motoride", "planefly", "helifly", "boatride", "busride", "motocrash"]:
+	elif not shot_view in ["drive", "motoride", "planefly", "helifly", "boatride", "busride", "motocrash", "props"]:
 		var c = player.vehicle
 		var g := 1.0 if hud.gas else 0.0
 		var b := 1.0 if hud.brk else 0.0
@@ -723,71 +708,60 @@ func _physics_process(dt: float) -> void:
 		combat.fire_held = true
 	elif not Input.is_action_pressed("fire"):
 		combat.fire_held = false
-	_traffic()
-	_buses(dt)
 	_crimes(dt)
+	_props_tick()
+	_car_vs_player()
 	police.tick(dt)
 	missions.tick(dt)
 	_water_tick(dt)
 
-func _traffic() -> void:
-	for t in traffic:
-		var c = t.car
-		var tgt: Vector3 = t.loop[t.i]
-		if c.global_position.distance_to(tgt) < 9.0:
-			t.i = (t.i + 1) % t.loop.size()
-		t.mk.global_position = tgt
-		# freia atrás de outros carros e do jogador
-		var ahead: Vector3 = c.global_position + c.global_transform.basis.z * 7.0
-		var block := player.global_position.distance_to(ahead) < 4.5
-		for o in cars:
-			if o != c and o.global_position.distance_to(ahead) < 4.0:
-				block = true
-		if block:
-			c.ai_target = null
-			c.throttle = 0
-			c.brake_in = 1.0
-		else:
-			c.ai_target = t.mk
-			c.brake_in = 0.0
-
-## ônibus: segue a linha e para 4 s em cada ponto
-func _buses(dt: float) -> void:
-	for b in buses.duplicate():
-		var c = b.car
-		if not is_instance_valid(c) or player.vehicle == c:
-			buses.erase(b)
+## carros batendo em postes (fáceis) e árvores (precisam de mais velocidade)
+func _props_tick() -> void:
+	for c in cars:
+		if not is_instance_valid(c) or not (c is VehicleBody3D):
 			continue
-		var stop: Dictionary = city.bus_route[b.i]
-		var tgt: Vector3 = stop.p
-		var d: float = Vector2(c.global_position.x - tgt.x, c.global_position.z - tgt.z).length()
-		if b.stop_t > 0.0:
-			b.stop_t -= dt
-			c.ai_target = null
-			c.throttle = 0.0
-			c.brake_in = 1.0
-			if b.stop_t <= 0.0:
-				b.i = (b.i + 1) % city.bus_route.size()
+		var v: Vector3 = c.linear_velocity
+		var spd := Vector2(v.x, v.z).length()
+		if spd < 5.0:
 			continue
-		if d < (5.0 if stop.stop else 11.0):
-			if stop.stop:
-				b.stop_t = 4.0
+		var pos: Vector3 = c.global_position + v.normalized() * c.body_size.z * 0.45
+		for i in city.props_near(pos):
+			var pr: Dictionary = city.props[i]
+			var dd := Vector2(pr.pos.x - pos.x, pr.pos.z - pos.z).length()
+			if dd > c.body_size.x * 0.5 + 0.7 + spd * 0.03:
 				continue
-			b.i = (b.i + 1) % city.bus_route.size()
-			tgt = city.bus_route[b.i].p
-		b.mk.global_position = tgt
-		var ahead: Vector3 = c.global_position + c.global_transform.basis.z * 9.0
-		var block := player.global_position.distance_to(ahead) < 5.0
-		for o in cars:
-			if o != c and is_instance_valid(o) and o.global_position.distance_to(ahead) < 4.5:
-				block = true
-		if block:
-			c.ai_target = null
-			c.throttle = 0
-			c.brake_in = 1.0
+			var need := 5.5 if pr.type == "lamp" else 14.0
+			if c.kind == "bus":
+				need *= 0.6
+			if spd >= need:
+				city.break_prop(i, v)
+				c.linear_velocity = v * (0.85 if pr.type == "lamp" else 0.6)
+				c.take_damage(4.0 if pr.type == "lamp" else 10.0)
+				audio.play("crash", pr.pos, 2.0)
+				FX.sparks(self, pr.pos + Vector3(0, 0.8, 0))
+
+## carro x jogador a pé (o jogador não tem colisão com carros para não "lançá-los"): empurra ou atropela
+func _car_vs_player() -> void:
+	if player.vehicle != null or combat.dead or combat.down_t > 0.0 or vehanim.busy():
+		return
+	for c in cars:
+		if not is_instance_valid(c) or c.kind in ["plane", "heli", "boat"]:
+			continue
+		var lp: Vector3 = c.global_transform.affine_inverse() * player.global_position
+		var hs: Vector3 = c.body_size * 0.5
+		if absf(lp.x) > hs.x + 0.45 or absf(lp.z) > hs.z + 0.45 or lp.y > 2.0:
+			continue
+		var spd: float = c.linear_velocity.length()
+		if spd > 3.5:
+			hp -= spd * 2.2
+			audio.play("hit", player.global_position, 4.0)
+			combat.knockdown(c.linear_velocity * 1.1 + Vector3(0, 2.5 + spd * 0.15, 0), 2.6)
+			c.linear_velocity *= 0.85
+			return
 		else:
-			c.ai_target = b.mk
-			c.brake_in = 0.0
+			var away: Vector3 = (player.global_position - c.global_position)
+			away.y = 0
+			player.global_position += away.normalized() * 0.08
 
 func _crimes(dt: float) -> void:
 	peds = peds.filter(func(q): return is_instance_valid(q))
@@ -798,7 +772,11 @@ func _crimes(dt: float) -> void:
 			var d: Vector3 = p.global_position - vc.global_position
 			d.y = 0
 			if d.length() < 2.2:
-				p.hit(vc, vc.linear_velocity, gore)
+				var spd: float = vc.linear_velocity.length()
+				if spd < 8.0:
+					p.knock(vc.linear_velocity * 1.1, 30.0)
+				else:
+					p.hit(vc, vc.linear_velocity, gore)
 				audio.play("hit", p.global_position, 4.0)
 				audio.play("scream", p.global_position, -2.0)
 				_add_wanted(1)
@@ -841,7 +819,9 @@ func _process(dt: float) -> void:
 	elif player.body and player.body.ragdolled and player.body.parts.size() > 0 and is_instance_valid(player.body.parts[0]):
 		tgt = player.body.parts[0]
 		h = 0.6
-	var aiming: bool = (hud.aim or Input.is_action_pressed("aim")) and player.vehicle == null and not combat.dead and combat.down_t <= 0.0 and not player.swimming
+	if player.vehicle != null or combat.dead or player.swimming:
+		hud.aim = false
+	var aiming: bool = hud.aim and player.vehicle == null and not combat.dead and combat.down_t <= 0.0 and not player.swimming
 	combat.aim = aiming
 	if not aiming:
 		player.aim_yaw = NAN
@@ -1047,8 +1027,15 @@ func _test_views() -> void:
 		if frames == 4:
 			_add_wanted(4)
 			combat.weapon = "pistol"
+			god = true
 		if frames % 30 == 0:
-			print("WNT ", frames, " stars=", wanted, " units=", police.units.size(), " cops=", police.cops.size(), " heli=", police.heli != null, " hp=", snappedf(hp, 1), " seen=", police.seen)
+			var dmin := 999.0
+			for u in police.units:
+				dmin = minf(dmin, u.car.global_position.distance_to(player.global_position))
+			if police.units.size() > 0:
+				var u0 = police.units[0]
+				print("  U0 pos=", u0.car.global_position.snapped(Vector3.ONE), " v=", snappedf(u0.car.forward_speed(), 0.1), " thr=", u0.car.throttle, " str=", snappedf(u0.car.steer_in, 0.01), " brk=", u0.car.brake_in, " out=", u0.out, " nav=", u0.get("nav", {}).get("pts", []).size(), " back=", u0.get("nav", {}).get("back", 0.0), " eng=", u0.car.engine_force, " dead=", u0.car.dead)
+			print("WNT ", frames, " nearest=", snappedf(dmin, 1), " stars=", wanted, " units=", police.units.size(), " cops=", police.cops.size(), " heli=", police.heli != null, " hp=", snappedf(hp, 1), " seen=", police.seen)
 	if v == "aimshot":
 		if frames == 4:
 			player.global_position = my_car.global_position + Vector3(-5.0, 0, 12.0)
@@ -1112,7 +1099,10 @@ func _test_views() -> void:
 			print("MIS ", frames, " active=", missions.active, " text=", missions.text, " hostiles=", missions.hostiles().size(), " timer=", snappedf(missions.timer, 1))
 	if v == "busride":
 		if frames == 4:
-			var b = buses[0].car
+			var b = null
+			for a in traffic_sys.agents:
+				if a.car.kind == "bus":
+					b = a.car
 			player.global_position = b.door_world()
 		if frames == 6:
 			_toggle_car()
@@ -1125,11 +1115,88 @@ func _test_views() -> void:
 			player.global_position = Vector3(city._center(2), 22.0, city._center(2) - city.BLOCK * 0.5 + 1.0)
 		if frames % 15 == 0:
 			print("FALL ", frames, " y=", snappedf(player.global_position.y, 0.1), " hp=", snappedf(hp, 1), " down=", snappedf(combat.down_t, 0.1), " rag=", player.body.ragdolled)
+	if v == "traffic":
+		if frames == 4:
+			player.global_position = Vector3(city._center(2) - city.CELL * 0.5 + 9.0, 0.3, city._center(2) - city.CELL * 0.5 + 9.0)
+			cam_yaw = PI * 0.25
+			cam_pitch = -0.35
+		if frames % 60 == 0:
+			var mv := 0
+			var st := 0
+			for a in traffic_sys.agents:
+				if a.car.linear_velocity.length() > 2.0: mv += 1
+				if a.stuck > 1.0: st += 1
+			if frames % 300 == 0:
+				for a in traffic_sys.agents:
+					if a.car.linear_velocity.length() < 1.0:
+						var lim2: float = traffic_sys._ahead_limit(a.car, a.car.global_position)
+						var bl = traffic_sys.last_block
+						print("  STOP ", a.car.kind, " pos=", a.car.global_position.snapped(Vector3.ONE), " n=", a.n, " d=", a.d, " st=", a.st, " wps=", a.wps.size(), " lim=", snappedf(lim2, 0.1), " blk=", (bl.kind + str(bl.global_position.snapped(Vector3.ONE))) if bl and lim2 < 50 else "-", " thr=", snappedf(a.car.throttle, 0.01), " brk=", snappedf(a.car.brake_in, 0.01), " up=", snappedf(a.car.global_transform.basis.y.y, 0.01))
+			print("TRF ", frames, " agents=", traffic_sys.agents.size(), " moving=", mv, " stuck=", st, " clock=", snappedf(Traffic.clock, 0.1), " ns_green=", Traffic.green("ns"))
+	if v == "motoseat":
+		if frames == 4:
+			var mo = null
+			for c in cars:
+				if c.kind == "moto" and not traffic_sys.is_agent(c):
+					mo = c
+					break
+			player.global_position = mo.door_world()
+			set_meta("moto", mo)
+		if frames == 6:
+			_toggle_car()
+		if frames == 40:
+			cam_yaw = get_meta("moto").rotation.y + PI * 0.5
+			cam_idle = 999.0
+			cam_pitch = -0.1
+	if v == "exitcar":
+		if frames == 4:
+			player.global_position = my_car.door_world()
+		if frames == 6:
+			_toggle_car()
+		if frames == 60:
+			_toggle_car()
+		if frames % 10 == 0 and frames > 50:
+			print("EXIT ", frames, " anim=", vehanim.state, " car_v=", snappedf(my_car.linear_velocity.length(), 0.01), " car_y=", snappedf(my_car.global_position.y, 0.01), " hp=", my_car.hp, " veh=", player.vehicle != null)
+	if v == "bump":
+		if frames == 4:
+			player.global_position = my_car.global_position + Vector3(-5.0, 0, 12.0)
+			shot_ped = Ped.new()
+			add_child(shot_ped)
+			var pp: Vector3 = player.global_position + Vector3(0, 0, 4.0)
+			shot_ped.setup([pp, pp + Vector3(0, 0, 0.1), pp, pp], 0, rng)
+			shot_ped.speed = 0.0
+			peds.append(shot_ped)
+			cam_yaw = PI
+		if frames > 6 and frames < 40:
+			hud.joy = Vector2(0, -1)
+			hud.sprint = true
+		if frames == 40:
+			hud.joy = Vector2.ZERO
+		if frames % 10 == 0:
+			print("BMP ", frames, " knocked=", snappedf(shot_ped.knocked, 0.1), " hp=", shot_ped.hp, " down=", shot_ped.down, " rag=", shot_ped.body.ragdolled if is_instance_valid(shot_ped.body) else "-")
+	if v == "props":
+		if frames == 4:
+			var pr: Dictionary = city.props[0]
+			for q in city.props:
+				if q.type == "lamp":
+					pr = q
+					break
+			set_meta("pr", pr)
+			var c = _spawn_car(pr.pos + Vector3(0, 0.6, -30.0), 0.0, Color.RED, false, "sedan")
+			c.linear_velocity = Vector3(0, 0, 14.0)
+			set_meta("pc", c)
+			player.global_position = pr.pos + Vector3(-8.0, 0, 5.0)
+			cam_yaw = -PI * 0.5
+		if frames % 10 == 0 and frames > 4:
+			var c2 = get_meta("pc")
+			c2.throttle = 1.0
+			c2.steer_in = 0.0
+			print("PRP ", frames, " lamp_alive=", get_meta("pr").alive, " car_v=", snappedf(c2.linear_velocity.length(), 0.1), " hp=", snappedf(c2.hp, 1), " z=", snappedf(c2.global_position.z, 0.1))
 	if v == "motocrash":
 		if frames == 4:
 			var mo = null
 			for c in cars:
-				if c.kind == "moto" and not traffic.any(func(t): return t.car == c):
+				if c.kind == "moto" and not traffic_sys.is_agent(c):
 					mo = c
 					break
 			player.global_position = mo.door_world()
@@ -1276,7 +1343,7 @@ func _shot_tick() -> void:
 	if shot_view == "warm" and frames % 5 == 0 and frames < 40:
 		print("WARM ", frames, " w=", daynight._warm, " omni=", daynight.lamp_lights.filter(func(l): return l.visible).size(), " spot=", daynight.car_lights.filter(func(c): return c.l.visible).size())
 	if shot_view == "bus" and frames == 4 or shot_view == "bus" and frames == shot_at - 2:
-		var b = buses[0].car
+		var b = traffic_sys.agents.filter(func(a): return a.car.kind == "bus")[0].car
 		var bx: Vector3 = b.global_transform.basis.x
 		var bz: Vector3 = b.global_transform.basis.z
 		player.global_position = b.global_position + bx * 6.5 + bz * 7.0
@@ -1284,9 +1351,12 @@ func _shot_tick() -> void:
 		cam_yaw = atan2(away.x, away.z)
 		cam_pitch = -0.12
 	if shot_view == "bus" and frames % 30 == 0:
-		print("BUS ", frames, " ", buses.map(func(x): return [x.i, snappedf(x.stop_t, 0.1), x.car.global_position.snapped(Vector3.ONE), snappedf(x.car.speed_kmh(), 1)]))
+		for a in traffic_sys.agents:
+			if a.car.kind == "bus":
+				print("  BA n=", a.n, " d=", a.d, " st=", a.st, " thr=", a.car.throttle, " brk=", a.car.brake_in, " stop_t=", a.stop_t, " lim=", traffic_sys._ahead_limit(a.car, a.car.global_position), " back=", a.back, " blk=", (str(traffic_sys.last_block.kind) + str(traffic_sys.last_block.global_position.snapped(Vector3.ONE)) + " agent=" + str(traffic_sys.is_agent(traffic_sys.last_block))) if traffic_sys.last_block else "-")
+		print("BUS ", frames, " ", traffic_sys.agents.filter(func(a): return a.car.kind == "bus").map(func(x): return [x.n, snappedf(x.stop_t, 0.1), x.car.global_position.snapped(Vector3.ONE), snappedf(x.car.speed_kmh(), 1)]))
 	if shot_view in ["moto", "motoride"] and frames == 4:
-		var mo = cars.filter(func(c): return c.kind == "moto" and not traffic.any(func(t): return t.car == c))[0]
+		var mo = cars.filter(func(c): return c.kind == "moto" and not traffic_sys.is_agent(c))[0]
 		player.global_position = mo.global_position + Vector3(-1.2, 0, 0)
 		cam_yaw = -PI * 0.5 - 0.6
 		cam_pitch = -0.15

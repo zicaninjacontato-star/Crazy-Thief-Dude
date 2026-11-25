@@ -197,7 +197,16 @@ func show_pause() -> void:
 	_btn(box, "CONTINUAR", _close)
 	_btn(box, "SALVAR JOGO", func(): save_game(); _info(box, "Jogo salvo!", Color(0.4, 1, 0.4)))
 	_btn(box, "CONFIGURAÇÕES", func(): show_settings(show_pause))
+	_btn(box, "CÓDIGOS", show_cheats)
 	_btn(box, "MENU INICIAL", func(): save_game(); show_main_menu())
+
+## códigos (por enquanto só liga/desliga; os nomes dos códigos virão depois)
+func show_cheats() -> void:
+	var box := _open("CÓDIGOS")
+	_btn(box, "Vida infinita: %s" % _on(main.god), func(): main.god = not main.god; show_cheats())
+	_btn(box, "Muito dinheiro (+$99.999)", func(): main.money += 99999; main.audio.play("cash"); show_cheats())
+	_info(box, "Dinheiro: $%d" % main.money, Color(0.4, 1, 0.4))
+	_btn(box, "VOLTAR", show_pause)
 
 func show_settings(back: Callable) -> void:
 	var box := _open("CONFIGURAÇÕES")

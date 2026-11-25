@@ -145,7 +145,7 @@ func _start(id: String) -> void:
 	match id:
 		"delivery":
 			var road: float = c._center(0) - c.CELL * 0.5
-			target_car = main._spawn_car(Vector3(road + 2.6, 0.7, c._center(3)), 0.0, Color(0.85, 0.05, 0.05), false, "sport")
+			target_car = main._spawn_car(Vector3(road + 5.9, 0.7, c._center(3)), 0.0, Color(0.85, 0.05, 0.05), false, "sport")
 			text = "Roube o esportivo vermelho"
 			timer = -1.0
 		"hit":

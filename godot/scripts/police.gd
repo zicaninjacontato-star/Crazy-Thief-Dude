@@ -156,19 +156,23 @@ func _units_tick(dt: float, s: int, p: Node3D, pp: Vector3) -> void:
 		var d: float = c.global_position.distance_to(pp)
 		var on_foot: bool = main.player.vehicle == null
 		if not u.out:
-			# persegue mirando um pouco à frente do jogador (intercepta / bate)
-			_mk.global_position = pp + pv * clampf(d / 25.0, 0.0, 1.2)
-			if not u.has("mk"):
-				u.mk = Marker3D.new()
-				main.add_child(u.mk)
-			u.mk.global_position = _mk.global_position
-			c.ai_target = u.mk
+			# segue as ruas até perto; perto, mira à frente do jogador (bate) ou pelos lados (encurrala)
+			c.ai_target = null
+			if not u.has("nav"):
+				u.nav = {}
+			var k: int = units.find(u)
+			var lead: Vector3 = pp + pv * clampf(d / 22.0, 0.0, 1.1)
+			if pv.length() > 3.0 and d > 10.0:
+				var side := Vector3(-pv.z, 0, pv.x).normalized()
+				lead += side * (5.0 if k % 2 == 0 else -5.0) * clampf((d - 10.0) / 20.0, 0.0, 1.0)
+			main.traffic_sys.chase(c, pp, lead, u.nav, dt, 30.0 if u.kind == "car" else 26.0)
 			if d < 17.0 and (on_foot or pv.length() < 4.0):
 				_crew_out(u, s)
 		else:
 			c.ai_target = null
 			c.throttle = 0.0
 			c.brake_in = 1.0
+			c.steer_in = 0.0
 			# jogador fugiu de carro: a equipe volta e a viatura retoma
 			if not on_foot and d > 45.0:
 				for cp in cops.duplicate():
