@@ -1,8 +1,9 @@
 extends VehicleBody3D
 ## Carro com física real do Godot (suspensão por roda, atrito, transferência de peso).
-## Modelo: Car Concept (Khronos, CC-BY 4.0) — ver CREDITOS.md.
+## Modelo gerado por código (carmodel.gd).
 
 const M := preload("res://scripts/mats.gd")
+const CarModel := preload("res://scripts/carmodel.gd")
 
 var throttle := 0.0     # -1..1 (negativo = ré)
 var brake_in := 0.0     # 0..1
@@ -17,73 +18,62 @@ var driver: Node = null
 var _lights: Array = []
 var _t := 0.0
 var wheels: Array = []
+var body_size := Vector3(1.8, 1.4, 4.6)
+var seat := Vector3(0.38, 0.5, 0.0)
+var _flip_t := 0.0
 
-## model: cena gerada a partir do GLB (nós st_p1, st_dark, st_glass, st_lights, wheel_fl/fr/rl/rr).
-func setup(model: Node3D, paint: Color, is_police := false) -> void:
-	police = is_police
-	mass = 1350.0
+## kind: sedan, hatch, suv, pickup, sport ou police (modelo gerado por carmodel.gd).
+func setup(kind: String, paint: Color) -> void:
+	police = kind == "police"
+	var built: Dictionary = CarModel.build(kind, paint)
+	var size: Vector3 = built.size
+	mass = 1350.0 if size.z < 4.8 else 1700.0
 	can_sleep = false
 	center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
-	center_of_mass = Vector3(0, 0.25, 0.05)
-	angular_damp = 0.4
+	# centro de massa abaixo do eixo das rodas: o carro inclina mas não capota em curva normal
+	center_of_mass = Vector3(0, 0.05, 0.05)
+	angular_damp = 0.8
 	var cs := CollisionShape3D.new()
 	var bx := BoxShape3D.new()
-	bx.size = Vector3(2.0, 0.75, 4.25)
+	bx.size = Vector3(size.x - 0.1, 0.7, size.z - 0.1)
 	cs.shape = bx
-	cs.position = Vector3(0, 0.72, 0)
+	cs.position = Vector3(0, 0.7, 0)
 	add_child(cs)
-	add_child(model)
-	model.position.z = -0.085   # centraliza o entre-eixos
-	var paint_m := M.car_paint(paint)
-	var dark := StandardMaterial3D.new()
-	dark.vertex_color_use_as_albedo = true
-	dark.roughness = 0.55
-	dark.metallic = 0.25
-	var glass := StandardMaterial3D.new()
-	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	glass.albedo_color = Color(0.04, 0.07, 0.09, 0.42)
-	glass.roughness = 0.03
-	glass.metallic = 0.7
-	var lights := StandardMaterial3D.new()
-	lights.vertex_color_use_as_albedo = true
-	lights.emission_enabled = true
-	lights.emission = Color(0.5, 0.5, 0.45)
-	lights.emission_energy_multiplier = 0.6
-	_paint(model, "st_p1", paint_m)
-	_paint(model, "st_dark", dark)
-	_paint(model, "st_glass", glass)
-	_paint(model, "st_lights", lights)
-	for k in ["fl", "fr", "rl", "rr"]:
-		var wm := _find(model, "wheel_" + k)
-		if wm == null:
-			continue
+	var cs2 := CollisionShape3D.new()
+	var bx2 := BoxShape3D.new()
+	bx2.size = Vector3(size.x * 0.78, maxf(0.3, size.y - 1.05), size.z * 0.42)
+	cs2.shape = bx2
+	cs2.position = Vector3(0, 1.05 + bx2.size.y * 0.5, -0.1)
+	add_child(cs2)
+	body_size = size
+	seat = built.seat
+	add_child(built.root)
+	var wr: float = built.wr
+	for wd in built.wheels:
 		var w := VehicleWheel3D.new()
-		var p: Vector3 = wm.position + model.position
+		var p: Vector3 = wd.pos
 		w.position = Vector3(p.x, p.y + 0.14, p.z)
-		w.wheel_radius = 0.385
+		w.wheel_radius = wr
 		w.wheel_rest_length = 0.14
-		w.suspension_travel = 0.22
-		w.suspension_stiffness = 42.0
-		w.suspension_max_force = 9000.0
-		w.damping_compression = 0.35
-		w.damping_relaxation = 0.55
-		w.wheel_friction_slip = 2.6
-		w.wheel_roll_influence = 0.04
-		w.use_as_steering = k.begins_with("f")
-		w.use_as_traction = k.begins_with("r")
+		w.suspension_travel = 0.2
+		w.suspension_stiffness = 48.0
+		w.suspension_max_force = 12000.0
+		w.damping_compression = 0.4
+		w.damping_relaxation = 0.6
+		w.wheel_friction_slip = 2.4
+		w.wheel_roll_influence = 0.0
+		w.use_as_steering = wd.front
+		w.use_as_traction = not wd.front
 		add_child(w)
-		wm.get_parent().remove_child(wm)
-		w.add_child(wm)
-		wm.position = Vector3.ZERO
-		wm.material_override = dark
+		w.add_child(wd.node)
 		wheels.append(w)
 	if police:
 		for s in [-1.0, 1.0]:
 			var b := MeshInstance3D.new()
 			var bm := BoxMesh.new()
-			bm.size = Vector3(0.5, 0.12, 0.22)
+			bm.size = Vector3(0.5, 0.12, 0.24)
 			b.mesh = bm
-			b.position = Vector3(0.28 * s, 1.33, -0.25)
+			b.position = Vector3(0.3 * s, size.y + 0.16, -0.1)
 			b.material_override = M.emissive(Color(1, 0.1, 0.1) if s < 0 else Color(0.1, 0.3, 1), 3.0)
 			add_child(b)
 			_lights.append(b)
@@ -131,8 +121,9 @@ func _physics_process(dt: float) -> void:
 	engine_force = eng
 	brake = brk
 	# esterço progressivo e menor em alta velocidade
-	var lim := max_steer * lerpf(1.0, 0.22, clampf(absf(fs) / 30.0, 0.0, 1.0))
+	var lim := max_steer * lerpf(1.0, 0.18, clampf(absf(fs) / 28.0, 0.0, 1.0))
 	steering = move_toward(steering, steer_in * lim, dt * 2.2)
+	_anti_flip(dt)
 	for w in wheels:
 		if w.use_as_traction:
 			w.wheel_friction_slip = 1.6 if handbrake else 2.6
@@ -153,3 +144,22 @@ func _ai(dt: float) -> void:
 		brake_in = 0.6
 		return
 	brake_in = 0.0
+
+## Estabilidade estilo jogo de mundo aberto: torque que endireita o carro quando ele inclina demais
+## e, se mesmo assim virar e ficar parado, ele é recolocado de pé depois de 2,5 s.
+func _anti_flip(dt: float) -> void:
+	var up := global_transform.basis.y
+	var tilt := up.angle_to(Vector3.UP)
+	if tilt > 0.25 and tilt < 2.0:
+		var axis := up.cross(Vector3.UP).normalized()
+		apply_torque(axis * tilt * mass * 9.0)
+	if up.y < 0.35 and linear_velocity.length() < 3.0:
+		_flip_t += dt
+		if _flip_t > 2.5:
+			_flip_t = 0.0
+			var yaw := atan2(global_transform.basis.z.x, global_transform.basis.z.z)
+			global_transform = Transform3D(Basis(Vector3.UP, yaw), global_position + Vector3(0, 1.2, 0))
+			linear_velocity = Vector3.ZERO
+			angular_velocity = Vector3.ZERO
+	else:
+		_flip_t = 0.0

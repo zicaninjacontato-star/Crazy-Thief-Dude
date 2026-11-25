@@ -7,6 +7,8 @@ const Car := preload("res://scripts/car.gd")
 const Ped := preload("res://scripts/ped.gd")
 const Hud := preload("res://scripts/hud.gd")
 const Humanoid := preload("res://scripts/humanoid.gd")
+const Audio := preload("res://scripts/audio.gd")
+const FX := preload("res://scripts/fx.gd")
 
 var city: Node3D
 var player: CharacterBody3D
@@ -30,9 +32,17 @@ var fps_n := 0
 var fps_show := 0.0
 var shot := ""
 var shot_view := ""
+var shot_at := 240
+var shot_ped = null
 var frames := 0
 var msg_t := 0.0
 var build_id := "dev"
+var audio: Node
+var money := 600
+var hp := 100.0
+var gore := true
+var _step_ph := 0.0
+var _lastv := Vector3.ZERO
 
 func _ready() -> void:
 	rng.seed = 7
@@ -41,8 +51,16 @@ func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--shot="): shot = a.substr(7)
 		if a.begins_with("--view="): shot_view = a.substr(7)
+		if a.begins_with("--at="): shot_at = int(a.substr(5))
 	_inputs()
 	_environment()
+	# desempenho no celular: 3D em 75% da resolução + FXAA (sem MSAA)
+	if OS.has_feature("mobile"):
+		get_viewport().scaling_3d_scale = 0.75
+		get_viewport().msaa_3d = Viewport.MSAA_DISABLED
+		get_viewport().screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
+	audio = Audio.new()
+	add_child(audio)
 	city = City.new()
 	add_child(city)
 	cam = Camera3D.new()
@@ -56,10 +74,13 @@ func _ready() -> void:
 	hud = Hud.new()
 	add_child(hud)
 	hud.enter_pressed.connect(_toggle_car)
+	for k in city.N + 1:
+		hud.map_roads.append((k - city.N * 0.5) * city.CELL)
+	hud.map_roadw = city.ROADW
 	hud.jump_pressed.connect(func(): player.jump())
 	# carro do jogador estacionado ao lado
 	var road_x: float = city._center(2) - city.CELL * 0.5
-	my_car = _spawn_car(Vector3(road_x + 2.6, 0.6, city._center(2) + 4.0), 0.0, Color(0.06, 0.2, 0.55))
+	my_car = _spawn_car(Vector3(road_x + 2.6, 0.6, city._center(2) + 4.0), 0.0, Color(0.06, 0.2, 0.55), false, "sport")
 	var palette := [Color(0.55, 0.02, 0.03), Color(0.85, 0.85, 0.86), Color(0.05, 0.05, 0.06), Color(0.75, 0.45, 0.05), Color(0.2, 0.22, 0.25)]
 	for k in 5:
 		var rx: float = city._center(rng.randi_range(0, 4)) + city.CELL * 0.5 * (1 if rng.randf() < 0.5 else -1)
@@ -93,19 +114,11 @@ func _block_loop(i: int, j: int, k: int) -> Array:
 		out.append(pts[(q + k) % 4])
 	return out
 
-func _load_model() -> Node3D:
-	var doc := GLTFDocument.new()
-	var st := GLTFState.new()
-	var bytes := FileAccess.get_file_as_bytes("res://assets/esportivo.bin")
-	if bytes.is_empty() or doc.append_from_buffer(bytes, "", st) != OK:
-		push_error("modelo do carro não carregou")
-		return Node3D.new()
-	return doc.generate_scene(st)
-
-func _spawn_car(pos: Vector3, yaw: float, paint: Color, police := false):
+func _spawn_car(pos: Vector3, yaw: float, paint: Color, police := false, kind := ""):
 	var c := Car.new()
 	add_child(c)
-	c.setup(_load_model(), paint, police)
+	var kinds := ["sedan", "sedan", "hatch", "suv", "pickup", "sport"]
+	c.setup("police" if police else (kind if kind != "" else kinds[rng.randi() % kinds.size()]), paint)
 	c.global_position = pos
 	c.rotation.y = yaw
 	cars.append(c)
@@ -164,7 +177,7 @@ func _environment() -> void:
 	sun.shadow_enabled = true
 	sun.shadow_blur = 1.3
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
-	sun.directional_shadow_max_distance = 95.0
+	sun.directional_shadow_max_distance = 60.0
 	add_child(sun)
 
 func _toggle_car() -> void:
@@ -203,8 +216,8 @@ func _toggle_car() -> void:
 	seated = Humanoid.new()
 	seated.build(Color(0.13, 0.42, 0.26), Color(0.12, 0.16, 0.27), Color(0.86, 0.66, 0.5), Color(0.16, 0.1, 0.06))
 	seated.sitting = true
-	seated.scale = Vector3.ONE * 0.9
-	seated.position = Vector3(0, -0.62, 0.2)
+	seated.scale = Vector3.ONE * 0.85
+	seated.position = Vector3(best.seat.x, best.seat.y + 0.07 - 0.98 * 0.85, best.seat.z)
 	best.add_child(seated)
 	seated.animate(0, 0)
 	best.brake_in = 0
@@ -234,6 +247,16 @@ func _physics_process(dt: float) -> void:
 		c.handbrake = Input.is_action_pressed("jump")
 	if player.vehicle:
 		player.global_position = player.vehicle.global_position
+	if player.vehicle:
+		var v: Vector3 = player.vehicle.linear_velocity
+		if _lastv.length() > 4.0 and _lastv.distance_to(v) > 5.0:
+			var pv: Vector3 = player.vehicle.global_position
+			audio.play("crash", pv, 3.0)
+			FX.sparks(self, pv + player.vehicle.global_transform.basis.z * 2.0 + Vector3(0, 0.6, 0))
+			hp = maxf(5.0, hp - _lastv.distance_to(v) * 0.8)
+		_lastv = v
+	else:
+		_lastv = Vector3.ZERO
 	_traffic()
 	_crimes(dt)
 	_police(dt)
@@ -260,6 +283,7 @@ func _traffic() -> void:
 			c.brake_in = 0.0
 
 func _crimes(dt: float) -> void:
+	peds = peds.filter(func(q): return is_instance_valid(q))
 	var vc = player.vehicle
 	if vc != null and vc.linear_velocity.length() > 3.0:
 		for p in peds:
@@ -267,8 +291,13 @@ func _crimes(dt: float) -> void:
 			var d: Vector3 = p.global_position - vc.global_position
 			d.y = 0
 			if d.length() < 2.2:
-				p.hit(vc.global_position, vc.linear_velocity.length())
+				p.hit(vc, vc.linear_velocity, gore)
+				audio.play("hit", p.global_position, 4.0)
+				audio.play("scream", p.global_position, -2.0)
 				_add_wanted(1)
+				for q in peds:
+					if q != p and q.global_position.distance_to(p.global_position) < 18.0:
+						q.scare()
 	if wanted > 0:
 		wanted_timer -= dt
 		if wanted_timer <= 0 and (police_car == null or police_car.global_position.distance_to(player.global_position) > 80.0):
@@ -336,6 +365,20 @@ func _process(dt: float) -> void:
 	var focus := tgt.global_position + Vector3(0, h, 0)
 	cam.global_position = cam.global_position.lerp(focus + off, minf(1.0, dt * 8.0)) if frames > 2 else focus + off
 	cam.look_at(focus, Vector3.UP)
+	# sons contínuos
+	if player.vehicle:
+		var v = player.vehicle
+		var rpm := clampf(absf(v.forward_speed()) / 30.0, 0.0, 1.0) * 0.8 + absf(v.throttle) * 0.2
+		audio.set_engine(true, rpm, absf(v.throttle))
+	else:
+		audio.set_engine(false, 0.0, 0.0)
+		var hs := Vector2(player.velocity.x, player.velocity.z).length()
+		if hs > 0.5 and player.is_on_floor():
+			_step_ph += dt * (2.2 + hs * 1.65) / PI
+			if _step_ph >= 1.0:
+				_step_ph -= 1.0
+				audio.play("step", null, -8.0)
+	audio.set_siren(police_car != null, police_car.global_position.distance_to(player.global_position) if police_car else 999.0)
 	# HUD
 	fps_acc += dt
 	fps_n += 1
@@ -346,6 +389,11 @@ func _process(dt: float) -> void:
 	hud.driving = player.vehicle != null
 	hud.info.text = "%d FPS · %s · b%s · Fatia de teste Godot" % [round(fps_show), RenderingServer.get_video_adapter_name(), build_id]
 	hud.stars.text = "★".repeat(wanted) + "☆".repeat(5 - wanted)
+	hud.money.text = "$%d,00" % money
+	hud.hp = hp
+	hud.map_player = player.global_position
+	hud.map_yaw = cam_yaw + PI
+	hud.map_police = police_car.global_position if police_car else Vector3.INF
 	hud.speed.text = ("%d km/h" % round(player.vehicle.speed_kmh())) if player.vehicle else ""
 	if msg_t > 0:
 		msg_t -= dt
@@ -363,6 +411,18 @@ func _shot_tick() -> void:
 		match shot_view:
 			"drive":
 				_toggle_car()
+	if shot_view == "rag" and frames == 4:
+		player.global_position = my_car.global_position + Vector3(-5.0, 0, 12.0)
+		shot_ped = Ped.new()
+		add_child(shot_ped)
+		var pp: Vector3 = player.global_position + Vector3(0, 0, 5.5)
+		shot_ped.setup([pp, pp + Vector3(0, 0, 0.1), pp, pp], 0, rng)
+		peds.append(shot_ped)
+		cam_yaw = -PI
+		cam_pitch = -0.22
+	if shot_view == "rag" and frames == 12:
+		shot_ped.hit(my_car, Vector3(7, 0, 4), gore)
+		audio.play("scream", shot_ped.global_position)
 	if shot_view == "police" and frames == 6:
 		_add_wanted(2)
 		set_meta("pd0", 0.0)
@@ -387,9 +447,18 @@ func _shot_tick() -> void:
 				cam_pitch = -0.6
 			"drive":
 				player.global_position = my_car.global_position + Vector3(2.0, 0, 0)
-	if frames == 240:
+			"cars", "cars2":
+				var base: Vector3 = my_car.global_position + Vector3(0, 0, 14)
+				var ks := ["sedan", "hatch", "suv", "pickup", "sport", "police"]
+				var cols := [Color(0.6, 0.05, 0.05), Color(0.9, 0.9, 0.9), Color(0.1, 0.25, 0.15), Color(0.2, 0.22, 0.25), Color(0.95, 0.6, 0.05), Color.WHITE]
+				for q in ks.size():
+					var cc = _spawn_car(base + Vector3(0, 0.6, q * 6.5), PI * 0.5, cols[q], ks[q] == "police", ks[q])
+				player.global_position = base + Vector3(-9.0, 0, 14)
+				cam_yaw = -PI * 0.5 if shot_view == "cars" else -PI * 0.25
+				cam_pitch = -0.15
+	if frames == shot_at:
 		var img := get_viewport().get_texture().get_image()
 		img.save_png(shot)
-		var info := {"fps": fps_show, "car_z": my_car.global_position.z, "car_x": my_car.global_position.x, "car_speed": my_car.linear_velocity.length(), "yaw": my_car.rotation.y, "up": my_car.global_transform.basis.y.y, "wanted": wanted, "police_d0": get_meta("pd0", -1.0), "pol": ([police_car.global_position, police_car.linear_velocity.length(), police_car.throttle, police_car.engine_force, police_car.brake, police_car.wheels.map(func(w): return w.is_in_contact())] if police_car else []), "police_d": (police_car.global_position.distance_to(player.global_position) if police_car else -1.0), "walk": (player.global_position - get_meta("p0", player.global_position)), "camdir": (get_meta("p0", player.global_position) - get_meta("c0", cam.global_position))}
+		var info := {"draws": RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME), "prims": RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME), "fps": fps_show, "car_z": my_car.global_position.z, "car_x": my_car.global_position.x, "car_speed": my_car.linear_velocity.length(), "yaw": my_car.rotation.y, "up": my_car.global_transform.basis.y.y, "wanted": wanted, "police_d0": get_meta("pd0", -1.0), "pol": ([police_car.global_position, police_car.linear_velocity.length(), police_car.throttle, police_car.engine_force, police_car.brake, police_car.wheels.map(func(w): return w.is_in_contact())] if police_car else []), "police_d": (police_car.global_position.distance_to(player.global_position) if police_car else -1.0), "walk": (player.global_position - get_meta("p0", player.global_position)), "camdir": (get_meta("p0", player.global_position) - get_meta("c0", cam.global_position))}
 		print("SHOT ", JSON.stringify(info))
 		get_tree().quit()

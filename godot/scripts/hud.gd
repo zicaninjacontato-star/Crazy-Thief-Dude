@@ -22,6 +22,14 @@ var speed: Label
 var hint: Label
 var buttons := {}   # nome -> Rect2 (em pixels de tela)
 var driving := false
+var money: Label
+var hp := 100.0
+var map_player := Vector3.ZERO
+var map_yaw := 0.0
+var map_police := Vector3.INF
+var map_roads: Array = []      # posições das ruas da grade (x e z)
+var map_ext := 160.0
+var map_roadw := 14.0
 const R := 70.0
 
 func _ready() -> void:
@@ -33,9 +41,16 @@ func _ready() -> void:
 	info = _label(Vector2(16, 10), 16)
 	stars = _label(Vector2(0, 10), 34)
 	stars.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	stars.position = Vector2(-220, 8)
+	stars.position = Vector2(-220, 98)
 	stars.add_theme_color_override("font_color", Color(1, 0.82, 0.2))
-	speed = _label(Vector2(16, 40), 26)
+	speed = _label(Vector2(16, 250), 26)
+	money = _label(Vector2(0, 0), 40)
+	money.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	money.position = Vector2(-300, 44)
+	money.size = Vector2(280, 50)
+	money.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	money.add_theme_color_override("font_color", Color(0.35, 0.95, 0.35))
+	info.position = Vector2(230, 10)
 	hint = _label(Vector2(0, 0), 22)
 	hint.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	hint.position = Vector2(-200, 70)
@@ -117,6 +132,8 @@ func _draw_controls() -> void:
 	root.draw_circle(c, R, Color(0, 0, 0, 0.28))
 	root.draw_arc(c, R, 0, TAU, 48, Color(1, 1, 1, 0.5), 3.0)
 	root.draw_circle(c + joy * R, 32, Color(1, 1, 1, 0.75))
+	_draw_minimap()
+	_draw_bars(s)
 	var names := {"enter": "CARRO", "jump": "PULO", "sprint": "CORRER", "gas": "ACEL", "brake": "FREIO"}
 	var font := ThemeDB.fallback_font
 	for k in buttons:
@@ -127,9 +144,54 @@ func _draw_controls() -> void:
 		root.draw_string(font, r.position + Vector2(0, r.size.y * 0.58), names[k], HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 18, Color(1, 1, 1))
 
 func _process(_dt: float) -> void:
+	var s := root.get_viewport_rect().size
+	money.position = Vector2(s.x - 300, 40)
+	stars.position = Vector2(s.x - 232, 88)
+	hint.position = Vector2(s.x * 0.5 - 200, 70)
 	root.queue_redraw()
 
 func take_cam_drag() -> Vector2:
 	var d := cam_drag
 	cam_drag = Vector2.ZERO
 	return d
+
+func _draw_bars(s: Vector2) -> void:
+	var r := Rect2(s.x - 300, 14, 280, 22)
+	root.draw_rect(r, Color(0, 0, 0, 0.45))
+	root.draw_rect(Rect2(r.position + Vector2(3, 3), Vector2((r.size.x - 6) * clampf(hp / 100.0, 0.0, 1.0), r.size.y - 6)), Color(0.85, 0.12, 0.12))
+
+## minimapa redondo (gira com a câmera), ruas da grade, jogador e polícia
+func _draw_minimap() -> void:
+	var C := Vector2(118, 128)
+	var R := 100.0
+	var sc := R / 90.0
+	root.draw_circle(C, R + 4, Color(0, 0, 0, 0.6))
+	root.draw_circle(C, R, Color(0.24, 0.33, 0.22))
+	var f := Vector2(sin(map_yaw), cos(map_yaw))
+	var rt := Vector2(-f.y, f.x)
+	var tr := func(w: Vector3) -> Vector2:
+		var rel := Vector2(w.x - map_player.x, w.z - map_player.z)
+		return C + Vector2(rel.dot(rt), -rel.dot(f)) * sc
+	var rw := 90.0
+	for c in map_roads:
+		for axis in 2:
+			var d: float = c - (map_player.x if axis == 0 else map_player.z)
+			if absf(d) >= rw:
+				continue
+			var h := sqrt(rw * rw - d * d)
+			var a: Vector3
+			var b: Vector3
+			if axis == 0:
+				a = Vector3(c, 0, map_player.z - h)
+				b = Vector3(c, 0, map_player.z + h)
+			else:
+				a = Vector3(map_player.x - h, 0, c)
+				b = Vector3(map_player.x + h, 0, c)
+			root.draw_line(tr.call(a), tr.call(b), Color(0.16, 0.16, 0.18), map_roadw * sc)
+	if map_police != Vector3.INF:
+		var pp: Vector2 = tr.call(map_police)
+		if pp.distance_to(C) < R - 6:
+			root.draw_circle(pp, 6, Color(0.2, 0.45, 1.0) if int(Time.get_ticks_msec() / 250) % 2 == 0 else Color(1, 0.15, 0.15))
+	# seta do jogador (sempre para cima, o mapa gira)
+	root.draw_colored_polygon(PackedVector2Array([C + Vector2(0, -11), C + Vector2(8, 8), C + Vector2(0, 3), C + Vector2(-8, 8)]), Color(1, 1, 1))
+	root.draw_arc(C, R, 0, TAU, 64, Color(1, 1, 1, 0.8), 3.0)

@@ -26,6 +26,15 @@ func _ready() -> void:
 			_block(_center(i), _center(j))
 	_markings()
 	_props()
+	_flush()
+
+func _flush() -> void:
+	for mat in _batch:
+		var mi := MeshInstance3D.new()
+		mi.mesh = _batch[mat].commit()
+		mi.material_override = mat
+		add_child(mi)
+	_batch.clear()
 
 func _center(i: int) -> float:
 	return (i - (N - 1) * 0.5) * CELL
@@ -33,14 +42,25 @@ func _center(i: int) -> float:
 func extent() -> float:
 	return N * CELL * 0.5
 
-func _box(size: Vector3, pos: Vector3, mat: Material, collide := true, parent: Node = self) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
+## Caixas estáticas são acumuladas por material e fundidas numa malha só no fim (_flush):
+## a cidade inteira vira ~15 draw calls em vez de centenas.
+var _batch := {}
+
+func _box(size: Vector3, pos: Vector3, mat: Material, collide := true, parent: Node = self) -> void:
 	var bm := BoxMesh.new()
 	bm.size = size
-	mi.mesh = bm
-	mi.material_override = mat
-	mi.position = pos
-	parent.add_child(mi)
+	if parent == self:
+		if not _batch.has(mat):
+			var st := SurfaceTool.new()
+			st.begin(Mesh.PRIMITIVE_TRIANGLES)
+			_batch[mat] = st
+		_batch[mat].append_from(bm, 0, Transform3D(Basis(), pos))
+	else:
+		var mi := MeshInstance3D.new()
+		mi.mesh = bm
+		mi.material_override = mat
+		mi.position = pos
+		parent.add_child(mi)
 	if collide:
 		var cs := CollisionShape3D.new()
 		var sh := BoxShape3D.new()
@@ -48,7 +68,6 @@ func _box(size: Vector3, pos: Vector3, mat: Material, collide := true, parent: N
 		cs.shape = sh
 		cs.position = pos
 		body.add_child(cs)
-	return mi
 
 func _ground() -> void:
 	var ext := extent() + ROADW * 0.5
@@ -198,18 +217,22 @@ func _props() -> void:
 	pole.top_radius = 0.07
 	pole.bottom_radius = 0.11
 	pole.height = 7.0
+	pole.radial_segments = 8
+	pole.rings = 1
 	_multimesh(pole, M.plain(Color(0.18, 0.19, 0.2), 0.4, 0.8), lamps)
 	_multimesh(_mesh_box(Vector3(0.5, 0.18, 0.9)), M.emissive(Color(1.0, 0.93, 0.78), 1.5), heads)
 	var trunk := CylinderMesh.new()
 	trunk.top_radius = 0.14
 	trunk.bottom_radius = 0.22
 	trunk.height = 3.0
+	trunk.radial_segments = 8
+	trunk.rings = 1
 	_multimesh(trunk, M.bark(), trunks)
 	var crown := SphereMesh.new()
 	crown.radius = 2.2
 	crown.height = 3.6
-	crown.radial_segments = 16
-	crown.rings = 10
+	crown.radial_segments = 12
+	crown.rings = 7
 	_multimesh(crown, M.leaves(), crowns)
 
 func _mesh_box(size: Vector3) -> BoxMesh:
