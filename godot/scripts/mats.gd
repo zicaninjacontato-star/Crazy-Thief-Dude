@@ -3,6 +3,11 @@ extends RefCounted
 ## Tudo usa mapeamento triplanar em coordenadas do mundo, então a escala da textura é sempre em metros.
 
 static var _cache := {}
+static var _facades: Array = []   # materiais de fachada (emissão das janelas à noite)
+
+static func set_night(n: float) -> void:
+	for m in _facades:
+		m.emission_energy_multiplier = n * 1.1
 
 static func _noise(freq: float, seed: int, ntype: int, octaves := 5) -> FastNoiseLite:
 	var n := FastNoiseLite.new()
@@ -157,10 +162,39 @@ static func facade(style: int) -> StandardMaterial3D:
 	hgt.fill_rect(mul, Color(0.6, 0.6, 0.6))
 	rgh.fill_rect(mul, Color(0.5, 0.5, 0.5))
 	met.fill_rect(mul, Color(0.2, 0.2, 0.2))
-	hgt.bump_map_to_normal_map(5.0)
+	# bloco de 4x4 janelas (128 px cada) para variar quais janelas acendem à noite
+	var T := 4
+	var C := 128
+	var tiles := []
 	for im in [alb, hgt, rgh, met]:
+		im.resize(C, C, Image.INTERPOLATE_BILINEAR)
+		var big := Image.create(C * T, C * T, false, Image.FORMAT_RGBA8)
+		for ty in T:
+			for tx in T:
+				big.blit_rect(im, Rect2i(0, 0, C, C), Vector2i(tx * C, ty * C))
+		tiles.append(big)
+	alb = tiles[0]; hgt = tiles[1]; rgh = tiles[2]; met = tiles[3]
+	var emi := Image.create(C * T, C * T, false, Image.FORMAT_RGBA8)
+	emi.fill(Color(0, 0, 0))
+	var er := RandomNumberGenerator.new()
+	er.seed = 300 + style
+	var wr := Rect2i(win.position / 2, win.size / 2)
+	var warm := [Color(1.0, 0.78, 0.45), Color(1.0, 0.88, 0.62), Color(0.75, 0.85, 1.0), Color(1.0, 0.7, 0.4)]
+	for ty in T:
+		for tx in T:
+			if er.randf() < 0.42:
+				var wc: Color = warm[er.randi() % warm.size()] * er.randf_range(0.55, 1.0)
+				wc.a = 1.0
+				emi.fill_rect(Rect2i(wr.position + Vector2i(tx * C, ty * C), wr.size), wc)
+	hgt.bump_map_to_normal_map(5.0)
+	for im in [alb, hgt, rgh, met, emi]:
 		im.generate_mipmaps()
 	var m := StandardMaterial3D.new()
+	m.emission_enabled = true
+	m.emission_texture = ImageTexture.create_from_image(emi)
+	m.emission = Color(0, 0, 0)   # operador ADD: cor + textura (preto = só a máscara das janelas)
+	m.emission_energy_multiplier = 0.0
+	_facades.append(m)
 	m.albedo_texture = ImageTexture.create_from_image(alb)
 	m.normal_enabled = true
 	m.normal_texture = ImageTexture.create_from_image(hgt)
@@ -177,7 +211,7 @@ static func facade(style: int) -> StandardMaterial3D:
 	m.detail_albedo = noise_tex(0.05, 40 + style, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 256, false, 0, ramp(Color(0.72, 0.72, 0.72), Color(1, 1, 1)))
 	m.uv1_triplanar = true
 	m.uv1_world_triplanar = true
-	m.uv1_scale = Vector3(1.0 / 3.2, 1.0 / 3.4, 1.0 / 3.2)
+	m.uv1_scale = Vector3(1.0 / 12.8, 1.0 / 13.6, 1.0 / 12.8)
 	_cache[key] = m
 	return m
 

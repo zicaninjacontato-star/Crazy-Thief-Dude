@@ -11,6 +11,7 @@ const Audio := preload("res://scripts/audio.gd")
 const FX := preload("res://scripts/fx.gd")
 const Combat := preload("res://scripts/combat.gd")
 const UI := preload("res://scripts/ui.gd")
+const DayNight := preload("res://scripts/daynight.gd")
 
 var city: Node3D
 var player: CharacterBody3D
@@ -53,6 +54,9 @@ var armor := 0.0
 var owned_cars: Array = []   # [{kind, color}] comprados na concessionária
 var shop_near := ""
 var autosave_t := 0.0
+var tod := 10.0          # hora do dia (0-24)
+var quality := 1
+var daynight: Node
 
 func _ready() -> void:
 	rng.seed = 7
@@ -120,13 +124,16 @@ func _ready() -> void:
 	combat.setup(self)
 	hud.weapon_pressed.connect(func(): combat.cycle())
 	hud.shop_pressed.connect(func(): if shop_near != "": ui.show_shop(shop_near))
+	daynight = DayNight.new()
+	add_child(daynight)
+	daynight.setup(self)
 	ui = UI.new()
 	ui.main = self
 	add_child(ui)
 	ui.apply_now()
 	if shot == "" or shot_view in ["menu", "shop", "cars_shop", "settings"]:
 		ui.show_main_menu()
-	if shot_view in ["menu", "shop", "cars_shop", "settings"]:
+	if shot_view in ["menu", "shop", "cars_shop", "settings", "clothes"]:
 		process_mode = Node.PROCESS_MODE_ALWAYS   # captura de teste com o menu aberto
 
 ## novo jogo: só soco, $600, sem carros comprados
@@ -137,6 +144,9 @@ func new_game() -> void:
 	combat.owned = {"fist": true}
 	combat.ammo = {}
 	combat.weapon = "fist"
+	tod = 10.0
+	player.outfit = player.OUTFIT0.duplicate()
+	player.rebuild_body()
 	combat._equip()
 	for c in _owned_nodes():
 		cars.erase(c)
@@ -163,6 +173,14 @@ func load_game() -> void:
 	combat.ammo = am
 	var w: String = d.get("weapon", "fist")
 	combat.weapon = w if ow.has(w) else "fist"
+	tod = float(d.get("time", 10.0))
+	var of: Dictionary = player.OUTFIT0.duplicate()
+	var od2: Dictionary = d.get("outfit", {})
+	for k in od2:
+		if of.has(k): of[k] = od2[k]
+	of.hat = int(of.hat)
+	player.outfit = of
+	player.rebuild_body()
 	combat._equip()
 	for c in _owned_nodes():
 		cars.erase(c)
@@ -192,6 +210,7 @@ func apply_settings(s: Dictionary) -> void:
 	gore = s.gore
 	FX.blood_on = s.blood
 	var q: int = s.quality
+	quality = q
 	var mobile := OS.has_feature("mobile")
 	get_viewport().scaling_3d_scale = ([0.6, 0.75, 1.0] if mobile else [0.75, 1.0, 1.0])[q]
 	if sun:
@@ -513,6 +532,7 @@ func _process(dt: float) -> void:
 			if Vector2(sh.pos.x - player.global_position.x, sh.pos.z - player.global_position.z).length() < 3.2:
 				shop_near = sh.type
 	hud.shop_label = "LOJA" if shop_near != "" else ""
+	hud.clock.text = "%02d:%02d" % [int(tod), int(fmod(tod, 1.0) * 60.0)]
 	autosave_t += dt
 	if autosave_t > 60.0 and shot == "":
 		autosave_t = 0.0
@@ -525,7 +545,7 @@ func _process(dt: float) -> void:
 		msg_t -= dt
 		if msg_t <= 0: hud.hint.text = ""
 	elif shop_near != "":
-		hud.hint.text = "Toque em LOJA para comprar"
+		hud.hint.text = {"guns": "AMMU★NATION", "cars": "Concessionária", "clothes": "Loja de roupas"}[shop_near] + " · toque em LOJA"
 	elif player.vehicle == null and my_car and my_car.global_position.distance_to(player.global_position) < 4.0:
 		hud.hint.text = "Toque em CARRO para entrar"
 	else:
@@ -621,13 +641,47 @@ func _shot_tick() -> void:
 			print("HIT hp=", hp, " armor=", armor)
 		if frames == 20:
 			new_game()
-			print("NEW money=", money, " owned=", combat.owned, " nodes=", _owned_nodes().size())
+			print("NEW outfit=", player.outfit, " tod=", tod, " money=", money, " owned=", combat.owned, " nodes=", _owned_nodes().size())
 			ui.save_game()
+		if frames == 21:
+			ui._clothes_begin()
+			ui._set_outfit("hat", 2)
+			ui._set_outfit("shirt", "a3141a")
+			print("CLOTH cost=", ui._outfit_cost())
+			ui._clothes_buy()
+			ui._clothes_exit()
+			tod = 21.25
+			ui.save_game()
+			print("CLOTH money=", money, " outfit=", player.outfit)
 		if frames == 22:
 			money = 20000
 			ui._buy_car(ui.CARS[0])
+			player.outfit = player.OUTFIT0.duplicate()
+			tod = 3.0
 			load_game()
-			print("LOAD money=", money, " owned=", combat.owned, " weapon=", combat.weapon, " cars=", owned_cars.size(), " nodes=", _owned_nodes().size())
+			print("LOAD outfit=", player.outfit, " tod=", snappedf(tod, 0.01), " money=", money, " owned=", combat.owned, " weapon=", combat.weapon, " cars=", owned_cars.size(), " nodes=", _owned_nodes().size())
+	if shot_view in ["night", "dusk", "nightcar"] and frames == 3:
+		tod = {"night": 22.5, "dusk": 17.6, "nightcar": 23.0}[shot_view]
+		daynight.set_process(false)
+		daynight.apply(0.0, true)
+	if shot_view == "nightcar" and frames == 4:
+		player.global_position = my_car.global_position + Vector3(2.0, 0, 0)
+	if shot_view == "nightcar" and frames == 5:
+		_toggle_car()
+		daynight.apply(0.0, true)
+		cam_yaw = 0.3
+		cam_idle = 999.0
+	if shot_view == "night" and frames == 4:
+		cam_yaw = PI * 0.75
+		cam_pitch = -0.12
+	if shot_view == "clothes" and frames == 20:
+		player.global_position = city.shops[2].pos + Vector3(0, 0, -1.0)
+	if shot_view == "clothes" and frames == 30:
+		money = 900
+		ui.show_shop("clothes")
+		ui._set_outfit("jacket", "5a3a22")
+		ui._set_outfit("hat", 1)
+		ui._set_outfit("glasses", true)
 	if shot_view == "shopsign" and frames == 4:
 		var sh: Dictionary = city.shops[0]
 		player.global_position = sh.pos + Vector3(-3, 0, -6)

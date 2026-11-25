@@ -47,14 +47,21 @@ func _process(_dt: float) -> void:
 	pause_btn.visible = overlay == null
 
 # ---------------- utilidades de interface ----------------
-func _open(title: String) -> VBoxContainer:
+func _open(title: String, side := false) -> VBoxContainer:
 	_close()
 	get_tree().paused = true
 	overlay = ColorRect.new()
-	overlay.color = Color(0, 0, 0, 0.62)
+	overlay.color = Color(0, 0, 0, 0.15 if side else 0.62)
 	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(overlay)
-	var center := CenterContainer.new()
+	var center: Container
+	if side:
+		# painel à esquerda (o personagem aparece à direita, para provar roupas)
+		center = MarginContainer.new()
+		for k in ["margin_left", "margin_top", "margin_bottom"]:
+			center.add_theme_constant_override(k, 14)
+	else:
+		center = CenterContainer.new()
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	overlay.add_child(center)
 	var pc := PanelContainer.new()
@@ -66,8 +73,9 @@ func _open(title: String) -> VBoxContainer:
 	sb.set_border_width_all(2)
 	pc.add_theme_stylebox_override("panel", sb)
 	center.add_child(pc)
+	pc.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(560, 0)
+	scroll.custom_minimum_size = Vector2(480 if side else 560, 0)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	pc.add_child(scroll)
 	var box := VBoxContainer.new()
@@ -81,7 +89,7 @@ func _open(title: String) -> VBoxContainer:
 	t.add_theme_color_override("font_color", Color(1, 0.82, 0.2))
 	box.add_child(t)
 	# altura máxima: 85% da tela (com rolagem)
-	var h := get_viewport().get_visible_rect().size.y * 0.85
+	var h := get_viewport().get_visible_rect().size.y * (0.9 if side else 0.85)
 	scroll.custom_minimum_size.y = minf(h, 640.0)
 	return box
 
@@ -138,6 +146,9 @@ func _on(v: bool) -> String:
 	return "LIGADO" if v else "DESLIGADO"
 
 func show_shop(kind: String) -> void:
+	if kind == "clothes":
+		_clothes_begin()
+		return
 	if kind == "guns":
 		var box := _open("AMMU★NATION")
 		_info(box, "Dinheiro: $%d" % main.money, Color(0.4, 1, 0.4))
@@ -172,6 +183,131 @@ func show_shop(kind: String) -> void:
 		for it in CARS:
 			_btn(box, "%s — $%d" % [it.name, it.price], func(): _buy_car(it), main.money >= it.price)
 		_btn(box, "SAIR", _close)
+
+# ---------------- loja de roupas (prova ao vivo no personagem) ----------------
+const SHIRTS := ["216b42", "f2f2f0", "141416", "a3141a", "1d4fa8", "e0a020", "6b2c80", "d96aa0", "4f6b2a", "8a8f96"]
+const PANTS := ["1f2945", "141416", "4a4f57", "6b5a3e", "2f4a2a", "e8e4da"]
+const JACKETS := ["", "141416", "5a3a22", "263a5c", "7a1a1a", "3d4a2f", "b8b8b4"]
+const HATC := ["1a1a1f", "a3141a", "1d4fa8", "e8e4da", "2f4a2a", "e0a020"]
+const HAIRS := ["291a0f", "0d0d0d", "6b4a2a", "c9a25a", "8a8a8a", "9a3a1a"]
+const CPRICE := {"shirt": 60, "pants": 80, "jacket": 220, "hat": 50, "hat_c": 0, "glasses": 40, "hair": 30}
+var _orig_outfit := {}
+var _cam_saved := Transform3D()
+
+func _clothes_begin() -> void:
+	var p = main.player
+	_orig_outfit = p.outfit.duplicate()
+	_cam_saved = main.cam.global_transform
+	_clothes_cam()
+	_show_clothes()
+
+## câmera de frente para o jogador, com ele no lado direito da tela
+func _clothes_cam() -> void:
+	var p = main.player
+	var c: Camera3D = main.cam
+	var f: Vector3 = c.global_position - p.global_position
+	f.y = 0
+	f = f.normalized() if f.length() > 0.1 else Vector3.BACK
+	p.body.rotation.y = atan2(f.x, f.z)
+	var base: Vector3 = p.global_position + Vector3(0, 1.0, 0)
+	c.global_position = base + f * 3.1 + Vector3(0, 0.35, 0)
+	var right: Vector3 = (-f).cross(Vector3.UP).normalized()
+	c.look_at(base - right * 1.0, Vector3.UP)
+
+func _outfit_cost() -> int:
+	var o: Dictionary = main.player.outfit
+	var t := 0
+	for k in CPRICE:
+		if str(o[k]) != str(_orig_outfit[k]):
+			t += CPRICE[k]
+	if str(o.hat_c) != str(_orig_outfit.hat_c) and int(o.hat) != 0 and str(o.hat) == str(_orig_outfit.hat):
+		t += CPRICE.hat
+	return t
+
+func _set_outfit(k: String, v) -> void:
+	var p = main.player
+	p.outfit[k] = v
+	p.rebuild_body()
+	main.combat._equip()
+	_clothes_cam()
+	_show_clothes()
+
+func _swatches(box: Container, title: String, key: String, list: Array) -> void:
+	_info(box, title, Color(0.95, 0.85, 0.5))
+	var row := HFlowContainer.new()
+	row.alignment = FlowContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("h_separation", 6)
+	row.add_theme_constant_override("v_separation", 6)
+	box.add_child(row)
+	for hx in list:
+		var b := Button.new()
+		b.custom_minimum_size = Vector2(44, 44)
+		var st := StyleBoxFlat.new()
+		st.set_corner_radius_all(22)
+		if hx == "":
+			st.bg_color = Color(0.2, 0.2, 0.22)
+			b.text = "✕"
+		else:
+			st.bg_color = Color.html(hx)
+		if str(main.player.outfit[key]) == hx:
+			st.border_color = Color(1, 0.85, 0.2)
+			st.set_border_width_all(4)
+		for sn in ["normal", "hover", "pressed"]:
+			b.add_theme_stylebox_override(sn, st)
+		b.pressed.connect(func(): _set_outfit(key, hx))
+		row.add_child(b)
+
+func _opts(box: Container, title: String, key: String, names: Array, values: Array) -> void:
+	_info(box, title, Color(0.95, 0.85, 0.5))
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_child(row)
+	for i in names.size():
+		var b := Button.new()
+		b.text = names[i]
+		b.toggle_mode = true
+		b.button_pressed = str(main.player.outfit[key]) == str(values[i])
+		b.custom_minimum_size = Vector2(120, 46)
+		b.add_theme_font_size_override("font_size", 20)
+		var v = values[i]
+		b.pressed.connect(func(): _set_outfit(key, v))
+		row.add_child(b)
+
+func _show_clothes() -> void:
+	var box := _open("LOJA DE ROUPAS", true)
+	var cost := _outfit_cost()
+	_info(box, "Dinheiro: $%d · Total: $%d" % [main.money, cost], Color(0.4, 1, 0.4) if main.money >= cost else Color(1, 0.4, 0.4))
+	_swatches(box, "Camiseta ($%d)" % CPRICE.shirt, "shirt", SHIRTS)
+	_swatches(box, "Calça ($%d)" % CPRICE.pants, "pants", PANTS)
+	_swatches(box, "Jaqueta ($%d)" % CPRICE.jacket, "jacket", JACKETS)
+	_opts(box, "Chapéu ($%d)" % CPRICE.hat, "hat", ["Nenhum", "Boné", "Touca"], [0, 1, 2])
+	if int(main.player.outfit.hat) != 0:
+		_swatches(box, "Cor do chapéu", "hat_c", HATC)
+	_opts(box, "Óculos escuros ($%d)" % CPRICE.glasses, "glasses", ["Sem", "Com"], [false, true])
+	_swatches(box, "Cabelo ($%d)" % CPRICE.hair, "hair", HAIRS)
+	var buy := _btn(box, "COMPRAR ($%d)" % cost, _clothes_buy, cost > 0 and main.money >= cost)
+	buy.custom_minimum_size.x = 420
+	var ex := _btn(box, "SAIR SEM COMPRAR" if cost > 0 else "SAIR", _clothes_exit)
+	ex.custom_minimum_size.x = 420
+
+func _clothes_buy() -> void:
+	var cost := _outfit_cost()
+	if main.money < cost:
+		return
+	main.money -= cost
+	_orig_outfit = main.player.outfit.duplicate()
+	main.audio.play("cash")
+	save_game()
+	_show_clothes()
+
+func _clothes_exit() -> void:
+	var p = main.player
+	if str(p.outfit) != str(_orig_outfit):
+		p.outfit = _orig_outfit.duplicate()
+		p.rebuild_body()
+		main.combat._equip()
+	main.cam.global_transform = _cam_saved
+	_close()
 
 func _buy_gun(it: Dictionary) -> void:
 	var c = main.combat
@@ -232,7 +368,7 @@ func apply_now() -> void:
 
 func save_game() -> void:
 	var c = main.combat
-	var d := {"money": main.money, "armor": main.armor, "owned": c.owned, "ammo": c.ammo, "weapon": c.weapon, "cars": main.owned_cars}
+	var d := {"money": main.money, "armor": main.armor, "owned": c.owned, "ammo": c.ammo, "weapon": c.weapon, "cars": main.owned_cars, "outfit": main.player.outfit, "time": main.tod}
 	var f := FileAccess.open(SAVE, FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(d))

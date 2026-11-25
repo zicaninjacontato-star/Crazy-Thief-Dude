@@ -34,7 +34,8 @@ static func material() -> StandardMaterial3D:
 		_mat.roughness = 0.78
 	return _mat
 
-func build(shirt: Color, pants: Color, skin: Color, hair: Color) -> void:
+## ex (opcional): jacket (Color, alfa 0 = sem), hat (0 nenhum, 1 boné, 2 touca), hat_c (Color), glasses (bool)
+func build(shirt: Color, pants: Color, skin: Color, hair: Color, ex := {}) -> void:
 	skin_c = skin
 	var shoe := Color(0.07, 0.07, 0.08)
 	# ossos (pivôs)
@@ -49,19 +50,46 @@ func build(shirt: Color, pants: Color, skin: Color, hair: Color) -> void:
 		_bone("fore" + sd, "upper" + sd, Vector3(0, -0.29, 0))
 	# geometria fundida por osso
 	_mesh("hips", [[_cap(0.17, 0.32), Transform3D(Basis().scaled(Vector3(1.05, 1, 0.75)), Vector3(0, 0.02, 0)), pants]])
-	_mesh("chest", [[_cap(0.19, 0.58), Transform3D(Basis().scaled(Vector3(1.0, 1, 0.68)), Vector3(0, 0.26, 0)), shirt],
-		[_cap(0.055, 0.14), Transform3D(Basis(), Vector3(0, 0.56, 0)), skin]])
-	_mesh("head", [[_sph(0.115), Transform3D(Basis().scaled(Vector3(0.9, 1.08, 1.0)), Vector3(0, 0.12, 0)), skin],
+	var jacket: Color = ex.get("jacket", Color(0, 0, 0, 0))
+	var has_j := jacket.a > 0.5
+	var chest_items := [[_cap(0.19, 0.58), Transform3D(Basis().scaled(Vector3(1.0, 1, 0.68)), Vector3(0, 0.26, 0)), shirt],
+		[_cap(0.055, 0.14), Transform3D(Basis(), Vector3(0, 0.56, 0)), skin]]
+	if has_j:
+		# jaqueta aberta: casca um pouco maior + camiseta aparecendo na frente + gola
+		chest_items.append([_cap(0.2, 0.56), Transform3D(Basis().scaled(Vector3(1.04, 1, 0.72)), Vector3(0, 0.25, -0.004)), jacket])
+		chest_items.append([_box(Vector3(0.11, 0.36, 0.03)), Transform3D(Basis(), Vector3(0, 0.27, 0.138)), shirt])
+		chest_items.append([_box(Vector3(0.3, 0.06, 0.2)), Transform3D(Basis(), Vector3(0, 0.5, -0.01)), jacket.darkened(0.15)])
+	_mesh("chest", chest_items)
+	var head_items := [[_sph(0.115), Transform3D(Basis().scaled(Vector3(0.9, 1.08, 1.0)), Vector3(0, 0.12, 0)), skin],
 		[_sph(0.12), Transform3D(Basis().scaled(Vector3(0.96, 0.82, 1.02)), Vector3(0, 0.17, -0.015)), hair],
 		[_sph(0.018), Transform3D(Basis(), Vector3(-0.04, 0.13, 0.103)), Color(0.04, 0.04, 0.04)],
 		[_sph(0.018), Transform3D(Basis(), Vector3(0.04, 0.13, 0.103)), Color(0.04, 0.04, 0.04)],
 		[_sph(0.022), Transform3D(Basis().scaled(Vector3(1, 1.2, 1)), Vector3(0, 0.1, 0.113)), skin],
 		[_sph(0.03), Transform3D(Basis().scaled(Vector3(0.4, 1, 0.7)), Vector3(-0.11, 0.12, 0)), skin],
-		[_sph(0.03), Transform3D(Basis().scaled(Vector3(0.4, 1, 0.7)), Vector3(0.11, 0.12, 0)), skin]])
+		[_sph(0.03), Transform3D(Basis().scaled(Vector3(0.4, 1, 0.7)), Vector3(0.11, 0.12, 0)), skin]]
+	var hat: int = ex.get("hat", 0)
+	var hat_c: Color = ex.get("hat_c", Color(0.1, 0.1, 0.12))
+	if hat == 1:
+		head_items.append([_sph(0.125), Transform3D(Basis().scaled(Vector3(0.98, 0.62, 1.02)), Vector3(0, 0.2, -0.01)), hat_c])
+		head_items.append([_box(Vector3(0.2, 0.018, 0.13)), Transform3D(Basis(Vector3.RIGHT, -0.12), Vector3(0, 0.205, 0.13)), hat_c.darkened(0.1)])
+	elif hat == 2:
+		head_items.append([_sph(0.128), Transform3D(Basis().scaled(Vector3(0.97, 0.8, 1.0)), Vector3(0, 0.205, -0.012)), hat_c])
+		head_items.append([_sph(0.035), Transform3D(Basis(), Vector3(0, 0.31, -0.015)), hat_c.lightened(0.2)])
+	if ex.get("glasses", false):
+		var gl := Color(0.03, 0.03, 0.035)
+		for gx in [-0.045, 0.045]:
+			head_items.append([_box(Vector3(0.07, 0.04, 0.012)), Transform3D(Basis(), Vector3(gx, 0.135, 0.112)), gl])
+		head_items.append([_box(Vector3(0.21, 0.012, 0.012)), Transform3D(Basis(), Vector3(0, 0.145, 0.11)), gl])
+	_mesh("head", head_items)
 	for sd in ["L", "R"]:
 		_mesh("thigh" + sd, [[_cap(0.085, 0.5), Transform3D(Basis(), Vector3(0, -0.23, 0)), pants]])
 		_mesh("shin" + sd, [[_cap(0.065, 0.48), Transform3D(Basis(), Vector3(0, -0.23, 0)), pants],
 			[_box(Vector3(0.11, 0.08, 0.27)), Transform3D(Basis(), Vector3(0, -0.47, 0.05)), shoe]])
+		if has_j:
+			_mesh("upper" + sd, [[_cap(0.066, 0.33), Transform3D(Basis(), Vector3(0, -0.14, 0)), jacket]])
+			_mesh("fore" + sd, [[_cap(0.054, 0.22), Transform3D(Basis(), Vector3(0, -0.1, 0)), jacket], [_cap(0.047, 0.28), Transform3D(Basis(), Vector3(0, -0.13, 0)), skin],
+				[_sph(0.05), Transform3D(Basis().scaled(Vector3(0.8, 1.1, 0.6)), Vector3(0, -0.3, 0)), skin]])
+			continue
 		_mesh("upper" + sd, [[_cap(0.06, 0.32), Transform3D(Basis(), Vector3(0, -0.14, 0)), shirt]])
 		_mesh("fore" + sd, [[_cap(0.047, 0.28), Transform3D(Basis(), Vector3(0, -0.13, 0)), skin],
 			[_sph(0.05), Transform3D(Basis().scaled(Vector3(0.8, 1.1, 0.6)), Vector3(0, -0.3, 0)), skin]])

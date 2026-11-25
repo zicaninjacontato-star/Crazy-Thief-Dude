@@ -25,11 +25,16 @@ func _ready() -> void:
 	rebuild_body()
 	floor_snap_length = 0.3
 
+const OUTFIT0 := {"shirt": "216b42", "pants": "1f2945", "hair": "291a0f", "jacket": "", "hat": 0, "hat_c": "1a1a1f", "glasses": false}
+var outfit: Dictionary = OUTFIT0.duplicate()
+
 func rebuild_body() -> void:
 	if body and is_instance_valid(body):
 		body.queue_free()
 	body = Humanoid.new()
-	body.build(Color(0.13, 0.42, 0.26), Color(0.12, 0.16, 0.27), Color(0.86, 0.66, 0.5), Color(0.16, 0.1, 0.06))
+	var o := outfit
+	body.build(Color.html(o.shirt), Color.html(o.pants), Color(0.86, 0.66, 0.5), Color.html(o.hair),
+		{"jacket": Color.html(o.jacket) if o.jacket != "" else Color(0, 0, 0, 0), "hat": int(o.hat), "hat_c": Color.html(o.hat_c), "glasses": bool(o.glasses)})
 	add_child(body)
 
 func jump() -> void:

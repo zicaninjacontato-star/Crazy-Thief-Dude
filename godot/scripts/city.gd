@@ -17,6 +17,7 @@ var walk_loops: Array = []  # percursos de pedestres (um por quadra)
 var hospital_pos := Vector3.ZERO
 var police_pos := Vector3.ZERO
 var shops: Array = []   # {type, pos, name}
+var lamp_mat: StandardMaterial3D
 
 func _ready() -> void:
 	rng.seed = 2026
@@ -224,7 +225,8 @@ func _props() -> void:
 	pole.radial_segments = 8
 	pole.rings = 1
 	_multimesh(pole, M.plain(Color(0.18, 0.19, 0.2), 0.4, 0.8), lamps)
-	_multimesh(_mesh_box(Vector3(0.5, 0.18, 0.9)), M.emissive(Color(1.0, 0.93, 0.78), 1.5), heads)
+	lamp_mat = M.emissive(Color(1.0, 0.86, 0.62), 1.5).duplicate()
+	_multimesh(_mesh_box(Vector3(0.5, 0.18, 0.9)), lamp_mat, heads)
 	var trunk := CylinderMesh.new()
 	trunk.top_radius = 0.14
 	trunk.bottom_radius = 0.22
@@ -267,7 +269,8 @@ func _landmarks() -> void:
 	# lojas: AMMU★NATION e concessionária (porta na calçada, placa luminosa com texto)
 	var gs := Vector3(_center(3), 0.3, _center(3) - BLOCK * 0.5 + 1.6)
 	var cs := Vector3(_center(1), 0.3, _center(1) - BLOCK * 0.5 + 1.6)
-	shops = [{"type": "guns", "pos": gs, "name": "AMMU★NATION", "col": Color(0.95, 0.15, 0.1)}, {"type": "cars", "pos": cs, "name": "CONCESSIONÁRIA", "col": Color(0.2, 0.75, 1.0)}]
+	var rs := Vector3(_center(2), 0.3, _center(3) - BLOCK * 0.5 + 1.6)
+	shops = [{"type": "guns", "pos": gs, "name": "AMMU★NATION", "col": Color(0.95, 0.15, 0.1)}, {"type": "cars", "pos": cs, "name": "CONCESSIONÁRIA", "col": Color(0.2, 0.75, 1.0)}, {"type": "clothes", "pos": rs, "name": "ROUPAS", "col": Color(0.95, 0.45, 0.85)}]
 	for sh in shops:
 		var sp: Vector3 = sh.pos
 		var em := M.emissive(sh.col, 1.6)

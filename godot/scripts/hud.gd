@@ -30,6 +30,7 @@ var hint: Label
 var buttons := {}   # nome -> Rect2 (em pixels de tela)
 var driving := false
 var money: Label
+var clock: Label
 var hp := 100.0
 var armor := 0.0
 var shop_label := ""   # texto do botão de loja (vazio = escondido)
@@ -52,7 +53,8 @@ func _ready() -> void:
 	stars.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	stars.position = Vector2(-220, 98)
 	stars.add_theme_color_override("font_color", Color(1, 0.82, 0.2))
-	speed = _label(Vector2(16, 250), 26)
+	speed = _label(Vector2(16, 290), 26)
+	clock = _label(Vector2(88, 232), 24)
 	money = _label(Vector2(0, 0), 40)
 	money.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	money.position = Vector2(-300, 44)

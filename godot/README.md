@@ -2,6 +2,8 @@
 
 Protótipo para avaliar o visual e o desempenho de uma versão do jogo em motor nativo. **O jogo web (`../game.html`) não depende disto.**
 
+Conteúdo (lote 5): loja de roupas (camiseta, calça, jaqueta, boné/touca, óculos, cabelo, com prova no personagem), ciclo de dia e noite (pôr do sol, lua, janelas acesas, postes e faróis com luz de verdade) e relógio no HUD.
+
 Conteúdo (lote 4): menu inicial (continuar / novo jogo / configurações), pausa, configurações (sangue, gore, qualidade gráfica baixa/média/alta, volume, contador de FPS), loja de armas AMMU★NATION (armas, munição, colete), concessionária (5 modelos, 8 cores) e save automático.
 
 Conteúdo (lote 3): armas (soco, pistola, submetralhadora, espingarda) com mira automática para o celular, botões ATIRAR e troca de arma, rastro e clarão de tiro; policiais descem da viatura, perseguem a pé e atiram; morte com ragdoll do jogador → WASTED → hospital (-$100); preso a pé → delegacia (-$100); pedestres mortos deixam dinheiro.
