@@ -234,6 +234,34 @@ func cinematic(title: String, sub: String, mid: Callable) -> void:
 	tw.tween_property(_cine, "modulate:a", 0.0, 0.5)
 	tw.tween_callback(func(): _cine.queue_free(); _cine = null; main.hud.input_block = false)
 
+## faixas pretas de cinema (sem escurecer a tela) com um título
+var _lb: Control
+func letterbox(on: bool, title := "") -> void:
+	if _lb:
+		_lb.queue_free()
+		_lb = null
+	if not on:
+		return
+	_lb = Control.new()
+	_lb.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_lb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_lb)
+	var s := get_viewport().get_visible_rect().size
+	for k in 2:
+		var bar := ColorRect.new()
+		bar.color = Color(0, 0, 0)
+		bar.size = Vector2(s.x, s.y * 0.13)
+		bar.position = Vector2(0, 0 if k == 0 else s.y * 0.87)
+		_lb.add_child(bar)
+	var t := Label.new()
+	t.text = title
+	t.add_theme_font_size_override("font_size", 40)
+	t.add_theme_color_override("font_color", Color(0.9, 0.85, 0.8))
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	t.size = Vector2(s.x, 60)
+	t.position = Vector2(0, s.y * 0.9)
+	_lb.add_child(t)
+
 # ---------------- telas ----------------
 func show_main_menu() -> void:
 	var box := _open("CRAZY THIEF DUDE")

@@ -19,6 +19,24 @@ var sir_t := 0.0
 var sir_vol := 0.0
 var sir_target := 0.0
 var sounds := {}
+var amb_city: AudioStreamPlayer
+var amb_sea: AudioStreamPlayer
+
+## ambiente: 0..1 de cidade e de mar (o main calcula pela posição)
+func set_ambient(city: float, sea: float) -> void:
+	amb_city.volume_db = linear_to_db(maxf(0.0005, city * 0.55))
+	amb_sea.volume_db = linear_to_db(maxf(0.0005, sea * 0.7))
+
+func _loop_player(w: AudioStreamWAV) -> AudioStreamPlayer:
+	w.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	w.loop_begin = 0
+	w.loop_end = w.data.size() / 2
+	var p := AudioStreamPlayer.new()
+	p.stream = w
+	p.volume_db = -60.0
+	add_child(p)
+	p.play()
+	return p
 
 func _ready() -> void:
 	engine_p = _gen_player()
@@ -39,6 +57,15 @@ func _ready() -> void:
 	sounds["rocket"] = _noise_burst(0.9, 0.05, 1200.0, 0.6)
 	sounds["swoosh"] = _noise_burst(0.15, 0.04, 2200.0, 0.4)
 	sounds["kick"] = _noise_burst(0.14, 0.002, 380.0, 1.2)
+	sounds["reload"] = _clicks([0.0, 0.35, 0.7], 0.95)
+	sounds["click"] = _clicks([0.0], 0.15)
+	sounds["stroke"] = _noise_burst(0.35, 0.05, 1800.0, 0.5)
+	sounds["glass"] = _noise_burst(0.5, 0.001, 6000.0, 0.7)
+	sounds["whale"] = _whale()
+	sounds["whoosh"] = _whoosh()
+	amb_city = _loop_player(_city_loop())
+	amb_sea = _loop_player(_sea_loop())
+	sounds["squid"] = _boom()
 
 func _gen_player() -> AudioStreamPlayer:
 	var p := AudioStreamPlayer.new()
@@ -208,4 +235,108 @@ func _boom() -> AudioStreamWAV:
 		y2 += 0.5 * ((randf() * 2.0 - 1.0) - y2)
 		var low := sin(TAU * 45.0 * t * (1.0 - t * 0.3)) * exp(-t * 3.0)
 		out[i] = clampf((y * 6.0 + low * 0.9) * exp(-t * 2.2) + y2 * exp(-t * 25.0) * 0.8, -1.0, 1.0)
+	return _wav(out)
+
+func _clicks(times: Array, dur: float) -> AudioStreamWAV:
+	var n := int(dur * RATE)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	for tt in times:
+		var i0 := int(tt * RATE)
+		for i in int(0.04 * RATE):
+			if i0 + i < n:
+				var t := i / RATE
+				out[i0 + i] += (randf() * 2.0 - 1.0) * exp(-t * 120.0) * 0.9 + sin(TAU * 2400.0 * t) * exp(-t * 200.0) * 0.4
+	return _wav(out)
+
+func _whale() -> AudioStreamWAV:
+	var dur := 2.5
+	var n := int(dur * RATE)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	var ph := 0.0
+	for i in n:
+		var t := i / RATE
+		var f := 180.0 + sin(t * 1.3) * 60.0 + t * 30.0
+		ph += f / RATE
+		out[i] = sin(TAU * ph) * sin(PI * t / dur) * 0.5 + sin(TAU * ph * 2.01) * 0.12 * sin(PI * t / dur)
+	return _wav(out)
+
+## cidade (8 s em loop): ronco de trânsito, carros passando ao longe, vozes (formantes) e buzina distante
+func _city_loop() -> AudioStreamWAV:
+	var dur := 8.0
+	var n := int(dur * RATE)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	var y := 0.0
+	var y2 := 0.0
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 11
+	for i in n:
+		var t := i / RATE
+		y += 0.02 * ((rng.randf() * 2.0 - 1.0) - y)
+		y2 += 0.12 * ((rng.randf() * 2.0 - 1.0) - y2)
+		# carros passando: ondas lentas de ruído
+		var pass_ := pow(maxf(0.0, sin(t * TAU / 8.0 * 3.0)), 6.0) + pow(maxf(0.0, sin(t * TAU / 8.0 * 2.0 + 1.3)), 8.0)
+		# loop sem emenda: tudo periódico em 8 s
+		out[i] = y * 5.0 * 0.35 + y2 * pass_ * 0.35
+	# vozes: sílabas curtas filtradas
+	for k in 26:
+		var t0 := rng.randf_range(0.0, dur - 0.5)
+		var f0 := rng.randf_range(140.0, 260.0)
+		var syl := rng.randi_range(2, 5)
+		var amp := rng.randf_range(0.03, 0.08)
+		for sy in syl:
+			var st := t0 + sy * 0.16
+			var len_ := rng.randf_range(0.08, 0.14)
+			var fm := rng.randf_range(500.0, 900.0)
+			for i in int(len_ * RATE):
+				var idx := int(st * RATE) + i
+				if idx >= n:
+					break
+				var tt := i / RATE
+				var env := sin(PI * tt / len_)
+				out[idx] += (sin(TAU * f0 * tt) * 0.6 + sin(TAU * fm * tt) * 0.3) * env * amp
+	# buzina distante
+	var hb := int(5.3 * RATE)
+	for i in int(0.35 * RATE):
+		var tt := i / RATE
+		out[hb + i] += (sin(TAU * 410.0 * tt) + sin(TAU * 520.0 * tt)) * 0.025 * minf(1.0, tt * 30.0) * minf(1.0, (0.35 - tt) * 20.0)
+	return _wav(out)
+
+## mar (8 s em loop): ondas batendo (ruído com envelope lento), vento e gaivotas
+func _sea_loop() -> AudioStreamWAV:
+	var dur := 8.0
+	var n := int(dur * RATE)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	var y := 0.0
+	var w := 0.0
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 21
+	for i in n:
+		var t := i / RATE
+		y += 0.09 * ((rng.randf() * 2.0 - 1.0) - y)
+		w += 0.01 * ((rng.randf() * 2.0 - 1.0) - w)
+		var wave := pow(0.5 + 0.5 * sin(t * TAU / 4.0 - 1.2), 3.0) * 0.8 + pow(0.5 + 0.5 * sin(t * TAU / 8.0 * 3.0), 4.0) * 0.4
+		out[i] = y * wave * 0.9 + w * 2.5 * 0.25
+	for k in 3:
+		var t0 := rng.randf_range(0.5, dur - 1.0)
+		for i in int(0.5 * RATE):
+			var idx := int(t0 * RATE) + i
+			var tt := i / RATE
+			var f := 1800.0 - tt * 1400.0 + sin(tt * 60.0) * 120.0
+			out[idx] += sin(TAU * f * tt) * sin(PI * tt / 0.5) * 0.05
+	return _wav(out)
+
+func _whoosh() -> AudioStreamWAV:
+	var dur := 1.2
+	var n := int(dur * RATE)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	var y := 0.0
+	for i in n:
+		var t := i / RATE
+		y += 0.15 * ((randf() * 2.0 - 1.0) - y)
+		out[i] = y * pow(sin(PI * t / dur), 2.0) * 1.6
 	return _wav(out)

@@ -50,7 +50,15 @@ var pitch := 0.0
 var roll := 0.0
 var vy := 0.0
 
+var subkind := ""           # boat / jetski / ship (todos usam a física de barco)
+var ai_path: Array = []      # patrulha em volta da ilha (barcos com piloto NPC)
+var ai_i := 0
+var npc_drv: Node3D = null
+
 func setup(k: String, paint: Color) -> void:
+	subkind = k
+	if k in ["jetski", "ship"]:
+		k = "boat"
 	kind = k
 	collision_layer = 1
 	collision_mask = 1
@@ -60,10 +68,21 @@ func setup(k: String, paint: Color) -> void:
 	var bx := BoxShape3D.new()
 	match kind:
 		"boat":
-			_boat(paint)
-			body_size = Vector3(2.2, 1.4, 6.0)
-			seat = Vector3(0.35, 0.55, -0.4)
-			hp = 120.0
+			if subkind == "jetski":
+				_jetski(paint)
+				body_size = Vector3(1.2, 1.1, 3.2)
+				seat = Vector3(0, 0.75, -0.3)
+				hp = 70.0
+			elif subkind == "ship":
+				_ship(paint)
+				body_size = Vector3(9.0, 9.0, 42.0)
+				seat = Vector3(0, 9.2, -12.5)
+				hp = 900.0
+			else:
+				_boat(paint)
+				body_size = Vector3(2.2, 1.4, 6.0)
+				seat = Vector3(0.35, 0.55, -0.4)
+				hp = 120.0
 		"plane":
 			_plane(paint)
 			body_size = Vector3(10.5, 2.6, 8.4)
@@ -74,7 +93,7 @@ func setup(k: String, paint: Color) -> void:
 			body_size = Vector3(2.4, 2.8, 9.0)
 			seat = Vector3(0.35, 0.65, 0.9)
 			hp = 160.0
-	bx.size = Vector3(minf(body_size.x, 2.4), 1.2, body_size.z * 0.8)
+	bx.size = Vector3(minf(body_size.x, 2.4), 1.2, body_size.z * 0.8) if subkind != "ship" else Vector3(8.6, 4.0, 40.0)
 	cs.shape = bx
 	cs.position = Vector3(0, 0.8, 0)
 	add_child(cs)
@@ -102,7 +121,10 @@ func take_damage(d: float) -> void:
 		if kind != "boat" and global_position.y > 2.0:
 			_fall = true     # motor falha: cai girando
 	if hp <= 0.0:
-		explode()
+		if kind == "boat":
+			_sink()      # barco destruído no mar afunda (o jogador cai na água)
+		else:
+			explode()
 
 func _sink() -> void:
 	if sinking:
@@ -171,13 +193,24 @@ func _physics_process(dt: float) -> void:
 
 # ---------------------------------------------------------------- barco
 func _boat_phys(dt: float) -> void:
+	# piloto NPC: segue a rota de patrulha em volta da ilha
+	if driver == null and npc_drv != null and not ai_path.is_empty() and not dead:
+		var tp: Vector3 = ai_path[ai_i]
+		var to := tp - global_position
+		to.y = 0
+		if to.length() < 25.0:
+			ai_i = (ai_i + 1) % ai_path.size()
+		var want := atan2(to.x, to.z)
+		steer_in = clampf(wrapf(want - yaw, -PI, PI) * 1.5, -1.0, 1.0)
+		throttle = 0.6
 	var drive := not dead and (driver != null or ai_target != null or throttle != 0.0)
 	engine_on = drive
-	var acc := throttle * 11.0 if drive else 0.0
+	var vmax := 30.0 if subkind == "jetski" else (10.0 if subkind == "ship" else 26.0)
+	var acc := throttle * (14.0 if subkind == "jetski" else (2.5 if subkind == "ship" else 11.0)) if drive else 0.0
 	v += acc * dt
-	v -= v * (0.35 if absf(throttle) > 0.05 else 0.9) * dt
-	v = clampf(v, -6.0, 26.0)
-	yaw += steer_in * 1.1 * clampf(absf(v) / 5.0, 0.0, 1.0) * signf(v + 0.01) * dt
+	v -= v * (0.35 if absf(throttle) > 0.05 else 0.9) * dt * (0.3 if subkind == "ship" else 1.0)
+	v = clampf(v, -6.0, vmax)
+	yaw += steer_in * (1.6 if subkind == "jetski" else (0.18 if subkind == "ship" else 1.1)) * clampf(absf(v) / 5.0, 0.0, 1.0) * signf(v + 0.01) * dt
 	var fwd := Vector3(sin(yaw), 0, cos(yaw))
 	var next := global_position + fwd * v * dt
 	if world2 and not world2.is_water(next.x, next.z):
@@ -185,7 +218,8 @@ func _boat_phys(dt: float) -> void:
 		if absf(v) > 4.0:
 			take_damage(absf(v) * 2.0)
 	velocity = fwd * v
-	velocity.y = (WATER_Y - 0.55 - global_position.y) * 6.0 if not dead else -0.6
+	var float_y := WATER_Y - (0.55 if subkind != "ship" else 3.2)
+	velocity.y = (float_y - global_position.y) * 6.0 if not dead else -0.6
 	move_and_slide()
 	if dead and global_position.y < -2.5:
 		queue_free()
@@ -401,3 +435,33 @@ func _blade() -> BoxMesh:
 	var b := BoxMesh.new()
 	b.size = Vector3(0.28, 0.04, 10.4)
 	return b
+
+
+func _jetski(paint: Color) -> void:
+	var st := _st()
+	CM._ell(st, Vector3(0, 0.45, 0.1), Vector3(1.1, 0.55, 3.2), paint)
+	CM._ell(st, Vector3(0, 0.32, 0.0), Vector3(1.15, 0.3, 3.1), Color(0.95, 0.95, 0.95))
+	CM._ell(st, Vector3(0, 0.82, -0.45), Vector3(0.45, 0.22, 1.2), Color(0.08, 0.08, 0.1))   # banco
+	CM._box(st, Vector3(0.5, 0.35, 0.3), Vector3(0, 0.95, 0.55), paint.darkened(0.3))        # console
+	CM._box(st, Vector3(0.75, 0.05, 0.05), Vector3(0, 1.15, 0.5), Color(0.1, 0.1, 0.1))      # guidão
+	_commit(st, model_root)
+
+## navio de carga: casco, ponte de comando na popa e contêineres no convés
+func _ship(paint: Color) -> void:
+	var st := _st()
+	var hull := Color(0.15, 0.2, 0.3)
+	for i in 21:
+		var z := lerpf(-21.0, 21.0, i / 20.0)
+		var w := 9.0 * (1.0 - pow(clampf((z - 10.0) / 11.0, 0.0, 1.0), 1.5) * 0.8)
+		CM._box(st, Vector3(w, 5.0, 2.1), Vector3(0, 2.5, z), hull)
+		CM._box(st, Vector3(w + 0.05, 1.0, 2.1), Vector3(0, 0.5, z), Color(0.6, 0.1, 0.08))
+	CM._box(st, Vector3(8.6, 0.2, 40.0), Vector3(0, 5.1, 0), Color(0.45, 0.45, 0.42))
+	CM._box(st, Vector3(8.0, 6.0, 6.0), Vector3(0, 8.0, -15.5), Color(0.92, 0.92, 0.9))     # ponte
+	CM._box(st, Vector3(8.4, 0.3, 6.4), Vector3(0, 11.1, -15.5), Color(0.3, 0.3, 0.32))
+	CM._box(st, Vector3(1.2, 4.0, 1.2), Vector3(0, 13.0, -17.0), Color(0.75, 0.12, 0.1))   # chaminé
+	var cc := [Color(0.75, 0.2, 0.1), Color(0.1, 0.35, 0.6), Color(0.85, 0.6, 0.1), Color(0.2, 0.5, 0.3)]
+	for r in 6:
+		for c in 3:
+			for h in 2:
+				CM._box(st, Vector3(2.4, 2.5, 5.8), Vector3(-2.7 + c * 2.7, 6.45 + h * 2.55, -8.0 + r * 4.6 + 2.0), cc[(r + c + h) % 4])
+	_commit(st, model_root)

@@ -18,6 +18,7 @@ const World2 := preload("res://scripts/world2.gd")
 const Missions := preload("res://scripts/missions.gd")
 const VehAnim := preload("res://scripts/vehanim.gd")
 const Traffic := preload("res://scripts/traffic.gd")
+const Sea := preload("res://scripts/sea.gd")
 
 var city: Node3D
 var player: CharacterBody3D
@@ -73,6 +74,9 @@ var shop_action := ""      # "enter" / "exit" / "buy"
 var shark: Node3D
 var traffic_sys: Node
 var god := false           # código: vida infinita
+var sea: Node3D
+var cine_cam := false      # câmera controlada por uma cena (lula gigante)
+var _snd_t := {}
 var shark_t := 0.0
 
 func _ready() -> void:
@@ -287,7 +291,7 @@ func _spawn_arcade(kind: String, pos: Vector3, yaw: float, paint: Color):
 	a.rotation.y = yaw
 	a.crashed.connect(_on_crash)
 	a.destroyed.connect(_on_vehicle_destroyed)
-	a.destroyed_water.connect(func(cc): if cc == player.vehicle: eject_player(Vector3.ZERO); _msg("A aeronave afundou!"))
+	a.destroyed_water.connect(func(cc): if cc == player.vehicle: eject_player(Vector3.ZERO); _msg("O barco afundou!" if cc.kind == "boat" else "A aeronave afundou!"))
 	cars.append(a)
 	return a
 
@@ -327,6 +331,35 @@ func _spawn_extras() -> void:
 		_spawn_arcade("plane", ps[0], ps[1], [Color(0.75, 0.1, 0.1), Color(0.1, 0.25, 0.6)][i % 2])
 	for hs in world2.heli_spots:
 		_spawn_arcade("heli", hs[0], hs[1], Color(0.85, 0.55, 0.05))
+	# jet-ski no píer e embarcações com piloto dando a volta na ilha (dá para roubar)
+	var js = world2.boat_spots[0]
+	_spawn_arcade("jetski", js[0] + Vector3(0, 0, -11.0), js[1], Color(0.9, 0.85, 0.1))
+	var specs := [["boat", 70.0, Color(0.8, 0.8, 0.82)], ["boat", 140.0, Color(0.1, 0.3, 0.6)], ["boat", 95.0, Color(0.7, 0.15, 0.1)], ["jetski", 45.0, Color(0.1, 0.7, 0.3)], ["jetski", 55.0, Color(0.9, 0.3, 0.6)], ["ship", 320.0, Color.WHITE]]
+	for i in specs.size():
+		var off: float = specs[i][1]
+		var x0: float = world2.ISL_X0 - off
+		var x1: float = world2.SHORE_X + off
+		var z0: float = world2.ISL_Z0 - off
+		var z1: float = world2.ISL_Z1 + off
+		var path := [Vector3(x1, 0, z1), Vector3(x1, 0, z0), Vector3(x0, 0, z0), Vector3(x0, 0, z1)]
+		if i % 2 == 1:
+			path.reverse()
+		var start: Vector3 = path[i % 4].lerp(path[(i + 1) % 4], 0.3 + 0.1 * i)
+		var b = _spawn_arcade(specs[i][0], start + Vector3(0, 0.4, 0), 0.0, specs[i][2])
+		b.ai_path = path
+		b.ai_i = (i + 1) % 4
+		var dh := Humanoid.new()
+		dh.build(Color(0.9, 0.9, 0.88), Color(0.15, 0.2, 0.35), Color(0.78, 0.56, 0.38), Color(0.08, 0.06, 0.05))
+		dh.sitting = true
+		dh.scale = Vector3.ONE * 0.85
+		dh.position = Vector3(b.seat.x, b.seat.y + 0.07 - 0.98 * 0.85, b.seat.z)
+		b.model_root.add_child(dh)
+		dh.animate(0, 0)
+		dh.set_far(70.0)
+		b.npc_drv = dh
+	sea = Sea.new()
+	add_child(sea)
+	sea.setup(self)
 	for sc in world2.station_cars:
 		var pc = _spawn_car(sc[0], sc[1], Color.WHITE, true)
 		pc.parked = true
@@ -468,22 +501,35 @@ func _water_tick(dt: float) -> void:
 	for c in cars.duplicate():
 		if not is_instance_valid(c) or not (c is VehicleBody3D):
 			continue
-		if world2.is_water(c.global_position.x - 11.0, 0) and not c.has_meta("sinking"):
+		if world2.sea_dist(c.global_position.x, c.global_position.z) > 11.0 and world2.is_water(c.global_position.x, c.global_position.z) and not c.has_meta("sinking"):
+			# boia alguns segundos e vai afundando devagar (quem fica dentro se afoga)
 			c.set_meta("sinking", true)
+			c.set_meta("sink_t", 0.0)
 			FX.splash(self, c.global_position + Vector3(0, 0.8, 0), 1.6)
 			audio.play("splash", c.global_position, 4.0)
 			c.dead = true
-			c.gravity_scale = 0.3
-			c.linear_damp = 2.5
+			c.gravity_scale = 0.0
+			c.linear_damp = 1.8
 			c.angular_damp = 2.0
-			if c == player.vehicle:
-				eject_player(Vector3.ZERO)
-				player.global_position = c.global_position + Vector3(0, 1.2, 0)
 			var cc = c
-			get_tree().create_timer(60.0).timeout.connect(func(): if is_instance_valid(cc): cars.erase(cc); cc.queue_free())
+			get_tree().create_timer(90.0).timeout.connect(func(): if is_instance_valid(cc) and cc != player.vehicle: cars.erase(cc); cc.queue_free())
+		elif c.has_meta("sink_t"):
+			var st: float = c.get_meta("sink_t") + dt
+			c.set_meta("sink_t", st)
+			if st < 5.0:
+				# flutuando, balançando
+				var fy: float = world2.WATER_Y - 0.55 - st * 0.08
+				c.linear_velocity.y = (fy - c.global_position.y) * 2.0
+				c.apply_torque(Vector3(sin(st * 2.0), 0, cos(st * 1.7)) * c.mass * 0.6)
+				if int(st * 4.0) != int((st - dt) * 4.0):
+					FX.splash(self, c.global_position + Vector3(0, 0.6, 0), 0.4)
+			else:
+				c.gravity_scale = 0.12
 	# mergulho, fôlego e afogamento
 	player.diving = player.swimming and (hud.jump_held or Input.is_action_pressed("jump"))
-	if player.underwater and not combat.dead:
+	var pv = player.vehicle
+	var in_sunk: bool = pv != null and pv.has_meta("sink_t") and pv.global_position.y + 1.1 < world2.WATER_Y
+	if (player.underwater or in_sunk) and not combat.dead:
 		breath = maxf(0.0, breath - dt * 8.0)
 		if breath <= 0.0:
 			hp -= dt * 14.0
@@ -504,7 +550,7 @@ func _water_tick(dt: float) -> void:
 func _shark_tick(dt: float) -> void:
 	var pp: Vector3 = player.global_position
 	var boat = player.vehicle if player.vehicle and player.vehicle.kind == "boat" else null
-	var far: bool = pp.x > world2.SHORE_X + 280.0 and pp.x < 2600.0
+	var far: bool = world2.is_water(pp.x, pp.z) and world2.sea_dist(pp.x, pp.z) > 280.0
 	if (player.swimming or boat) and far and shark == null and not combat.dead:
 		shark = _make_shark()
 		shark.global_position = pp + Vector3(45.0, 0, randf_range(-25, 25))
@@ -680,6 +726,13 @@ func _toggle_car() -> void:
 	best.throttle = 0.0
 	best.brake_in = 1.0
 	best.ai_target = null
+	if best.get("npc_drv") != null:
+		# piloto do barco/jet-ski/navio pula na água
+		if is_instance_valid(best.npc_drv):
+			FX.splash(self, best.npc_drv.global_position, 1.0)
+			audio.play("splash", best.npc_drv.global_position)
+			best.npc_drv.queue_free()
+		best.npc_drv = null
 	var info: Dictionary = traffic_sys.release(best)
 	vehanim.start_enter(best, info)
 
@@ -905,7 +958,7 @@ func _process(dt: float) -> void:
 	var dist := 4.6
 	var h := 1.5
 	if player.vehicle:
-		dist = {"bus": 13.0, "plane": 15.0, "heli": 13.0, "boat": 9.0, "moto": 5.5}.get(player.vehicle.kind, 7.5)
+		dist = {"bus": 13.0, "plane": 15.0, "heli": 13.0, "boat": 9.0 if player.vehicle.get("subkind") != "ship" else 38.0, "moto": 5.5}.get(player.vehicle.kind, 7.5)
 		h = {"bus": 3.0, "plane": 3.0, "heli": 3.0}.get(player.vehicle.kind, 1.6)
 	elif player.body and player.body.ragdolled and player.body.parts.size() > 0 and is_instance_valid(player.body.parts[0]):
 		tgt = player.body.parts[0]
@@ -949,8 +1002,31 @@ func _process(dt: float) -> void:
 	var ch := get_world_3d().direct_space_state.intersect_ray(cq)
 	if not ch.is_empty():
 		want_pos = ch.position + (focus - want_pos).normalized() * 0.3
-	cam.global_position = cam.global_position.lerp(want_pos, minf(1.0, dt * (14.0 if aiming else 8.0))) if frames > 2 else want_pos
-	cam.look_at(focus + (-off.normalized() * 6.0 if aiming else Vector3.ZERO), Vector3.UP)
+	if not cine_cam:
+		cam.global_position = cam.global_position.lerp(want_pos, minf(1.0, dt * (14.0 if aiming else 8.0))) if frames > 2 else want_pos
+		cam.look_at(focus + (-off.normalized() * 6.0 if aiming else Vector3.ZERO), Vector3.UP)
+	# ambiente: cidade x mar pela distância da água; braçadas; carros e barcos passando
+	var sdist: float = world2.sea_dist(player.global_position.x, player.global_position.z)
+	var amb_city := clampf((-sdist - 30.0) / 80.0, 0.0, 1.0) if interior == "" else 0.0
+	var amb_sea := clampf((sdist + 90.0) / 100.0, 0.0, 1.0) if interior == "" else 0.0
+	if player.underwater:
+		amb_sea *= 0.25
+		amb_city = 0.0
+	audio.set_ambient(amb_city, amb_sea)
+	if player.swimming and Vector2(player.velocity.x, player.velocity.z).length() > 0.6:
+		_step_ph += dt * 1.3
+		if _step_ph >= 1.0:
+			_step_ph = 0.0
+			audio.play("stroke", player.global_position, -4.0)
+	if frames % 10 == 0:
+		var nowt := Time.get_ticks_msec()
+		for c in cars:
+			if not is_instance_valid(c) or c == player.vehicle:
+				continue
+			var cd: float = c.global_position.distance_to(player.global_position)
+			if cd < 9.0 and c.linear_velocity.length() > 8.0 and _snd_t.get(c.get_instance_id(), 0) < nowt:
+				_snd_t[c.get_instance_id()] = nowt + 4000
+				audio.play("whoosh", c.global_position, 0.0 if c.kind != "boat" else 3.0)
 	# sons contínuos
 	if player.vehicle:
 		var v = player.vehicle
@@ -1010,6 +1086,17 @@ func _process(dt: float) -> void:
 							shop_action = "carry"
 							act_target = q
 							break
+	hud.action_kind = shop_action
+	hud.weapon_kind = combat.weapon
+	hud.heli = player.vehicle != null and player.vehicle.kind == "heli"
+	# botão do carro só aparece com um veículo por perto
+	var ce := false
+	if player.vehicle == null and interior == "" and not combat.dead:
+		for c in cars:
+			if is_instance_valid(c) and not c.get("dead") and c.global_position.distance_to(player.global_position) < maxf(c.body_size.z, c.body_size.x) * 0.5 + 3.0 and not police.is_unit_car(c):
+				ce = true
+				break
+	hud.can_enter = ce
 	hud.shop_label = {"enter": "ENTRAR", "exit": "SAIR", "buy": "COMPRAR", "carry": "CARREGAR", "drop": "SOLTAR", "trunk": "PORTA-MALAS"}.get(shop_action, "")
 	var pk: String = player.vehicle.kind if player.vehicle else ""
 	hud.gas_name = "SUBIR" if pk == "heli" else "ACEL"
@@ -1050,6 +1137,79 @@ func _process(dt: float) -> void:
 
 ## cenas de teste do lote 9
 func _test9(v: String) -> void:
+	if v in ["swimpose", "gun1", "gun2", "gun3"]:
+		if frames == 4:
+			if v == "swimpose":
+				player.global_position = Vector3(world2.SHORE_X + 40.0, 0.3, 30.0)
+			else:
+				player.global_position = my_car.global_position + Vector3(-6.0, 0, 14.0)
+				combat.owned["rifle"] = true
+				combat.ammo["rifle"] = 60
+				combat.weapon = "pistol" if v != "gun3" else "rifle"
+				combat._equip()
+				hud.aim = v != "gun1"
+		if frames > 6:
+			cam_yaw = PI * 0.5
+			cam_pitch = -0.05
+			if v == "swimpose":
+				hud.joy = Vector2(0, -1) if frames < 30 else Vector2.ZERO
+			player.aim_yaw = 0.0 if v != "gun1" else NAN
+			player.body.rotation.y = 0.0
+			if frames % 5 == 0 and player.body.gun:
+				print("GUN ", frames, " barrel=", (player.body.gun.global_basis * Vector3(0, -1, 0)).snapped(Vector3.ONE * 0.01), " aiming=", player.body.aiming)
+	if v == "sinkcar":
+		if frames == 4:
+			player.global_position = my_car.door_world()
+		if frames == 6:
+			_toggle_car()
+		if frames == 40:
+			my_car.global_transform = Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(world2.SHORE_X + 30.0, 2.0, 20.0))
+			my_car.linear_velocity = Vector3.ZERO
+		if frames % 10 == 0 and frames > 6:
+			print("SNK ", frames, " y=", snappedf(my_car.global_position.y, 0.01), " veh=", player.vehicle != null, " hp=", snappedf(hp, 0.1), " br=", snappedf(breath, 0.01), " st=", vehanim.state, " sink=", my_car.has_meta("sink_t"))
+		if frames == 130 and player.vehicle:
+			_toggle_car()
+		if frames > 130 and frames < 170:
+			cam_pitch = 0.3
+	if v == "reload":
+		if frames == 6:
+			combat.weapon = "pistol"
+			combat.ammo["pistol"] = 30
+			combat._equip()
+		if frames > 8 and frames < 120:
+			combat.shoot()
+			if frames % 6 == 0:
+				print("RLD ", frames, " ", combat.label(), " rt=", snappedf(combat.reload_t, 0.01))
+	if v == "whale" or v == "squid":
+		if frames == 4:
+			var bt = null
+			for c in cars:
+				if is_instance_valid(c) and c.kind == "boat" and c.get("subkind") == "boat" and c.get("npc_drv") == null:
+					bt = c
+					break
+			set_meta("bt", bt)
+			bt.global_position = Vector3(world2.SHORE_X + (400.0 if v == "whale" else 950.0), world2.WATER_Y, 0.0)
+			player.global_position = bt.global_position + Vector3(2, 0, 0)
+		if frames == 6:
+			_toggle_car()
+		if frames == 40 and v == "whale":
+			sea.whale_cd = 0.0
+			sea._rng.seed = 1
+			for i in 200:
+				if sea.whale: break
+				sea._whale_tick(1.0, player.global_position, world2)
+		if frames % 10 == 0:
+			print("SEA ", frames, " veh=", player.vehicle != null, " whale=", sea.whale != null, " squid=", snappedf(sea.squid_t, 0.01), " dead=", combat.dead, " bhp=", snappedf(get_meta("bt").hp, 1) if is_instance_valid(get_meta("bt")) else -1)
+	if v == "hudnear":
+		if frames == 4:
+			player.global_position = my_car.door_world() + Vector3(1.5, 0, 0)
+		if frames % 20 == 0:
+			print("HUD ", frames, " can_enter=", hud.can_enter, " btns=", hud.buttons.keys())
+	if v == "coast":
+		if frames > 3:
+			player.global_position = Vector3(-640.0, 1.0, 0.0)
+			cam_yaw = -PI * 0.5
+			cam_pitch = 0.5
 	if v == "steal":
 		if frames == 10:
 			var a = traffic_sys.agents.filter(func(x): return x.car.kind == "sedan" or x.car.kind == "hatch")[0]

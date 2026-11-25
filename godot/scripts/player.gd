@@ -70,12 +70,13 @@ func _physics_process(dt: float) -> void:
 	var target_speed := lerpf(0.0, run_speed if (sprint or mag > 0.85) else walk_speed * 1.6, mag)
 	# nado: no mar, na altura da água (no píer, a 1,6 m, anda normal)
 	var wy: float = world2.WATER_Y if world2 else 0.9
-	var swim_now: bool = world2 != null and world2.is_swim(global_position.x) and global_position.y < wy - 0.15 + (0.6 if swimming else 0.0)
+	var swim_now: bool = world2 != null and world2.is_swim(global_position.x, global_position.z) and global_position.y < wy - 0.15 + (0.6 if swimming else 0.0)
 	if swim_now != swimming:
 		swimming = swim_now
 		body.swimming = swimming
 		if swimming and get_tree().current_scene.has_method("splash_at"):
 			get_tree().current_scene.splash_at(global_position)
+	body.swimming = swimming     # todo quadro (o corpo pode ter sido recriado na água)
 	if swimming:
 		target_speed = lerpf(0.0, 3.6 if sprint else 2.3, mag)
 	var hv := Vector3(velocity.x, 0, velocity.z)

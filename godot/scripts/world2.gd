@@ -44,11 +44,25 @@ func _process(dt: float) -> void:
 		var wm: StandardMaterial3D = water.material_override
 		wm.uv1_offset = Vector3(_wt * 0.004, _wt * 0.0025, 0)
 
-func is_water(x: float, z: float) -> bool:
-	return x > SHORE_X and x < 2600.0      # salas das lojas ficam em x ~4000
+const ISL_X0 := -600.0       # ilha: x de ISL_X0 até SHORE_X, z de ISL_Z0 até ISL_Z1
+const ISL_Z0 := -600.0
+const ISL_Z1 := 600.0
 
-func is_swim(x: float) -> bool:
-	return x > SHORE_X + 4.0 and x < 2600.0
+## distância (m) da água até a ilha (0 = na beira); negativo = em terra
+func sea_dist(x: float, z: float) -> float:
+	var dx := maxf(x - SHORE_X, ISL_X0 - 24.0 - x)
+	var dz := maxf(z - (ISL_Z1 + 24.0), (ISL_Z0 - 24.0) - z)
+	if dx > 0.0 and dz > 0.0:
+		return Vector2(dx, dz).length()
+	return maxf(dx, dz)
+
+func is_water(x: float, z: float) -> bool:
+	if absf(x) > 2950.0 or absf(z) > 3450.0:
+		return false               # fora do mundo / salas das lojas (x ~4000)
+	return sea_dist(x, z) > 0.0
+
+func is_swim(x: float, z := 0.0) -> bool:
+	return is_water(x, z) and sea_dist(x, z) > 4.0
 
 ## altura do fundo (rampa da praia e leito)
 func floor_y(x: float) -> float:
@@ -139,37 +153,19 @@ static func marker(parent: Node, pos: Vector3, col: Color, r := 1.2) -> MeshInst
 
 # ---------------------------------------------------------------- praia, mar e píer
 func _beach() -> void:
-	# rampa de areia: sobe da rua até 1,1 m, plana, e desce para dentro da água (linha d'água natural)
-	var prof := [[BEACH_X0, 0.0], [BEACH_X0 + 22.0, 1.1], [SHORE_X - 6.0, 1.1], [SHORE_X + 8.0, 0.0], [SHORE_X + 70.0, SEA_FLOOR], [SHORE_X + 500.0, SEA_FLOOR]]
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var z0 := -3500.0
-	var z1 := 3500.0
-	for i in prof.size() - 1:
-		var a: Array = prof[i]
-		var b: Array = prof[i + 1]
-		var p00 := Vector3(a[0], a[1], z0)
-		var p01 := Vector3(a[0], a[1], z1)
-		var p10 := Vector3(b[0], b[1], z0)
-		var p11 := Vector3(b[0], b[1], z1)
-		for v in [p00, p10, p11, p00, p11, p01]:
-			st.set_uv(Vector2(v.x, v.z) * 0.2)
-			st.add_vertex(v)
-	st.generate_normals()
-	var sm := st.commit()
-	var sand := MeshInstance3D.new()
-	sand.mesh = sm
-	sand.material_override = M.sand()
-	add_child(sand)
-	var cs := CollisionShape3D.new()
-	cs.shape = sm.create_trimesh_shape()
-	body.add_child(cs)
-	# leito do mar (colisão e areia) depois da rampa, chão das salas das lojas
+	# ilha: praia larga a leste e faixas de areia com rampa até o leito nos outros 3 lados
+	var east := [[BEACH_X0, 0.0], [BEACH_X0 + 22.0, 1.1], [SHORE_X - 6.0, 1.1], [SHORE_X + 8.0, 0.0], [SHORE_X + 70.0, SEA_FLOOR], [SHORE_X + 110.0, SEA_FLOOR]]
+	var rim := [[0.0, 0.0], [10.0, 1.1], [20.0, 1.1], [30.0, 0.0], [90.0, SEA_FLOOR], [120.0, SEA_FLOOR]]
+	_strip("x", 1.0, 0.0, east, ISL_Z0 - 120.0, ISL_Z1 + 120.0)
+	_strip("x", -1.0, ISL_X0, rim, ISL_Z0 - 120.0, ISL_Z1 + 120.0)
+	_strip("z", 1.0, ISL_Z1, rim, ISL_X0 - 120.0, SHORE_X + 10.0)
+	_strip("z", -1.0, ISL_Z0, rim, ISL_X0 - 120.0, SHORE_X + 10.0)
+	# leito do mar em volta de tudo (−12 m) e chão das salas das lojas
 	var fl := CollisionShape3D.new()
 	var fb := BoxShape3D.new()
-	fb.size = Vector3(2400.0, 4.0, 7000.0)
+	fb.size = Vector3(6000.0, 4.0, 7000.0)
 	fl.shape = fb
-	fl.position = Vector3(SHORE_X + 400.0 + 1200.0, SEA_FLOOR - 2.0, 0)
+	fl.position = Vector3(0, SEA_FLOOR - 2.0, 0)
 	body.add_child(fl)
 	var fl2 := CollisionShape3D.new()
 	var fb2 := BoxShape3D.new()
@@ -179,20 +175,25 @@ func _beach() -> void:
 	body.add_child(fl2)
 	var bed := MeshInstance3D.new()
 	var bpm := PlaneMesh.new()
-	bpm.size = Vector2(2400.0, 7000.0)
+	bpm.size = Vector2(6000.0, 7000.0)
 	bed.mesh = bpm
 	bed.material_override = M.sand()
-	bed.position = Vector3(SHORE_X + 500.0 + 1200.0 - 2.0, SEA_FLOOR, 0)
+	bed.position = Vector3(0, SEA_FLOOR, 0)
 	add_child(bed)
-	# mar
-	water = MeshInstance3D.new()
-	var pm := PlaneMesh.new()
-	pm.size = Vector2(2400, 7000)
-	water.mesh = pm
-	water.material_override = M.water()
-	water.position = Vector3(SHORE_X + 1200.0 - 4.0, WATER_Y, 0)
-	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(water)
+	# mar nos 4 lados (sem cobrir a ilha)
+	var wm := M.water()
+	for r in [Rect2(SHORE_X - 4.0, -3500.0, 3000.0 - SHORE_X + 4.0, 7000.0), Rect2(-3000.0, -3500.0, 3000.0 + ISL_X0 - 25.0, 7000.0),
+			Rect2(ISL_X0 - 25.0, ISL_Z1 + 25.0, SHORE_X - 4.0 - ISL_X0 + 25.0, 3500.0 - ISL_Z1 - 25.0), Rect2(ISL_X0 - 25.0, -3500.0, SHORE_X - 4.0 - ISL_X0 + 25.0, 3500.0 + ISL_Z0 - 25.0)]:
+		var wmi := MeshInstance3D.new()
+		var pm := PlaneMesh.new()
+		pm.size = r.size
+		wmi.mesh = pm
+		wmi.material_override = wm
+		wmi.position = Vector3(r.get_center().x, WATER_Y, r.get_center().y)
+		wmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(wmi)
+		if water == null:
+			water = wmi
 	# guarda-sóis, toalhas, posto de salva-vidas, coqueiros
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 77
@@ -358,3 +359,37 @@ func _interior(type: String, o: Vector3) -> void:
 					n.position = wd.pos
 			_label("CONCESSIONÁRIA", o + Vector3(0, 3.8, D * 0.5 - 0.2), 120, Color(0.3, 0.8, 1.0), PI)
 	interiors[type] = {"origin": o, "spawn": o + Vector3(0, 0.3, -D * 0.5 + 3.6), "exit": o + Vector3(0, 0.2, -D * 0.5 + 0.8), "counter": counter + Vector3(0, 0.2, -0.3)}
+
+
+## faixa de areia com rampa: eixo "x" (perfil em x, extensão em z) ou "z"; sign = para fora da ilha
+func _strip(axis: String, sgn: float, edge: float, prof: Array, a0: float, a1: float) -> void:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in prof.size() - 1:
+		var pa: Array = prof[i]
+		var pb: Array = prof[i + 1]
+		var d0: float = pa[0] if axis == "x" and sgn > 0 and prof[0][0] > 100.0 else edge + sgn * pa[0]
+		var d1: float = pb[0] if axis == "x" and sgn > 0 and prof[0][0] > 100.0 else edge + sgn * pb[0]
+		var q := []
+		if axis == "x":
+			q = [Vector3(d0, pa[1], a0), Vector3(d1, pb[1], a0), Vector3(d1, pb[1], a1), Vector3(d0, pa[1], a1)]
+		else:
+			q = [Vector3(a0, pa[1], d0), Vector3(a0, pb[1], d1), Vector3(a1, pb[1], d1), Vector3(a1, pa[1], d0)]
+		var tri := [q[0], q[1], q[2], q[0], q[2], q[3]]
+		var flip := (sgn < 0) == (axis == "x")
+		if flip:
+			tri = [q[0], q[2], q[1], q[0], q[3], q[2]]
+		for v in tri:
+			st.set_uv(Vector2(v.x, v.z) * 0.2)
+			st.add_vertex(v)
+	st.generate_normals()
+	var sm := st.commit()
+	var mi := MeshInstance3D.new()
+	mi.mesh = sm
+	mi.material_override = M.sand()
+	add_child(mi)
+	var cs := CollisionShape3D.new()
+	var shp := sm.create_trimesh_shape()
+	shp.backface_collision = true
+	cs.shape = shp
+	body.add_child(cs)

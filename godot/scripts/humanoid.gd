@@ -28,6 +28,8 @@ var pose := ""            # vault, climb, carry, drag, tackle, pull, break, lock
 var pose_t := 0.0
 var gun_kind := ""
 var aim_pitch := 0.0
+var reload_t := 0.0
+var reload_dur := 1.0
 var gun: Node3D
 
 ## arma na mão direita (apontando para frente quando o braço está esticado)
@@ -198,6 +200,10 @@ func animate(speed: float, dt: float) -> void:
 	bones.head.rotation = Vector3.ZERO
 	bones.hips.rotation = Vector3.ZERO
 	bones.hips.position.y = 0.98
+	if gun and is_instance_valid(gun):
+		gun.visible = not swimming
+		if not aiming or swimming:
+			gun.basis = Basis()
 	if swimming:
 		_swim(speed, dt, th, sh, up, fo)
 		return
@@ -297,37 +303,84 @@ func _upper(dt: float, up: Array, fo: Array) -> void:
 			up[k2].rotation = Vector3(-1.1, 0, 0.25 if k2 == 0 else -0.25)
 			fo[k2].rotation.x = -1.9
 		bones.chest.rotation.y = 0.15
+	elif reload_t > 0.0:
+		# recarga: mão de apoio vai até a arma, arma inclinada para o lado
+		reload_t -= dt
+		var rk := sin(clampf(1.0 - reload_t / maxf(reload_dur, 0.01), 0.0, 1.0) * PI)
+		up[1].rotation = Vector3(-0.75, 0, -0.35)
+		fo[1].rotation = Vector3(-1.0, 0.5 * rk, 0)
+		up[0].rotation = Vector3(-0.55 - 0.35 * rk, 0, 0.55)
+		fo[0].rotation.x = -1.3 + sin(_t * 12.0) * 0.12 * rk
+		bones.head.rotation.x = 0.35
 	elif aiming:
 		var ap := aim_pitch
-		if gun_kind in ["rifle", "sniper", "smg", "shotgun", "rpg"]:
-			# fuzil: coronha no ombro, mão de apoio no cano, tronco de lado
-			bones.chest.rotation.y = 0.3
-			bones.head.rotation.y = -0.3
-			up[1].rotation = Vector3(-1.2 - ap, 0, 0.35)
-			fo[1].rotation.x = -1.0
-			up[0].rotation = Vector3(-1.5 - ap, 0, -0.1)
-			fo[0].rotation.x = -0.15
+		if gun_kind in ["rifle", "sniper", "smg", "shotgun"]:
+			# arma longa no ombro: cotovelo baixo, antebraço na horizontal; mão de apoio no cano
+			bones.chest.rotation.y = 0.12
+			bones.head.rotation.y = -0.12
+			up[1].rotation = Vector3(-0.7 - ap, 0, -0.22)
+			fo[1].rotation.x = -0.9
+			up[0].rotation = Vector3(-1.25 - ap, 0, 0.5)
+			fo[0].rotation.x = -0.25
+		elif gun_kind == "rpg":
+			# bazuca no ombro
+			up[1].rotation = Vector3(-0.35, 0, -0.35)
+			fo[1].rotation.x = -1.3
+			up[0].rotation = Vector3(-1.1 - ap, 0, 0.45)
+			fo[0].rotation.x = -0.4
 		else:
-			# pistola com as duas mãos
-			up[1].rotation = Vector3(-1.5 - ap, 0, 0.18)
+			# pistola com as duas mãos, mãos juntas no centro
+			up[1].rotation = Vector3(-1.5 - ap, 0, -0.3)
 			fo[1].rotation.x = -0.05
-			up[0].rotation = Vector3(-1.42 - ap, 0, -0.38)
-			fo[0].rotation.x = -0.3
-			bones.chest.rotation.y = 0.05
+			up[0].rotation = Vector3(-1.45 - ap, 0, 0.5)
+			fo[0].rotation.x = -0.25
 		bones.chest.rotation.x = -ap * 0.35
 		bones.head.rotation.x = -ap * 0.4
+		if gun and is_instance_valid(gun) and gun_kind in ["rifle", "sniper", "smg", "shotgun", "rpg"]:
+			# cano sempre alinhado com a mira (a pose do braço sozinha deixava a arma inclinada)
+			gun.global_basis = global_basis * Basis(Vector3.RIGHT, -PI * 0.5 - ap)
+	elif gun_kind in ["rifle", "sniper", "smg", "shotgun"]:
+		# andando com arma longa: segura na frente do peito (pronto baixo)
+		up[1].rotation = Vector3(-0.45, 0, -0.25)
+		fo[1].rotation.x = -0.95
+		up[0].rotation = Vector3(-0.65, 0, 0.45)
+		fo[0].rotation.x = -0.7
+	elif gun_kind == "rpg":
+		up[1].rotation = Vector3(-0.3, 0, -0.3)
+		fo[1].rotation.x = -1.4
+		up[0].rotation = Vector3(-0.5, 0, 0.3)
+		fo[0].rotation.x = -0.8
 
 func _swim(speed: float, dt: float, th: Array, sh: Array, up: Array, fo: Array) -> void:
-	phase += dt * 4.0
-	bones.hips.rotation.x = 1.25 + (0.55 if dive else 0.0)
-	bones.hips.position.y = 0.6
-	bones.head.rotation.x = -0.9 + (0.5 if dive else 0.0)
-	for k in 2:
-		var sg := 1.0 if k == 0 else -1.0
-		th[k].rotation.x = sin(phase * 1.6) * sg * 0.35 * clampf(speed + 0.3, 0.3, 1.0)
-		sh[k].rotation.x = 0.25
-		up[k].rotation = Vector3(-2.6 + sin(phase + k * PI) * 1.4 * clampf(speed + 0.25, 0.25, 1.0), 0, sg * 0.3)
-		fo[k].rotation.x = -0.3
+	var mv := clampf(speed / 2.0, 0.0, 1.0)
+	_w = lerpf(_w, mv, minf(1.0, dt * 4.0))
+	phase += dt * lerpf(2.2, 6.0, _w)
+	if _w > 0.25 or dive:
+		# crawl: corpo deitado, braços girando em círculo alternados, pernada curta e rápida
+		bones.hips.rotation.x = 1.3 + (0.6 if dive else 0.0)
+		bones.hips.position.y = 0.6
+		bones.head.rotation.x = -1.0 + (0.6 if dive else 0.0)
+		bones.chest.rotation.y = sin(phase) * 0.25
+		for k in 2:
+			var sg := 1.0 if k == 0 else -1.0
+			var a := fmod(phase + k * PI, TAU)
+			up[k].rotation = Vector3(-a, 0, sg * 0.15)
+			fo[k].rotation.x = -0.25 - maxf(0.0, sin(a)) * 0.6
+			th[k].rotation.x = sin(phase * 3.0 + k * PI) * 0.3
+			sh[k].rotation.x = 0.2 + maxf(0.0, sin(phase * 3.0 + k * PI)) * 0.35
+	else:
+		# boiando: corpo em pé na água, pernas pedalando, braços abrindo e fechando
+		# boiando: tronco levemente inclinado, pernas juntas batendo curto (não parece passada),
+		# braços abertos na horizontal "remando" para frente e para trás
+		bones.hips.rotation.x = 0.35
+		bones.hips.position.y = 0.5
+		bones.head.rotation.x = -0.3
+		for k in 2:
+			var sg := 1.0 if k == 0 else -1.0
+			th[k].rotation = Vector3(-0.25 + sin(phase * 2.4 + k * 0.6) * 0.12, 0, sg * 0.08)
+			sh[k].rotation.x = 0.35 + sin(phase * 2.4 + k * 0.6 + 1.0) * 0.12
+			up[k].rotation = Vector3(-0.35, sg * sin(phase * 1.6) * 0.45, sg * 1.25)
+			fo[k].rotation.x = -0.35
 
 ## poses especiais (parkour, carregar/arrastar corpo, derrubar, puxar da porta, quebrar vidro, mixa, cobertura)
 func _pose(dt: float, th: Array, sh: Array, up: Array, fo: Array) -> void:
@@ -409,6 +462,16 @@ func _pose(dt: float, th: Array, sh: Array, up: Array, fo: Array) -> void:
 				sh[i].rotation.x = 1.95
 				up[i].rotation.x = -0.9
 				fo[i].rotation.x = -0.9
+		"kick":
+			# sentado chutando a porta / quebrando o vidro debaixo d'água
+			var kk2 := sin(clampf(k * 3.0, 0.0, 3.0) * PI)
+			th[0].rotation.x = -1.45 + kk2 * 0.9
+			sh[0].rotation.x = 1.35 - kk2 * 1.3
+			th[1].rotation.x = -1.45
+			sh[1].rotation.x = 1.35
+			up[1].rotation = Vector3(-1.2 + kk2 * 0.4, 0, -0.6)
+			fo[1].rotation.x = -1.4
+			bones.chest.rotation.x = -0.2
 		"carried":
 			# jogado no ombro de alguém: corpo dobrado, braços e pernas pendurados
 			bones.chest.rotation.x = 1.4

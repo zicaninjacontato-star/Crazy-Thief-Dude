@@ -49,6 +49,7 @@ func cycle() -> void:
 	_equip()
 
 func select(w: String) -> void:
+	reload_t = 0.0
 	if owned.get(w, false) and (w == "fist" or ammo.get(w, 0) > 0):
 		weapon = w
 		_equip()
@@ -59,13 +60,48 @@ func _equip() -> void:
 		p.body.give_gun(W.gun_mesh(weapon))
 		p.body.gun_kind = weapon
 
+## pente: balas carregadas na arma (o total fica em 'ammo'); acabou o pente = recarrega
+const MAG := {"pistol": 12, "smg": 30, "shotgun": 6, "rifle": 30, "sniper": 5, "rpg": 1}
+const RELOAD := {"pistol": 1.2, "smg": 1.6, "shotgun": 2.2, "rifle": 1.8, "sniper": 2.4, "rpg": 2.6}
+var clip := {}
+var reload_t := 0.0
+
+func _clip(w: String) -> int:
+	if not MAG.has(w):
+		return ammo.get(w, 0)
+	if not clip.has(w):
+		clip[w] = mini(MAG[w], ammo.get(w, 0))
+	return mini(clip[w], ammo.get(w, 0))
+
+func reload() -> void:
+	if not MAG.has(weapon) or reload_t > 0.0 or ammo.get(weapon, 0) <= _clip(weapon) or _clip(weapon) >= MAG[weapon]:
+		return
+	reload_t = RELOAD[weapon]
+	var p = main.player
+	if p.body:
+		p.body.reload_t = reload_t
+		p.body.reload_dur = reload_t
+	main.audio.play("reload", p.global_position, -2.0)
+
 func label() -> String:
 	var d: Dictionary = W.DATA[weapon]
-	return d.name if weapon == "fist" else "%s  %d" % [d.name, ammo.get(weapon, 0)]
+	if weapon == "fist":
+		return d.name
+	if MAG.has(weapon):
+		var c := _clip(weapon)
+		return "%s  %d/%d%s" % [d.name, c, maxi(0, ammo.get(weapon, 0) - c), "  ⟳" if reload_t > 0.0 else ""]
+	return "%s  %d" % [d.name, ammo.get(weapon, 0)]
 
 func _process(dt: float) -> void:
 	if main.god and not force_dead:
 		main.hp = 100.0
+	if reload_t > 0.0:
+		reload_t -= dt
+		if reload_t <= 0.0 and MAG.has(weapon):
+			clip[weapon] = mini(MAG[weapon], ammo.get(weapon, 0))
+			main.audio.play("click", main.player.global_position, -4.0)
+	elif MAG.has(weapon) and _clip(weapon) <= 0 and ammo.get(weapon, 0) > 0 and main.player.vehicle == null:
+		reload()
 	cool -= dt
 	aim_t -= dt
 	combo_t -= dt
@@ -138,7 +174,14 @@ func shoot() -> void:
 	if ammo.get(weapon, 0) <= 0:
 		cycle()
 		return
+	if reload_t > 0.0:
+		return
+	if MAG.has(weapon) and _clip(weapon) <= 0:
+		reload()
+		return
 	ammo[weapon] -= 1
+	if MAG.has(weapon):
+		clip[weapon] = _clip(weapon) - 1
 	aim_t = 1.6
 	main.police.armed_t = 5.0
 	if d.get("throw", false):

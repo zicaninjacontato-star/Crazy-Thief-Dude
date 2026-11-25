@@ -138,17 +138,17 @@ func _ground() -> void:
 	add_child(asphalt)
 	var grass := MeshInstance3D.new()
 	var gm := PlaneMesh.new()
-	gm.size = Vector2(3200, 3200)
+	gm.size = Vector2(836, 1200)
 	grass.mesh = gm
-	grass.position = Vector3(-1364.0, -0.03, 0)     # termina na praia (x≈236): o mar é fundo
+	grass.position = Vector3(-182.0, -0.03, 0)     # só a ilha (x −600..236, z −600..600): mar em volta
 	grass.material_override = M.grass()
 	add_child(grass)
 	# chão firme só em terra (o leito do mar fica no world2, a −12 m)
 	var cs := CollisionShape3D.new()
 	var bx := BoxShape3D.new()
-	bx.size = Vector3(3800.0, 20.0, 7000.0)
+	bx.size = Vector3(844.0, 20.0, 1200.0)
 	cs.shape = bx
-	cs.position = Vector3(244.0 - 1900.0, -10.0, 0)
+	cs.position = Vector3(-178.0, -10.0, 0)
 	body.add_child(cs)
 
 func _block(cx: float, cz: float) -> void:

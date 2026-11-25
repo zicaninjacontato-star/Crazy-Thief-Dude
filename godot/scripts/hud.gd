@@ -38,6 +38,10 @@ var aim := false
 var jump_held := false
 var breath := -1.0
 var swim_mode := false
+var can_enter := false       # há veículo perto (mostra o botão do carro)
+var weapon_kind := "fist"
+var action_kind := ""        # enter / exit / buy / carry / drop / trunk
+var heli := false
 var _fire_last := Vector2.ZERO
 var crosshair := false
 var input_block := false
@@ -109,7 +113,8 @@ func _layout() -> void:
 	var s := root.get_viewport_rect().size
 	buttons.clear()
 	var b := 92.0
-	buttons["enter"] = Rect2(s.x - b - 24, s.y * 0.38, b, b)
+	if can_enter or driving:
+		buttons["enter"] = Rect2(s.x - b - 24, s.y * 0.38, b, b)
 	if driving:
 		buttons["gas"] = Rect2(s.x - b - 24, s.y - b - 30, b, b * 1.15)
 		buttons["brake"] = Rect2(s.x - b * 2 - 44, s.y - b - 30, b, b * 1.15)
@@ -118,7 +123,7 @@ func _layout() -> void:
 		buttons["jump"] = Rect2(s.x - b * 2.2 - 44, s.y - b - 30, b, b)
 		buttons["sprint"] = Rect2(s.x - b * 1.2 - 24, s.y - b * 2.3 - 50, b * 1.2, b * 0.8)
 		buttons["aim"] = Rect2(s.x - b * 2.2 - 44, s.y - b * 2.2 - 46, b, b)
-	buttons["weapon"] = Rect2(s.x - 250, 128, 230, 44)
+	buttons["weapon"] = Rect2(s.x - 170, 122, 150, 78)
 	if shop_label != "" and not driving:
 		buttons["shop"] = Rect2(s.x - b - 24, s.y * 0.38 - b - 16, b, b)
 
@@ -199,7 +204,6 @@ func _draw_controls() -> void:
 		root.draw_rect(Rect2(Vector2.ZERO, s), Color(0.8, 0, 0, flash))
 	_draw_minimap()
 	_draw_bars(s)
-	var names := {"enter": "CARRO", "jump": "MERGULHAR" if swim_mode else "PULO", "sprint": "CORRER", "gas": gas_name, "brake": brk_name, "fire": "ATIRAR", "weapon": weapon_text, "shop": shop_label, "aim": "MIRA ✓" if aim else "MIRA"}
 	if crosshair:
 		var cc := s * 0.5
 		for v in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
@@ -209,9 +213,132 @@ func _draw_controls() -> void:
 	for k in buttons:
 		var r: Rect2 = buttons[k]
 		var on: bool = k in _btn_ids.values() or (k == "aim" and aim)
-		root.draw_rect(r, Color(1, 1, 1, 0.35 if on else 0.18))
-		root.draw_rect(r, Color(1, 1, 1, 0.7), false, 2.0)
-		root.draw_string(font, r.position + Vector2(0, r.size.y * 0.58), names[k], HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 18, Color(1, 1, 1))
+		var c2 := r.get_center()
+		var rad := minf(r.size.x, r.size.y) * 0.5
+		var white := Color(1, 1, 1, 0.92)
+		if k == "weapon":
+			var rr := Rect2(r.position, r.size)
+			root.draw_rect(rr, Color(0, 0, 0, 0.4))
+			root.draw_rect(rr, Color(1, 1, 1, 0.55), false, 2.0)
+			_icon("w_" + weapon_kind, c2 + Vector2(0, -10), 30.0, white)
+			var am := weapon_text.substr(weapon_text.find("  ") + 2) if weapon_text.find("  ") >= 0 else ""
+			root.draw_string(font, r.position + Vector2(0, r.size.y - 8), am, HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 18, white)
+			continue
+		root.draw_circle(c2, rad, Color(0, 0, 0, 0.32 if not on else 0.5))
+		root.draw_arc(c2, rad, 0, TAU, 40, Color(1, 0.85, 0.3, 0.95) if on else Color(1, 1, 1, 0.6), 2.5)
+		var ik: String = k
+		match k:
+			"enter": ik = "exit" if driving else "car"
+			"jump": ik = "dive" if swim_mode else "jump"
+			"sprint": ik = "run"
+			"gas": ik = "up" if heli else "gas"
+			"brake": ik = "down" if heli else "brake"
+			"shop": ik = "a_" + action_kind
+		_icon(ik, c2, rad * 0.62, white)
+
+## ícones vetoriais dos botões
+func _icon(kind: String, c: Vector2, r: float, col: Color) -> void:
+	var w := maxf(2.0, r * 0.13)
+	match kind:
+		"run":
+			_figure(c, r, col, w, [Vector2(-0.35, -0.2), Vector2(0.4, -0.45)], [Vector2(0.45, 0.85), Vector2(-0.5, 0.65)], 0.18)
+		"jump":
+			_figure(c, r, col, w, [Vector2(-0.5, -0.85), Vector2(0.5, -0.85)], [Vector2(-0.3, 0.45), Vector2(0.35, 0.4)], 0.0)
+		"dive":
+			_figure(c + Vector2(0, -r * 0.2), r * 0.75, col, w, [Vector2(-0.3, 0.6), Vector2(0.3, 0.6)], [Vector2(-0.2, -0.9), Vector2(0.2, -0.9)], 0.0)
+			for i in 3:
+				var y := c.y + r * (0.55 + i * 0.0)
+				root.draw_line(Vector2(c.x - r * 0.8 + i * r * 0.55, y), Vector2(c.x - r * 0.55 + i * r * 0.55, y - r * 0.15), col, w * 0.7)
+		"aim":
+			root.draw_arc(c, r * 0.7, 0, TAU, 32, col, w)
+			for v in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
+				root.draw_line(c + v * r * 0.35, c + v * r * 1.0, col, w)
+			root.draw_circle(c, w * 0.8, Color(1, 0.3, 0.3))
+		"fire":
+			var pts := PackedVector2Array([c + Vector2(-0.25, 0.75) * r, c + Vector2(-0.25, -0.2) * r, c + Vector2(0, -0.8) * r, c + Vector2(0.25, -0.2) * r, c + Vector2(0.25, 0.75) * r])
+			root.draw_colored_polygon(pts, Color(0.95, 0.75, 0.3))
+			root.draw_line(c + Vector2(-0.3, 0.55) * r, c + Vector2(0.3, 0.55) * r, Color(0.5, 0.35, 0.1), w)
+		"car":
+			_car_icon(c, r, col, false)
+		"exit":
+			root.draw_rect(Rect2(c + Vector2(-0.7, -0.8) * r, Vector2(0.8, 1.6) * r), col, false, w)
+			root.draw_line(c + Vector2(-0.1, 0) * r, c + Vector2(0.9, 0) * r, col, w)
+			root.draw_colored_polygon(PackedVector2Array([c + Vector2(0.95, 0) * r, c + Vector2(0.6, -0.3) * r, c + Vector2(0.6, 0.3) * r]), col)
+		"gas", "up":
+			root.draw_colored_polygon(PackedVector2Array([c + Vector2(0, -0.8) * r, c + Vector2(0.7, 0.1) * r, c + Vector2(0.25, 0.1) * r, c + Vector2(0.25, 0.8) * r, c + Vector2(-0.25, 0.8) * r, c + Vector2(-0.25, 0.1) * r, c + Vector2(-0.7, 0.1) * r]), col)
+		"brake", "down":
+			root.draw_colored_polygon(PackedVector2Array([c + Vector2(0, 0.8) * r, c + Vector2(0.7, -0.1) * r, c + Vector2(0.25, -0.1) * r, c + Vector2(0.25, -0.8) * r, c + Vector2(-0.25, -0.8) * r, c + Vector2(-0.25, -0.1) * r, c + Vector2(-0.7, -0.1) * r]), Color(1, 0.45, 0.4) if kind == "brake" else col)
+		"a_enter", "a_exit":
+			root.draw_rect(Rect2(c + Vector2(-0.5, -0.85) * r, Vector2(1.0, 1.7) * r), col, false, w)
+			root.draw_circle(c + Vector2(0.28, 0.05) * r, w, col)
+		"a_buy":
+			root.draw_rect(Rect2(c + Vector2(-0.6, -0.3) * r, Vector2(1.2, 1.1) * r), col)
+			root.draw_arc(c + Vector2(0, -0.3) * r, r * 0.35, PI, TAU, 16, col, w)
+			root.draw_string(ThemeDB.fallback_font, c + Vector2(-0.3, 0.55) * r, "$", HORIZONTAL_ALIGNMENT_LEFT, -1, int(r * 0.8), Color(0.1, 0.5, 0.15))
+		"a_carry", "a_drop":
+			root.draw_circle(c + Vector2(0, 0.2) * r, r * 0.45, col)
+			for i in 4:
+				root.draw_line(c + Vector2(-0.35 + i * 0.23, -0.05) * r, c + Vector2(-0.35 + i * 0.23, -0.75) * r, col, w * 1.3)
+			if kind == "a_drop":
+				root.draw_line(c + Vector2(0.7, -0.6) * r, c + Vector2(0.7, 0.7) * r, Color(1, 0.4, 0.4), w)
+		"a_trunk":
+			_car_icon(c + Vector2(0, 0.15) * r, r * 0.9, col, true)
+		"w_fist":
+			root.draw_circle(c + Vector2(0, 0.1) * r, r * 0.55, col)
+			for i in 4:
+				root.draw_circle(c + Vector2(-0.4 + i * 0.27, -0.45) * r, r * 0.17, col)
+		"w_pistol":
+			_poly(c, r, [[-0.8, -0.35], [0.8, -0.35], [0.8, 0.0], [-0.1, 0.0], [-0.25, 0.75], [-0.65, 0.75], [-0.5, 0.0], [-0.8, 0.0]], col)
+		"w_smg":
+			_poly(c, r, [[-1.0, -0.3], [0.9, -0.3], [0.9, 0.05], [0.1, 0.05], [0.1, 0.8], [-0.15, 0.8], [-0.2, 0.05], [-0.5, 0.05], [-0.6, 0.55], [-0.85, 0.55], [-0.75, 0.05], [-1.0, 0.05]], col)
+		"w_shotgun":
+			_poly(c, r, [[-1.3, -0.1], [1.3, -0.25], [1.3, 0.0], [-0.5, 0.1], [-0.9, 0.45], [-1.3, 0.35]], col)
+		"w_rifle":
+			_poly(c, r, [[-1.3, -0.2], [1.3, -0.2], [1.3, 0.02], [0.2, 0.02], [0.3, 0.6], [0.05, 0.62], [-0.1, 0.05], [-0.55, 0.05], [-1.3, 0.4]], col)
+		"w_sniper":
+			_poly(c, r, [[-1.4, -0.1], [1.4, -0.1], [1.4, 0.05], [-0.5, 0.08], [-1.4, 0.4]], col)
+			root.draw_rect(Rect2(c + Vector2(-0.4, -0.45) * r, Vector2(0.9, 0.25) * r), col)
+		"w_rpg":
+			root.draw_rect(Rect2(c + Vector2(-1.3, -0.18) * r, Vector2(2.1, 0.36) * r), col)
+			_poly(c, r, [[0.8, -0.35], [1.4, 0.0], [0.8, 0.35]], col)
+			root.draw_rect(Rect2(c + Vector2(-0.2, 0.15) * r, Vector2(0.2, 0.5) * r), col)
+		"w_grenade":
+			root.draw_circle(c + Vector2(0, 0.15) * r, r * 0.55, col)
+			root.draw_rect(Rect2(c + Vector2(-0.2, -0.65) * r, Vector2(0.4, 0.3) * r), col)
+			root.draw_arc(c + Vector2(0.35, -0.6) * r, r * 0.2, 0, TAU, 12, col, w * 0.6)
+
+func _poly(c: Vector2, r: float, pts: Array, col: Color) -> void:
+	var out := PackedVector2Array()
+	for p in pts:
+		out.append(c + Vector2(p[0], p[1]) * r * 0.75)
+	root.draw_colored_polygon(out, col)
+
+func _figure(c: Vector2, r: float, col: Color, w: float, hands: Array, feet: Array, lean: float) -> void:
+	var head := c + Vector2(lean, -0.75) * r
+	var neck := c + Vector2(lean * 0.8, -0.5) * r
+	var hip := c + Vector2(0, 0.15) * r
+	root.draw_circle(head, r * 0.2, col)
+	root.draw_line(neck, hip, col, w * 1.3)
+	for h in hands:
+		var hp: Vector2 = c + Vector2(h.x, h.y) * r
+		var el := (neck + hp) * 0.5 + Vector2(0, r * 0.1)
+		root.draw_line(neck, el, col, w)
+		root.draw_line(el, hp, col, w)
+	for f in feet:
+		var fp: Vector2 = c + Vector2(f.x, f.y) * r
+		var kn := (hip + fp) * 0.5 + Vector2(r * 0.12 * signf(f.x), -r * 0.05)
+		root.draw_line(hip, kn, col, w * 1.1)
+		root.draw_line(kn, fp, col, w * 1.1)
+
+func _car_icon(c: Vector2, r: float, col: Color, open_trunk: bool) -> void:
+	var pts := PackedVector2Array([c + Vector2(-1.0, 0.3) * r, c + Vector2(-0.95, -0.05) * r, c + Vector2(-0.5, -0.12) * r, c + Vector2(-0.25, -0.55) * r, c + Vector2(0.35, -0.55) * r, c + Vector2(0.6, -0.12) * r, c + Vector2(1.0, -0.05) * r, c + Vector2(1.0, 0.3) * r])
+	root.draw_colored_polygon(pts, col)
+	root.draw_colored_polygon(PackedVector2Array([c + Vector2(-0.18, -0.45) * r, c + Vector2(0.28, -0.45) * r, c + Vector2(0.45, -0.15) * r, c + Vector2(-0.35, -0.15) * r]), Color(0.2, 0.25, 0.3, 0.9))
+	for x in [-0.55, 0.55]:
+		root.draw_circle(c + Vector2(x, 0.32) * r, r * 0.22, Color(0.1, 0.1, 0.1))
+		root.draw_circle(c + Vector2(x, 0.32) * r, r * 0.1, col)
+	if open_trunk:
+		root.draw_line(c + Vector2(-0.95, -0.05) * r, c + Vector2(-1.3, -0.6) * r, Color(1, 0.85, 0.3), maxf(2.0, r * 0.12))
 
 func _process(_dt: float) -> void:
 	var s := root.get_viewport_rect().size

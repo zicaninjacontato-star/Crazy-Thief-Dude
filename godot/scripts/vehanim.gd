@@ -50,6 +50,11 @@ func start_exit(c) -> void:
 	t = 0.0
 	state = "x_open"
 	dur = 0.3 if _has_door(c) else 0.01
+	# carro afundado: chuta a porta ou quebra o vidro para sair nadando
+	if c.has_meta("sink_t") and c.global_position.y + 0.8 < main.world2.WATER_Y:
+		state = "x_kick"
+		dur = 1.2
+		seated.pose = "kick"
 
 func _go(s: String, d: float) -> void:
 	state = s
@@ -139,6 +144,20 @@ func tick(dt: float) -> void:
 				car.set_door(0.0)
 				state = ""
 				main.anim_done()
+		"x_kick":
+			seated.pose_t = k
+			seated.animate(0, dt)
+			if t >= dur:
+				seated.pose = ""
+				if _has_door(car) and rng.randf() < 0.6:
+					car.set_door(1.0)
+					main.audio.play("kick", car.global_position, 4.0)
+				else:
+					main.audio.play("glass", car.global_position, 2.0)
+					FX.sparks(main, car.global_transform * Vector3(car.body_size.x * 0.5, 1.1, car.seat.z))
+				FX.splash(main, car.global_position + Vector3(0, 1.2, 0), 0.6)
+				main.finish_exit(car, car.door_world() + Vector3(0, 0.6, 0))
+				state = ""
 		"x_open":
 			car.set_door(k)
 			if t >= dur:
