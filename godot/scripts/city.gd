@@ -18,6 +18,7 @@ var hospital_pos := Vector3.ZERO
 var police_pos := Vector3.ZERO
 var shops: Array = []   # {type, pos, name}
 var lamp_mat: StandardMaterial3D
+var bus_route: Array = []   # [{p: Vector3 (faixa), stop: bool}] em volta das quadras 1..3 x 1..3
 
 func _ready() -> void:
 	rng.seed = 2026
@@ -31,7 +32,51 @@ func _ready() -> void:
 	_markings()
 	_props()
 	_landmarks()
+	_bus_line()
 	_flush()
+
+## linha de ônibus: retângulo em volta das quadras 1..3 x 1..3, com ponto no meio de cada lado
+func _bus_line() -> void:
+	var r := CELL * 0.5 + 2.6
+	var x0 := _center(1) - r
+	var x1 := _center(3) + r
+	var z0 := _center(1) - r
+	var z1 := _center(3) + r
+	var xm := _center(2)
+	var zm := _center(2)
+	var pts := [[x0, z0, false], [x0, zm, true], [x0, z1, false], [xm, z1, true], [x1, z1, false], [x1, zm, true], [x1, z0, false], [xm, z0, true]]
+	var cx := (x0 + x1) * 0.5
+	var cz := (z0 + z1) * 0.5
+	var pole := M.plain(Color(0.3, 0.32, 0.34), 0.4, 0.8)
+	var roof := M.plain(Color(0.15, 0.4, 0.75), 0.4, 0.3)
+	var glass := M.plain(Color(0.6, 0.7, 0.75), 0.1, 0.6)
+	var bench := M.plain(Color(0.35, 0.22, 0.12), 0.7)
+	for q in pts:
+		var p := Vector3(q[0], 0.0, q[1])
+		bus_route.append({"p": p, "stop": q[2]})
+		if not q[2]:
+			continue
+		# abrigo na calçada, do lado de fora do retângulo
+		var out := Vector3(signf(p.x - cx), 0, 0) if absf(p.x - cx) > absf(p.z - cz) else Vector3(0, 0, signf(p.z - cz))
+		var c := p + out * 6.2 + Vector3(0, 0.15, 0)
+		var side := Vector3(out.z, 0, out.x).abs()
+		var lng := side * 3.2 + out.abs() * 0.12
+		_box(Vector3(0.1, 2.6, 0.1), c + side * 1.5 + out * 0.5 + Vector3(0, 1.3, 0), pole, false)
+		_box(Vector3(0.1, 2.6, 0.1), c - side * 1.5 + out * 0.5 + Vector3(0, 1.3, 0), pole, false)
+		_box(side * 3.4 + out.abs() * 1.4 + Vector3(0, 0.08, 0), c + Vector3(0, 2.62, 0), roof, false)
+		_box(lng + Vector3(0, 1.6, 0), c + out * 0.62 + Vector3(0, 1.2, 0), glass, true)
+		_box(side * 2.4 + out.abs() * 0.4 + Vector3(0, 0.08, 0), c + out * 0.35 + Vector3(0, 0.48, 0), bench, false)
+		_box(Vector3(0.08, 2.4, 0.08), c - out * 0.55 + side * 2.2 + Vector3(0, 1.2, 0), pole, true)
+		_box(side * 0.5 + out.abs() * 0.06 + Vector3(0, 0.5, 0), c - out * 0.55 + side * 2.2 + Vector3(0, 2.6, 0), M.emissive(Color(0.15, 0.45, 0.95), 1.2), false)
+		var lb := Label3D.new()
+		lb.text = "ÔNIBUS"
+		lb.font_size = 64
+		lb.pixel_size = 0.004
+		lb.outline_size = 8
+		lb.shaded = false
+		lb.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+		lb.position = c - out * 0.55 + side * 2.2 + Vector3(0, 3.05, 0)
+		add_child(lb)
 
 func _flush() -> void:
 	for mat in _batch:

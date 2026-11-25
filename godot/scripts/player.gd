@@ -31,11 +31,16 @@ var outfit: Dictionary = OUTFIT0.duplicate()
 func rebuild_body() -> void:
 	if body and is_instance_valid(body):
 		body.queue_free()
-	body = Humanoid.new()
-	var o := outfit
-	body.build(Color.html(o.shirt), Color.html(o.pants), Color(0.86, 0.66, 0.5), Color.html(o.hair),
-		{"jacket": Color.html(o.jacket) if o.jacket != "" else Color(0, 0, 0, 0), "hat": int(o.hat), "hat_c": Color.html(o.hat_c), "glasses": bool(o.glasses)})
+	body = make_body()
 	add_child(body)
+
+## corpo com a roupa atual (também usado para o jogador sentado no veículo)
+func make_body():
+	var h := Humanoid.new()
+	var o := outfit
+	h.build(Color.html(o.shirt), Color.html(o.pants), Color(0.86, 0.66, 0.5), Color.html(o.hair),
+		{"jacket": Color.html(o.jacket) if o.jacket != "" else Color(0, 0, 0, 0), "hat": int(o.hat), "hat_c": Color.html(o.hat_c), "glasses": bool(o.glasses)})
+	return h
 
 func jump() -> void:
 	if is_on_floor():

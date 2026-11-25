@@ -16,6 +16,7 @@ const GUNS := [
 	{"id": "armor", "name": "Colete (100%)", "price": 250},
 ]
 const CARS := [
+	{"id": "moto", "name": "Moto", "price": 1500},
 	{"id": "hatch", "name": "Hatch", "price": 3000},
 	{"id": "sedan", "name": "Sedã", "price": 6000},
 	{"id": "pickup", "name": "Picape", "price": 9000},

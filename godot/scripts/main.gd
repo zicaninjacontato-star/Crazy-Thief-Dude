@@ -57,6 +57,7 @@ var autosave_t := 0.0
 var tod := 10.0          # hora do dia (0-24)
 var quality := 1
 var daynight: Node
+var buses: Array = []   # {car, i, mk, stop_t, drv}
 
 func _ready() -> void:
 	rng.seed = 7
@@ -109,6 +110,38 @@ func _ready() -> void:
 		c.ai_target = mk
 		c.max_engine = 3000.0
 		traffic.append({"car": c, "loop": loop, "i": 1, "mk": mk})
+	# moto no trânsito e motos estacionadas
+	var mc = _spawn_car(Vector3(0, 0.6, 0), 0.0, Color(0.75, 0.08, 0.06), false, "moto")
+	var mloop := _block_loop(1, 2, 1)
+	mc.position = mloop[0]
+	var mmk := Marker3D.new()
+	add_child(mmk)
+	mc.ai_target = mmk
+	mc.max_engine = 900.0
+	traffic.append({"car": mc, "loop": mloop, "i": 1, "mk": mmk})
+	var mcols := [Color(0.05, 0.05, 0.06), Color(0.95, 0.6, 0.05), Color(0.1, 0.3, 0.75)]
+	for k in 3:
+		_spawn_car(my_car.global_position + Vector3(0.9, 0, -8.0 - k * 3.2), 0.0, mcols[k], false, "moto")
+	# ônibus na linha (2, em lados opostos do circuito)
+	for k in 2:
+		var b = _spawn_car(Vector3(0, 0.8, 0), 0.0, [Color(0.1, 0.45, 0.2), Color(0.7, 0.12, 0.1)][k], false, "bus")
+		var i0: int = k * 4
+		var p0: Vector3 = city.bus_route[i0].p
+		var p1: Vector3 = city.bus_route[(i0 + 1) % 8].p
+		b.global_position = p0.lerp(p1, 0.25) + Vector3(0, 0.8, 0)
+		b.rotation.y = atan2(p1.x - p0.x, p1.z - p0.z)
+		var bmk := Marker3D.new()
+		add_child(bmk)
+		b.ai_target = bmk
+		b.max_engine = 16000.0
+		var drv := Humanoid.new()
+		drv.build(Color(0.55, 0.6, 0.7), Color(0.12, 0.14, 0.2), Color(0.7, 0.5, 0.36), Color(0.1, 0.08, 0.06))
+		drv.sitting = true
+		drv.scale = Vector3.ONE * 0.85
+		drv.position = Vector3(b.seat.x, b.seat.y + 0.07 - 0.98 * 0.85, b.seat.z)
+		b.add_child(drv)
+		drv.animate(0, 0)
+		buses.append({"car": b, "i": (i0 + 1) % 8, "mk": bmk, "stop_t": 0.0, "drv": drv})
 	# pedestres
 	for k in 26:
 		var p := Ped.new()
@@ -313,7 +346,7 @@ func _toggle_car() -> void:
 		player.collision_layer = 1
 		player.collision_mask = 1
 		player.process_mode = Node.PROCESS_MODE_INHERIT
-		var side: Vector3 = c.global_transform.basis.x * 1.9
+		var side: Vector3 = c.global_transform.basis.x * (c.body_size.x * 0.5 + 0.8)
 		player.global_position = c.global_position + side + Vector3(0, 0.3, 0)
 		player.velocity = Vector3.ZERO
 		if seated:
@@ -321,11 +354,15 @@ func _toggle_car() -> void:
 			seated = null
 		return
 	var best = null
-	var bd := 4.0
+	var bd := 2.4
 	for c in cars:
-		if c.police or traffic.any(func(t): return t.car == c):
+		if not is_instance_valid(c) or c.police or traffic.any(func(t): return t.car == c):
 			continue
-		var d: float = c.global_position.distance_to(player.global_position)
+		# distância até a caixa do veículo (ônibus é comprido)
+		var lp: Vector3 = c.global_transform.affine_inverse() * player.global_position
+		var hs: Vector3 = c.body_size * 0.5
+		var q := Vector3(clampf(lp.x, -hs.x, hs.x), 0, clampf(lp.z, -hs.z, hs.z))
+		var d: float = Vector2(lp.x - q.x, lp.z - q.z).length()
 		if d < bd:
 			bd = d
 			best = c
@@ -336,12 +373,18 @@ func _toggle_car() -> void:
 	player.collision_layer = 0
 	player.collision_mask = 0
 	player.velocity = Vector3.ZERO
-	seated = Humanoid.new()
-	seated.build(Color(0.13, 0.42, 0.26), Color(0.12, 0.16, 0.27), Color(0.86, 0.66, 0.5), Color(0.16, 0.1, 0.06))
+	for b in buses:
+		if b.car == best and is_instance_valid(b.drv):
+			b.drv.queue_free()   # motorista do ônibus "sai"
+	seated = player.make_body()
 	seated.sitting = true
 	seated.scale = Vector3.ONE * 0.85
 	seated.position = Vector3(best.seat.x, best.seat.y + 0.07 - 0.98 * 0.85, best.seat.z)
-	best.add_child(seated)
+	if best.lean:
+		seated.rotation.x = 0.35     # moto: inclinado para a frente
+		best.lean.add_child(seated)
+	else:
+		best.add_child(seated)
 	seated.animate(0, 0)
 	best.brake_in = 0
 	cam_idle = 2.0
@@ -363,7 +406,7 @@ func _physics_process(dt: float) -> void:
 		player.move_input = Vector2(mv.x, mv.y)
 		player.cam_yaw = cam_yaw + PI
 		player.sprint = hud.sprint or Input.is_action_pressed("sprint")
-	elif shot_view != "drive":
+	elif not shot_view in ["drive", "motoride"]:
 		var c = player.vehicle
 		var g := 1.0 if hud.gas else 0.0
 		var b := 1.0 if hud.brk else 0.0
@@ -390,6 +433,7 @@ func _physics_process(dt: float) -> void:
 	elif not Input.is_action_pressed("fire"):
 		combat.fire_held = false
 	_traffic()
+	_buses(dt)
 	_crimes(dt)
 	_police(dt)
 
@@ -412,6 +456,44 @@ func _traffic() -> void:
 			c.brake_in = 1.0
 		else:
 			c.ai_target = t.mk
+			c.brake_in = 0.0
+
+## ônibus: segue a linha e para 4 s em cada ponto
+func _buses(dt: float) -> void:
+	for b in buses.duplicate():
+		var c = b.car
+		if not is_instance_valid(c) or player.vehicle == c:
+			buses.erase(b)
+			continue
+		var stop: Dictionary = city.bus_route[b.i]
+		var tgt: Vector3 = stop.p
+		var d: float = Vector2(c.global_position.x - tgt.x, c.global_position.z - tgt.z).length()
+		if b.stop_t > 0.0:
+			b.stop_t -= dt
+			c.ai_target = null
+			c.throttle = 0.0
+			c.brake_in = 1.0
+			if b.stop_t <= 0.0:
+				b.i = (b.i + 1) % city.bus_route.size()
+			continue
+		if d < (5.0 if stop.stop else 11.0):
+			if stop.stop:
+				b.stop_t = 4.0
+				continue
+			b.i = (b.i + 1) % city.bus_route.size()
+			tgt = city.bus_route[b.i].p
+		b.mk.global_position = tgt
+		var ahead: Vector3 = c.global_position + c.global_transform.basis.z * 9.0
+		var block := player.global_position.distance_to(ahead) < 5.0
+		for o in cars:
+			if o != c and is_instance_valid(o) and o.global_position.distance_to(ahead) < 4.5:
+				block = true
+		if block:
+			c.ai_target = null
+			c.throttle = 0
+			c.brake_in = 1.0
+		else:
+			c.ai_target = b.mk
 			c.brake_in = 0.0
 
 func _crimes(dt: float) -> void:
@@ -682,6 +764,30 @@ func _shot_tick() -> void:
 		ui._set_outfit("jacket", "5a3a22")
 		ui._set_outfit("hat", 1)
 		ui._set_outfit("glasses", true)
+	if shot_view == "warm" and frames % 5 == 0 and frames < 40:
+		print("WARM ", frames, " w=", daynight._warm, " omni=", daynight.lamp_lights.filter(func(l): return l.visible).size(), " spot=", daynight.car_lights.filter(func(c): return c.l.visible).size())
+	if shot_view == "bus" and frames == 4 or shot_view == "bus" and frames == shot_at - 2:
+		var b = buses[0].car
+		var bx: Vector3 = b.global_transform.basis.x
+		var bz: Vector3 = b.global_transform.basis.z
+		player.global_position = b.global_position + bx * 6.5 + bz * 7.0
+		var away: Vector3 = (bx * 1.0 + bz * 0.25).normalized()
+		cam_yaw = atan2(away.x, away.z)
+		cam_pitch = -0.12
+	if shot_view == "bus" and frames % 30 == 0:
+		print("BUS ", frames, " ", buses.map(func(x): return [x.i, snappedf(x.stop_t, 0.1), x.car.global_position.snapped(Vector3.ONE), snappedf(x.car.speed_kmh(), 1)]))
+	if shot_view in ["moto", "motoride"] and frames == 4:
+		var mo = cars.filter(func(c): return c.kind == "moto" and not traffic.any(func(t): return t.car == c))[0]
+		player.global_position = mo.global_position + Vector3(-1.2, 0, 0)
+		cam_yaw = -PI * 0.5 - 0.6
+		cam_pitch = -0.15
+	if shot_view == "motoride" and frames == 6:
+		_toggle_car()
+		print("RIDE veh=", player.vehicle.kind if player.vehicle else "none")
+	if shot_view == "motoride" and frames > 8 and player.vehicle:
+		player.vehicle.throttle = 0.7
+		player.vehicle.steer_in = 0.0 if frames < 100 else 0.7
+		if frames % 20 == 0: print("MOTO ", frames, " v=", snappedf(player.vehicle.speed_kmh(), 1), " up=", snappedf(player.vehicle.global_transform.basis.y.y, 0.01), " pos=", player.vehicle.global_position.snapped(Vector3.ONE))
 	if shot_view == "shopsign" and frames == 4:
 		var sh: Dictionary = city.shops[0]
 		player.global_position = sh.pos + Vector3(-3, 0, -6)

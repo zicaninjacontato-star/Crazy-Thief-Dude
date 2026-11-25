@@ -4,6 +4,7 @@ extends VehicleBody3D
 
 const M := preload("res://scripts/mats.gd")
 const CarModel := preload("res://scripts/carmodel.gd")
+const VehModel := preload("res://scripts/vehmodel.gd")
 
 var throttle := 0.0     # -1..1 (negativo = ré)
 var brake_in := 0.0     # 0..1
@@ -21,13 +22,33 @@ var wheels: Array = []
 var body_size := Vector3(1.8, 1.4, 4.6)
 var seat := Vector3(0.38, 0.5, 0.0)
 var _flip_t := 0.0
+var kind := "sedan"
+var spin: Array = []        # rodas visuais que giram sozinhas (moto)
+var fork: Node3D            # garfo da moto (esterça)
+var lean: Node3D            # inclinação visual da moto
+var wheel_r := 0.33
 
 ## kind: sedan, hatch, suv, pickup, sport ou police (modelo gerado por carmodel.gd).
 func setup(kind: String, paint: Color) -> void:
 	police = kind == "police"
-	var built: Dictionary = CarModel.build(kind, paint)
+	self.kind = kind
+	var built: Dictionary = VehModel.build(kind, paint) if kind in ["moto", "bus"] else CarModel.build(kind, paint)
 	var size: Vector3 = built.size
 	mass = 1350.0 if size.z < 4.8 else 1700.0
+	spin = built.get("spin", [])
+	fork = built.get("fork")
+	lean = built.get("lean")
+	wheel_r = built.wr
+	if kind == "moto":
+		mass = 260.0
+		max_engine = 1350.0
+		max_brake = 14.0
+		max_steer = 0.42
+	elif kind == "bus":
+		mass = 9000.0
+		max_engine = 26000.0
+		max_brake = 380.0
+		max_steer = 0.5
 	can_sleep = false
 	center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
 	# centro de massa abaixo do eixo das rodas: o carro inclina mas não capota em curva normal
@@ -57,7 +78,11 @@ func setup(kind: String, paint: Color) -> void:
 		w.wheel_rest_length = 0.14
 		w.suspension_travel = 0.2
 		w.suspension_stiffness = 48.0
-		w.suspension_max_force = 12000.0
+		w.suspension_max_force = 12000.0 * (mass / 1350.0) if mass > 1350.0 else 12000.0
+		if kind == "bus":
+			w.suspension_stiffness = 70.0
+		elif kind == "moto":
+			w.suspension_stiffness = 30.0
 		w.damping_compression = 0.4
 		w.damping_relaxation = 0.6
 		w.wheel_friction_slip = 2.4
@@ -124,6 +149,13 @@ func _physics_process(dt: float) -> void:
 	var lim := max_steer * lerpf(1.0, 0.18, clampf(absf(fs) / 28.0, 0.0, 1.0))
 	steering = move_toward(steering, steer_in * lim, dt * 2.2)
 	_anti_flip(dt)
+	if spin.size() > 0:
+		for n in spin:
+			n.rotate_x(fs * dt / wheel_r)
+		if fork:
+			fork.rotation.y = steering * 1.1
+		if lean:
+			lean.rotation.z = lerpf(lean.rotation.z, -steering * clampf(absf(fs) / 12.0, 0.0, 1.0) * 0.9, minf(1.0, dt * 5.0))
 	for w in wheels:
 		if w.use_as_traction:
 			w.wheel_friction_slip = 1.6 if handbrake else 2.6

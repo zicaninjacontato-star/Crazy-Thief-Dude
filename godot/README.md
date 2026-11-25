@@ -2,6 +2,8 @@
 
 Protótipo para avaliar o visual e o desempenho de uma versão do jogo em motor nativo. **O jogo web (`../game.html`) não depende disto.**
 
+Conteúdo (lote 6): motos (estacionadas, no trânsito e na concessionária) e ônibus com linha e pontos; noite mais clara e sem o travamento ao anoitecer.
+
 Conteúdo (lote 5): loja de roupas (camiseta, calça, jaqueta, boné/touca, óculos, cabelo, com prova no personagem), ciclo de dia e noite (pôr do sol, lua, janelas acesas, postes e faróis com luz de verdade) e relógio no HUD.
 
 Conteúdo (lote 4): menu inicial (continuar / novo jogo / configurações), pausa, configurações (sangue, gore, qualidade gráfica baixa/média/alta, volume, contador de FPS), loja de armas AMMU★NATION (armas, munição, colete), concessionária (5 modelos, 8 cores) e save automático.
