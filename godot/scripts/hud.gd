@@ -35,6 +35,10 @@ var hp := 100.0
 var armor := 0.0
 var shop_label := ""   # texto do botão de loja (vazio = escondido)
 var aim := false
+var jump_held := false
+var breath := -1.0
+var swim_mode := false
+var _fire_last := Vector2.ZERO
 var crosshair := false
 var input_block := false
 var map_blips: Array = []      # [{pos, col}]
@@ -153,6 +157,11 @@ func _input(e: InputEvent) -> void:
 				_cam_id = -1
 		root.queue_redraw()
 	elif e is InputEventScreenDrag:
+		# arrastar o dedo que está no ATIRAR também gira a câmera (atirar e mirar com um dedo só)
+		if _btn_ids.get(e.index, "") in ["fire", "aim"]:
+			cam_drag += e.relative
+			root.queue_redraw()
+			return
 		if e.index == _joy_id:
 			var d: Vector2 = (e.position - _joy_center) / R
 			joy = d.limit_length(1.0)
@@ -166,6 +175,7 @@ func _press(k: String, on: bool) -> void:
 		"enter":
 			if on: enter_pressed.emit()
 		"jump":
+			jump_held = on
 			if on: jump_pressed.emit()
 		"gas": gas = on
 		"brake": brk = on
@@ -189,7 +199,7 @@ func _draw_controls() -> void:
 		root.draw_rect(Rect2(Vector2.ZERO, s), Color(0.8, 0, 0, flash))
 	_draw_minimap()
 	_draw_bars(s)
-	var names := {"enter": "CARRO", "jump": "PULO", "sprint": "CORRER", "gas": gas_name, "brake": brk_name, "fire": "ATIRAR", "weapon": weapon_text, "shop": shop_label, "aim": "MIRA ✓" if aim else "MIRA"}
+	var names := {"enter": "CARRO", "jump": "MERGULHAR" if swim_mode else "PULO", "sprint": "CORRER", "gas": gas_name, "brake": brk_name, "fire": "ATIRAR", "weapon": weapon_text, "shop": shop_label, "aim": "MIRA ✓" if aim else "MIRA"}
 	if crosshair:
 		var cc := s * 0.5
 		for v in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
@@ -231,6 +241,10 @@ func _draw_bars(s: Vector2) -> void:
 	var r := Rect2(s.x - 300, 14, 280, 22)
 	root.draw_rect(r, Color(0, 0, 0, 0.45))
 	root.draw_rect(Rect2(r.position + Vector2(3, 3), Vector2((r.size.x - 6) * clampf(hp / 100.0, 0.0, 1.0), r.size.y - 6)), Color(0.85, 0.12, 0.12))
+	if breath >= 0.0:
+		var rb := Rect2(s.x - 300, 52, 280, 10)
+		root.draw_rect(rb, Color(0, 0, 0, 0.45))
+		root.draw_rect(Rect2(rb.position + Vector2(3, 2), Vector2((rb.size.x - 6) * clampf(breath / 100.0, 0.0, 1.0), rb.size.y - 4)), Color(0.35, 0.8, 1.0))
 	if armor > 0.0:
 		var ra := Rect2(s.x - 300, 38, 280, 10)
 		root.draw_rect(ra, Color(0, 0, 0, 0.45))

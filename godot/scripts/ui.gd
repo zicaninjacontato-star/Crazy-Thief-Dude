@@ -184,6 +184,56 @@ func _close_wheel() -> void:
 	Engine.time_scale = 1.0
 	main.hud.input_block = false
 
+# ---------------- tela de carregamento cinematográfica (entrar/sair das lojas) ----------------
+var _cine: ColorRect
+func cinematic(title: String, sub: String, mid: Callable) -> void:
+	if _cine:
+		return
+	_cine = ColorRect.new()
+	_cine.color = Color(0, 0, 0, 1)
+	_cine.modulate.a = 0.0
+	_cine.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_cine.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(_cine)
+	var s := get_viewport().get_visible_rect().size
+	for k in 2:
+		var bar := ColorRect.new()
+		bar.color = Color(0, 0, 0)
+		bar.size = Vector2(s.x, s.y * 0.12)
+		bar.position = Vector2(0, 0 if k == 0 else s.y * 0.88)
+		_cine.add_child(bar)
+	var t := Label.new()
+	t.text = title
+	t.add_theme_font_size_override("font_size", 52)
+	t.add_theme_color_override("font_color", Color(1, 0.85, 0.3))
+	t.add_theme_constant_override("outline_size", 8)
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	t.size = Vector2(s.x, 70)
+	t.position = Vector2(0, s.y * 0.42)
+	t.modulate.a = 0.0
+	_cine.add_child(t)
+	var st := Label.new()
+	st.text = sub
+	st.add_theme_font_size_override("font_size", 22)
+	st.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+	st.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	st.size = Vector2(s.x, 40)
+	st.position = Vector2(0, s.y * 0.42 + 70)
+	st.modulate.a = 0.0
+	_cine.add_child(st)
+	main.hud.input_block = true
+	var tw := create_tween()
+	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tw.tween_property(_cine, "modulate:a", 1.0, 0.45)
+	tw.parallel().tween_property(t, "modulate:a", 1.0, 0.45)
+	tw.parallel().tween_property(st, "modulate:a", 1.0, 0.45)
+	tw.tween_callback(mid)
+	tw.tween_interval(0.7)
+	tw.tween_property(t, "modulate:a", 0.0, 0.3)
+	tw.parallel().tween_property(st, "modulate:a", 0.0, 0.3)
+	tw.tween_property(_cine, "modulate:a", 0.0, 0.5)
+	tw.tween_callback(func(): _cine.queue_free(); _cine = null; main.hud.input_block = false)
+
 # ---------------- telas ----------------
 func show_main_menu() -> void:
 	var box := _open("CRAZY THIEF DUDE")

@@ -61,6 +61,7 @@ func setup(seed: int, kind := "cop") -> void:
 	add_child(body)
 	body.set_far(80.0)
 	body.give_gun(W.gun_mesh(weapon))
+	body.gun_kind = weapon
 	cool = rng.randf_range(0.8, 1.8)
 	pref = rng.randf_range(7.0, 14.0)
 	_strafe = 1.0 if rng.randf() < 0.5 else -1.0
@@ -90,6 +91,113 @@ func _die(imp: Vector3, src, gore: bool) -> void:
 	died.emit(self)
 	get_tree().create_timer(30.0).timeout.connect(_cleanup)
 
+var _stuck_t := 0.0
+var _side_t := 0.0
+var _side_dir := 1.0
+var cover_pos := Vector3.INF
+var _cover_t := 0.0
+var _peek := 0.0
+var rescue_rb: RigidBody3D = null
+var rescue_dest := Vector3.ZERO
+var _rescue_t := 0.0
+var anim := ""            # "tackle" / "pull" (prisão a 1 estrela)
+var anim_t := 0.0
+var anim_cb: Callable
+
+func _find_cover(tp: Vector3) -> Vector3:
+	var main := get_tree().current_scene
+	var best := Vector3.INF
+	var bs := 1e9
+	for c in main.cars:
+		if not is_instance_valid(c) or c.linear_velocity.length() > 2.0 or c == main.player.vehicle:
+			continue
+		var cp: Vector3 = c.global_position
+		if cp.distance_to(global_position) > 22.0:
+			continue
+		var away := cp - tp
+		away.y = 0
+		if away.length() < 5.0:
+			continue
+		var pt: Vector3 = cp + away.normalized() * (c.body_size.x * 0.5 + 0.9)
+		pt.y = global_position.y
+		var dt_ := pt.distance_to(tp)
+		if dt_ < 6.0 or dt_ > 32.0:
+			continue
+		var taken := false
+		for o in main.police.cops:
+			if o != self and is_instance_valid(o) and o.cover_pos.distance_to(pt) < 1.4:
+				taken = true
+		if taken:
+			continue
+		var sc := pt.distance_to(global_position)
+		if sc < bs:
+			bs = sc
+			best = pt
+	return best
+
+## arrasta um colega caído para um lugar seguro
+func start_rescue(rb: RigidBody3D, dest: Vector3) -> void:
+	rescue_rb = rb
+	rescue_dest = dest
+	_rescue_t = 0.0
+
+func _rescue_tick(dt: float) -> void:
+	_rescue_t += dt
+	if not is_instance_valid(rescue_rb) or _rescue_t > 9.0:
+		rescue_rb = null
+		body.pose = ""
+		return
+	if not is_on_floor():
+		velocity.y -= 18.0 * dt
+	var bp: Vector3 = rescue_rb.global_position
+	var to_b := bp - global_position
+	to_b.y = 0
+	if to_b.length() > 1.3 and body.pose != "drag":
+		velocity = Vector3(to_b.normalized().x * speed, velocity.y, to_b.normalized().z * speed)
+		body.rotation.y = atan2(to_b.x, to_b.z)
+		move_and_slide()
+		body.animate(speed, dt)
+		return
+	body.pose = "drag"
+	var to_d := rescue_dest - global_position
+	to_d.y = 0
+	if to_d.length() < 1.0:
+		rescue_rb = null
+		body.pose = ""
+		return
+	var mv := to_d.normalized() * 1.7
+	velocity = Vector3(mv.x, velocity.y, mv.z)
+	move_and_slide()
+	# anda de costas, de frente para o corpo, e puxa o corpo junto
+	body.rotation.y = atan2(-mv.x, -mv.z)
+	var hand: Vector3 = global_position - mv.normalized() * 0.9 + Vector3(0, 0.5, 0)
+	rescue_rb.linear_velocity = (hand - rescue_rb.global_position) * 6.0
+	body.animate(1.7, dt)
+
+## animação curta de prisão; 'cb' roda no fim
+func play_anim(a: String, dur: float, cb: Callable) -> void:
+	anim = a
+	anim_t = 0.0
+	_anim_dur = dur
+	anim_cb = cb
+	body.pose = a
+
+var _anim_dur := 1.0
+func _anim_tick(dt: float) -> void:
+	anim_t += dt
+	body.pose_t = clampf(anim_t / _anim_dur, 0.0, 1.0)
+	if anim == "tackle" and target and is_instance_valid(target):
+		var to := target.global_position - global_position
+		to.y = 0
+		if to.length() > 0.5:
+			global_position += to.normalized() * minf(to.length(), 7.0 * dt)
+	body.animate(0.0, dt)
+	if anim_t >= _anim_dur:
+		anim = ""
+		body.pose = ""
+		if anim_cb.is_valid():
+			anim_cb.call()
+
 func _cleanup() -> void:
 	for p in body.parts:
 		if is_instance_valid(p):
@@ -104,7 +212,14 @@ func _physics_process(dt: float) -> void:
 		velocity.y -= 18.0 * dt
 	else:
 		velocity.y = -0.5
+	if anim != "":
+		_anim_tick(dt)
+		return
+	if rescue_rb != null:
+		_rescue_tick(dt)
+		return
 	if target == null or not is_instance_valid(target):
+		body.pose = ""
 		velocity.x = 0
 		velocity.z = 0
 		move_and_slide()
@@ -127,7 +242,29 @@ func _physics_process(dt: float) -> void:
 		_los = r.is_empty() or r.collider == target or (r.collider is Node and (r.collider as Node).get_meta("player", false))
 	var want := Vector3.ZERO
 	var goal := 1.1 if arrest_only else pref
-	if d > goal + 1.5 or not _los:
+	var in_cover := false
+	# cobertura: corre para trás de um veículo entre ele e o alvo, abaixa e levanta para atirar
+	if not arrest_only:
+		_cover_t -= dt
+		if _cover_t <= 0.0:
+			_cover_t = rng.randf_range(2.5, 4.0)
+			cover_pos = _find_cover(tp)
+	if cover_pos != Vector3.INF and not arrest_only:
+		var tc := cover_pos - global_position
+		tc.y = 0
+		if tc.length() > 0.7:
+			want = tc.normalized() * speed
+			body.pose = ""
+		else:
+			in_cover = true
+			_peek += dt
+			var cyc := fmod(_peek, 3.0)
+			body.pose = "cover" if cyc < 1.6 else ""
+			if body.pose == "cover":
+				cool = maxf(cool, 0.25)
+	elif arrest_only and d > 1.0:
+		want = dirv * speed * 1.1
+	elif d > goal + 1.5 or not _los:
 		want = dirv * speed
 	elif d < goal - 3.0 and not arrest_only:
 		want = -dirv * speed * 0.6
@@ -137,11 +274,25 @@ func _physics_process(dt: float) -> void:
 			_strafe_t = rng.randf_range(1.2, 2.8)
 			_strafe = -_strafe if rng.randf() < 0.6 else _strafe
 		want = Vector3(-dirv.z, 0, dirv.x) * _strafe * 2.0
+	# preso num obstáculo (viatura, poste, quina): contorna pelo lado por um instante
+	if _side_t > 0.0:
+		_side_t -= dt
+		want = Vector3(-want.z, 0, want.x).normalized() * speed * _side_dir + want * 0.3
+	elif want.length() > 1.0 and Vector2(velocity.x, velocity.z).length() < 0.5:
+		_stuck_t += dt
+		if _stuck_t > 0.5:
+			_stuck_t = 0.0
+			_side_t = 0.9
+			_side_dir = -_side_dir if rng.randf() < 0.5 else _side_dir
+	else:
+		_stuck_t = 0.0
 	var hv := Vector3(velocity.x, 0, velocity.z).move_toward(want, 18.0 * dt)
 	velocity.x = hv.x
 	velocity.z = hv.z
 	move_and_slide()
-	body.aiming = not arrest_only and d < 30.0
+	if not in_cover and body.pose == "cover":
+		body.pose = ""
+	body.aiming = not arrest_only and d < 30.0 and body.pose == ""
 	body.animate(hv.length(), dt)
 	if arrest_only:
 		return

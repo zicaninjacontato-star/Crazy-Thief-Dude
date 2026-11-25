@@ -8,6 +8,7 @@ const Humanoid := preload("res://scripts/humanoid.gd")
 
 const SHORE_X := 236.0        # a partir daqui é mar
 const WATER_Y := 0.9
+const SEA_FLOOR := -12.0      # mar fundo (dá para mergulhar)
 const BEACH_X0 := 172.0
 const AIR_X := -330.0         # centro da pista
 
@@ -47,7 +48,17 @@ func is_water(x: float, z: float) -> bool:
 	return x > SHORE_X and x < 2600.0      # salas das lojas ficam em x ~4000
 
 func is_swim(x: float) -> bool:
-	return x > SHORE_X + 7.0 and x < 2600.0
+	return x > SHORE_X + 4.0 and x < 2600.0
+
+## altura do fundo (rampa da praia e leito)
+func floor_y(x: float) -> float:
+	if x < SHORE_X - 6.0:
+		return 1.1
+	if x < SHORE_X + 8.0:
+		return lerpf(1.1, 0.0, (x - SHORE_X + 6.0) / 14.0)
+	if x < SHORE_X + 70.0:
+		return lerpf(0.0, SEA_FLOOR, (x - SHORE_X - 8.0) / 62.0)
+	return SEA_FLOOR
 
 # ---------------------------------------------------------------- utilidades (fundem caixas por zona/material)
 func _box(zone: String, size: Vector3, pos: Vector3, mat: Material, collide := true, rot_y := 0.0) -> void:
@@ -129,11 +140,11 @@ static func marker(parent: Node, pos: Vector3, col: Color, r := 1.2) -> MeshInst
 # ---------------------------------------------------------------- praia, mar e píer
 func _beach() -> void:
 	# rampa de areia: sobe da rua até 1,1 m, plana, e desce para dentro da água (linha d'água natural)
-	var prof := [[BEACH_X0, 0.0], [BEACH_X0 + 22.0, 1.1], [SHORE_X - 6.0, 1.1], [SHORE_X + 10.0, -0.2], [SHORE_X + 40.0, -0.2]]
+	var prof := [[BEACH_X0, 0.0], [BEACH_X0 + 22.0, 1.1], [SHORE_X - 6.0, 1.1], [SHORE_X + 8.0, 0.0], [SHORE_X + 70.0, SEA_FLOOR], [SHORE_X + 500.0, SEA_FLOOR]]
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var z0 := -420.0
-	var z1 := 420.0
+	var z0 := -3500.0
+	var z1 := 3500.0
 	for i in prof.size() - 1:
 		var a: Array = prof[i]
 		var b: Array = prof[i + 1]
@@ -153,10 +164,30 @@ func _beach() -> void:
 	var cs := CollisionShape3D.new()
 	cs.shape = sm.create_trimesh_shape()
 	body.add_child(cs)
+	# leito do mar (colisão e areia) depois da rampa, chão das salas das lojas
+	var fl := CollisionShape3D.new()
+	var fb := BoxShape3D.new()
+	fb.size = Vector3(2400.0, 4.0, 7000.0)
+	fl.shape = fb
+	fl.position = Vector3(SHORE_X + 400.0 + 1200.0, SEA_FLOOR - 2.0, 0)
+	body.add_child(fl)
+	var fl2 := CollisionShape3D.new()
+	var fb2 := BoxShape3D.new()
+	fb2.size = Vector3(600.0, 20.0, 600.0)
+	fl2.shape = fb2
+	fl2.position = Vector3(4100.0, -10.0, 0)
+	body.add_child(fl2)
+	var bed := MeshInstance3D.new()
+	var bpm := PlaneMesh.new()
+	bpm.size = Vector2(2400.0, 7000.0)
+	bed.mesh = bpm
+	bed.material_override = M.sand()
+	bed.position = Vector3(SHORE_X + 500.0 + 1200.0 - 2.0, SEA_FLOOR, 0)
+	add_child(bed)
 	# mar
 	water = MeshInstance3D.new()
 	var pm := PlaneMesh.new()
-	pm.size = Vector2(2400, 2400)
+	pm.size = Vector2(2400, 7000)
 	water.mesh = pm
 	water.material_override = M.water()
 	water.position = Vector3(SHORE_X + 1200.0 - 4.0, WATER_Y, 0)

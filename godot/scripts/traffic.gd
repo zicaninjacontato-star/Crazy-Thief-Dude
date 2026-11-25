@@ -137,7 +137,9 @@ func _driver(a: Dictionary) -> void:
 	var ex := {}
 	if c.kind == "moto":
 		ex = {"hat": 2, "hat_c": [Color(0.1, 0.1, 0.1), Color(0.8, 0.1, 0.1), Color(0.9, 0.9, 0.9)][rng.randi() % 3]}   # capacete
-	h.build(shirts[rng.randi() % shirts.size()], Color(0.12, 0.14, 0.2), [Color(0.92, 0.75, 0.6), Color(0.55, 0.36, 0.22), Color(0.78, 0.56, 0.38)][rng.randi() % 3], Color(0.08, 0.06, 0.05), ex)
+	var cols := [shirts[rng.randi() % shirts.size()], Color(0.12, 0.14, 0.2), [Color(0.92, 0.75, 0.6), Color(0.55, 0.36, 0.22), Color(0.78, 0.56, 0.38)][rng.randi() % 3], Color(0.08, 0.06, 0.05)]
+	a.cols = cols
+	h.build(cols[0], cols[1], cols[2], cols[3], ex)
 	h.sitting = true
 	h.moto_pose = c.kind == "moto"
 	h.scale = Vector3.ONE * 0.85
@@ -150,15 +152,71 @@ func _driver(a: Dictionary) -> void:
 	h.set_far(45.0)
 	a.drv = h
 
-## jogador pegou o carro: o motorista sai correndo
-func release(car) -> bool:
+## jogador vai pegar o carro: o carro para e devolve o motorista (a animação o tira do banco)
+## {drv: Humanoid ou null, cols, dead}
+func release(car) -> Dictionary:
 	for a in agents.duplicate():
 		if a.car == car:
-			if is_instance_valid(a.drv):
-				a.drv.queue_free()
 			agents.erase(a)
-			return true
-	return false
+			car.throttle = 0.0
+			car.brake_in = 1.0
+			return {"drv": a.drv, "cols": a.cols, "dead": false}
+	for d in drifting.duplicate():
+		if d.car == car:
+			drifting.erase(d)
+			return {"drv": d.drv, "cols": d.cols, "dead": true}
+	return {}
+
+func driver_of(car):
+	for a in agents:
+		if a.car == car:
+			return a.drv
+	return null
+
+var drifting: Array = []     # carros com motorista morto, desgovernados
+## tiro no motorista: carro sai de controle (moto: piloto cai e a moto tomba)
+func kill_driver(car) -> void:
+	for a in agents.duplicate():
+		if a.car == car:
+			agents.erase(a)
+			if car.kind == "moto":
+				eject_rider_agent(a, true)
+			else:
+				a.drv.slumped = true
+				a.drv.animate(0, 0)
+				drifting.append({"car": car, "t": 0.0, "st": rng.randf_range(-0.7, 0.7), "drv": a.drv, "cols": a.cols})
+			return
+
+## moto atingida/atropelada: piloto vira ragdoll (levanta se não morreu) e a moto tomba
+func eject_rider(car, dead: bool) -> void:
+	for a in agents.duplicate():
+		if a.car == car:
+			agents.erase(a)
+			eject_rider_agent(a, dead)
+			return
+
+func eject_rider_agent(a: Dictionary, dead: bool) -> void:
+	var c = a.car
+	var h: Node3D = a.drv
+	var pos: Vector3 = h.global_position if is_instance_valid(h) else c.global_position
+	var Ped := preload("res://scripts/ped.gd")
+	var p = Ped.new()
+	main.add_child(p)
+	p.setup([pos, pos, pos, pos], 0, rng)
+	p._cols = a.cols.duplicate()
+	p.body.queue_free()
+	p._make_body()
+	p.global_position = pos
+	p.died.connect(main._on_ped_died)
+	main.peds.append(p)
+	var vel: Vector3 = c.linear_velocity + Vector3(0, 2.5, 0)
+	if dead:
+		p.hit(null, vel, main.gore)
+	else:
+		p.knock(vel, 30.0)
+	if is_instance_valid(h):
+		h.queue_free()
+	c.fall_over()
 
 func is_agent(car) -> bool:
 	for a in agents:
@@ -170,6 +228,16 @@ func is_agent(car) -> bool:
 func _physics_process(dt: float) -> void:
 	clock += dt
 	_update_lamps()
+	for d in drifting.duplicate():
+		var dc = d.car
+		if not is_instance_valid(dc) or dc == main.player.vehicle:
+			drifting.erase(d)
+			continue
+		d.t += dt
+		d.st = clampf(d.st + rng.randf_range(-1.5, 1.5) * dt, -0.9, 0.9)
+		dc.steer_in = d.st
+		dc.throttle = 0.35 if d.t < 2.5 else 0.0
+		dc.brake_in = 0.0 if d.t < 4.0 else 0.4
 	for a in agents.duplicate():
 		var c = a.car
 		if not is_instance_valid(c) or c.dead:

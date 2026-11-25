@@ -43,6 +43,9 @@ var _fire: CPUParticles3D
 var _smoke: CPUParticles3D
 var _fall := false
 var yaw := 0.0
+var sinking := false
+const MAX_ALT := 260.0
+const MAX_DIST := 1600.0
 var pitch := 0.0
 var roll := 0.0
 var vy := 0.0
@@ -101,6 +104,18 @@ func take_damage(d: float) -> void:
 	if hp <= 0.0:
 		explode()
 
+func _sink() -> void:
+	if sinking:
+		return
+	sinking = true
+	dead = true
+	engine_on = false
+	FX.splash(get_tree().current_scene, global_position + Vector3(0, 0.8, 0), 2.0)
+	destroyed_water.emit(self)
+	get_tree().create_timer(40.0).timeout.connect(queue_free)
+
+signal destroyed_water(car)
+
 func explode() -> void:
 	if dead:
 		return
@@ -125,6 +140,20 @@ func _physics_process(dt: float) -> void:
 		_rot_tail.rotate_x(dt * (40.0 if engine_on else 0.0))
 	if _prop:
 		_prop.rotate_z(dt * (30.0 * clampf(v / 10.0 + (0.4 if engine_on else 0.0), 0.0, 1.5)))
+	if sinking:
+		velocity = velocity.lerp(Vector3(0, -1.4, 0), dt * 1.5)
+		move_and_slide()
+		model_root.rotation.x = lerpf(model_root.rotation.x, 0.5, dt * 0.3)
+		return
+	# limites: alto demais ou longe demais = o motor falha e a aeronave cai
+	if kind in ["plane", "heli"] and not dead and not _fall and (global_position.y > MAX_ALT or Vector2(global_position.x, global_position.z).length() > MAX_DIST):
+		_fall = true
+		if _smoke == null:
+			_smoke = FX.smoke_emitter(model_root, Vector3(0, 1.2, -0.5))
+	# na água: afunda (avião/helicóptero que cai no mar, barco destruído)
+	if world2 and world2.is_water(global_position.x, global_position.z) and global_position.y < world2.WATER_Y + (0.6 if kind != "boat" else -0.2) and (kind != "boat" or dead):
+		_sink()
+		return
 	var before := velocity
 	match kind:
 		"boat": _boat_phys(dt)

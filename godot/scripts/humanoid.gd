@@ -21,6 +21,13 @@ var swimming := false
 var moto_pose := false
 var guard := false       # guarda alta (modo luta)
 var throw_t := 0.0
+var dive := false
+var crouching := false
+var slumped := false
+var pose := ""            # vault, climb, carry, drag, tackle, pull, break, lockpick, cover, carried
+var pose_t := 0.0
+var gun_kind := ""
+var aim_pitch := 0.0
 var gun: Node3D
 
 ## arma na mão direita (apontando para frente quando o braço está esticado)
@@ -43,6 +50,12 @@ static func material() -> StandardMaterial3D:
 func build(shirt: Color, pants: Color, skin: Color, hair: Color, ex := {}) -> void:
 	skin_c = skin
 	var shoe := Color(0.07, 0.07, 0.08)
+	var shin_c := pants
+	if ex.get("beach", false):
+		# praia: sem camiseta, de short e descalço
+		shirt = skin
+		shin_c = skin
+		shoe = skin.darkened(0.1)
 	# ossos (pivôs)
 	_bone("hips", null, Vector3(0, 0.98, 0))
 	_bone("chest", "hips", Vector3(0, 0.08, 0))
@@ -88,7 +101,7 @@ func build(shirt: Color, pants: Color, skin: Color, hair: Color, ex := {}) -> vo
 	_mesh("head", head_items)
 	for sd in ["L", "R"]:
 		_mesh("thigh" + sd, [[_cap(0.085, 0.5), Transform3D(Basis(), Vector3(0, -0.23, 0)), pants]])
-		_mesh("shin" + sd, [[_cap(0.065, 0.48), Transform3D(Basis(), Vector3(0, -0.23, 0)), pants],
+		_mesh("shin" + sd, [[_cap(0.065, 0.48), Transform3D(Basis(), Vector3(0, -0.23, 0)), shin_c],
 			[_box(Vector3(0.11, 0.08, 0.27)), Transform3D(Basis(), Vector3(0, -0.47, 0.05)), shoe]])
 		if has_j:
 			_mesh("upper" + sd, [[_cap(0.066, 0.33), Transform3D(Basis(), Vector3(0, -0.14, 0)), jacket]])
@@ -163,39 +176,45 @@ func set_far(dist: float) -> void:
 				c.visibility_range_end = dist
 				c.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
-## speed em m/s (0 = parado). Corrida acima de ~3 m/s.
+## speed em m/s (0 = parado). Animação procedural: passada com fase por perna, joelho dobrando no
+## balanço, quadril sobe/desce e gira, tronco contra-gira, inclinação na corrida, transição suave.
+var _w := 0.0
+var _run := 0.0
+var _t := 0.0
 func animate(speed: float, dt: float) -> void:
 	if ragdolled:
 		return
+	_t += dt
 	var th: Array = [bones.thighL, bones.thighR]
 	var sh: Array = [bones.shinL, bones.shinR]
 	var up: Array = [bones.upperL, bones.upperR]
 	var fo: Array = [bones.foreL, bones.foreR]
+	for k in 2:
+		th[k].rotation = Vector3.ZERO
+		sh[k].rotation = Vector3.ZERO
+		up[k].rotation = Vector3.ZERO
+		fo[k].rotation = Vector3.ZERO
+	bones.chest.rotation = Vector3.ZERO
+	bones.head.rotation = Vector3.ZERO
+	bones.hips.rotation = Vector3.ZERO
+	bones.hips.position.y = 0.98
 	if swimming:
-		phase += dt * 4.0
-		bones.hips.rotation.x = 1.25
-		bones.hips.position.y = 0.6
-		bones.chest.rotation.x = 0.0
-		bones.head.rotation.x = -0.9
-		var sw := sin(phase)
-		for k in 2:
-			var sg := 1.0 if k == 0 else -1.0
-			th[k].rotation.x = sw * sg * 0.35 * minf(1.0, speed)
-			sh[k].rotation.x = 0.2
-			up[k].rotation.x = -2.6 + sin(phase + k * PI) * 1.4 * minf(1.0, speed + 0.25)
-			up[k].rotation.z = sg * 0.3
-			fo[k].rotation.x = -0.3
+		_swim(speed, dt, th, sh, up, fo)
 		return
-	bones.hips.rotation.x = 0.0
+	var wt := clampf(speed / 1.4, 0.0, 1.0)
+	_w = lerpf(_w, wt, minf(1.0, dt * 7.0))
+	_run = lerpf(_run, clampf((speed - 2.6) / 3.0, 0.0, 1.0), minf(1.0, dt * 5.0))
+	if speed > 0.05:
+		phase += dt * lerpf(5.4, 9.2, _run) * clampf(speed / 1.2, 0.6, 1.4)
+	if pose != "":
+		_pose(dt, th, sh, up, fo)
+		return
 	if sitting and moto_pose:
-		# moto: pernas abertas apoiadas nas pedaleiras, braços no guidão
 		for k in 2:
 			var sg := 1.0 if k == 0 else -1.0
-			th[k].rotation.x = -1.15
-			th[k].rotation.z = sg * 0.18
+			th[k].rotation = Vector3(-1.15, 0, sg * 0.18)
 			sh[k].rotation.x = 1.55
-			up[k].rotation.x = -1.05
-			up[k].rotation.z = sg * 0.12
+			up[k].rotation = Vector3(-1.05, 0, sg * 0.12)
 			fo[k].rotation.x = -0.35
 		bones.chest.rotation.x = 0.15
 		bones.head.rotation.x = -0.1
@@ -208,66 +227,196 @@ func animate(speed: float, dt: float) -> void:
 			fo[k].rotation.x = -0.55
 		bones.chest.rotation.x = -0.32
 		bones.head.rotation.x = 0.25
+		if slumped:
+			bones.chest.rotation.x = 0.75
+			bones.head.rotation = Vector3(0.6, 0.3, 0.2)
+			up[0].rotation.x = 0.1
+			up[1].rotation.x = 0.1
 		return
-	var run := clampf((speed - 2.2) / 3.0, 0.0, 1.0)
-	phase += dt * (2.2 + speed * 1.65)
-	var walk := clampf(speed / 1.6, 0.0, 1.0)
-	var amp := walk * lerpf(0.5, 0.85, run)
-	var s := sin(phase)
+	# ---- passada ----
+	var w := _w
+	var run := _run
+	var crouch := 1.0 if crouching else 0.0
 	for k in 2:
 		var sg := 1.0 if k == 0 else -1.0
-		var ls := s * sg
-		# coxa: negativo = para frente
-		th[k].rotation.x = -ls * amp
-		# joelho dobra mais quando a perna volta (fase de balanço), e muito mais correndo
-		var swing := maxf(0.0, -cos(phase) * sg)
-		sh[k].rotation.x = (0.15 + swing * lerpf(0.7, 1.7, run)) * walk
-		# braço oposto à perna
-		up[k].rotation.x = ls * amp * lerpf(0.7, 1.1, run)
-		up[k].rotation.z = sg * (0.06 + run * 0.08)
-		fo[k].rotation.x = -lerpf(0.25, 1.5, run) * walk - 0.1
-	bones.chest.rotation.x = run * 0.22
-	bones.chest.rotation.y = s * 0.12 * amp
-	bones.hips.rotation.y = -s * 0.08 * amp
-	bones.hips.position.y = 0.98 - run * 0.04 + absf(cos(phase)) * lerpf(0.025, 0.07, run) * walk
-	bones.head.rotation.x = -run * 0.15
+		var p := phase + (0.0 if k == 0 else PI)
+		th[k].rotation.x = -sin(p) * lerpf(0.42, 0.95, run) * w - crouch * 1.25
+		sh[k].rotation.x = (0.08 + maxf(0.0, sin(p + 1.1)) * lerpf(0.65, 1.95, run) + run * 0.2) * w + crouch * 1.9
+		th[k].rotation.z = sg * 0.03
+		# braço oposto à perna, cotovelo dobra mais correndo
+		up[k].rotation.x = sin(p) * lerpf(0.35, 0.85, run) * w
+		up[k].rotation.z = sg * (0.07 + 0.06 * run)
+		fo[k].rotation.x = -(0.12 + run * 1.25 + maxf(0.0, -sin(p)) * 0.25 * w)
+	var s := sin(phase)
+	var c := cos(phase)
+	bones.chest.rotation.x = 0.03 * w + run * 0.2 + crouch * 0.3
+	bones.chest.rotation.y = -s * lerpf(0.1, 0.16, run) * w
+	bones.hips.rotation.y = s * lerpf(0.08, 0.12, run) * w
+	bones.hips.rotation.z = c * 0.035 * w * (1.0 - run)
+	bones.hips.position.y = 0.98 - run * 0.05 - crouch * 0.42 + absf(c) * lerpf(0.025, 0.075, run) * w + sin(_t * 1.7) * 0.005 * (1.0 - w)
+	bones.head.rotation.x = -bones.chest.rotation.x * 0.6
+	bones.head.rotation.y = -bones.chest.rotation.y * 0.6
+	if w < 0.2:
+		# parado: peso apoiado, braços relaxados
+		bones.hips.rotation.z = sin(_t * 0.5) * 0.02
+		for k in 2:
+			up[k].rotation.z = (0.08 if k == 0 else -0.08)
+	_upper(dt, up, fo)
+
+## braços: soco/chute, arremesso, guarda, mira (pistola com duas mãos, fuzil no ombro)
+func _upper(dt: float, up: Array, fo: Array) -> void:
+	var th: Array = [bones.thighL, bones.thighR]
+	var sh: Array = [bones.shinL, bones.shinR]
 	if throw_t > 0.0:
 		throw_t -= dt
 		var tk := clampf(throw_t / 0.5, 0.0, 1.0)
 		up[1].rotation.x = lerpf(-2.4, 1.2, 1.0 - tk) if tk < 0.6 else lerpf(-0.3, -2.4, (1.0 - tk) / 0.4)
 		fo[1].rotation.x = -0.4
+		bones.chest.rotation.y = -0.4 * tk
 	elif punch_t > 0.0:
 		punch_t -= dt
 		var k := sin(clampf(punch_t / 0.3, 0.0, 1.0) * PI)
-		bones.chest.rotation.y = (0.35 if punch_kind == 0 else -0.35) * k
+		bones.chest.rotation.y = (0.4 if punch_kind == 0 else -0.4) * k
 		if punch_kind == 2:
-			# chute frontal com a perna direita
-			th[1].rotation.x = -1.6 * k
-			sh[1].rotation.x = 0.2 * (1.0 - k)
-			bones.chest.rotation.x = 0.25 * k
+			th[1].rotation.x = -1.65 * k
+			sh[1].rotation.x = 0.15 * (1.0 - k)
+			bones.chest.rotation.x = 0.3 * k
 			up[0].rotation.x = -0.9
 			up[1].rotation.x = -0.9
+			fo[0].rotation.x = -1.6
+			fo[1].rotation.x = -1.6
 		else:
 			var a := 1 if punch_kind == 0 else 0
 			var o := 1 - a
-			up[a].rotation.x = -1.55 * k
-			up[a].rotation.z = 0.0
-			fo[a].rotation.x = -0.15 * k
-			up[o].rotation.x = -1.1
-			fo[o].rotation.x = -1.7
+			up[a].rotation = Vector3(-1.55 * k - (1.0 - k) * 1.1, 0, 0)
+			fo[a].rotation.x = -0.1 * k - (1.0 - k) * 1.8
+			up[o].rotation = Vector3(-1.1, 0, 0)
+			fo[o].rotation.x = -1.8
 	elif guard:
 		for k2 in 2:
-			up[k2].rotation.x = -1.1
-			up[k2].rotation.z = 0.25 if k2 == 0 else -0.25
-			fo[k2].rotation.x = -1.8
+			up[k2].rotation = Vector3(-1.1, 0, 0.25 if k2 == 0 else -0.25)
+			fo[k2].rotation.x = -1.9
+		bones.chest.rotation.y = 0.15
 	elif aiming:
-		up[1].rotation.x = -1.48
-		up[1].rotation.z = 0.0
-		fo[1].rotation.x = 0.0
-		up[0].rotation.x = -1.25
-		up[0].rotation.z = -0.45
-		fo[0].rotation.x = -0.35
-		bones.chest.rotation.y = 0.0
+		var ap := aim_pitch
+		if gun_kind in ["rifle", "sniper", "smg", "shotgun", "rpg"]:
+			# fuzil: coronha no ombro, mão de apoio no cano, tronco de lado
+			bones.chest.rotation.y = 0.3
+			bones.head.rotation.y = -0.3
+			up[1].rotation = Vector3(-1.2 - ap, 0, 0.35)
+			fo[1].rotation.x = -1.0
+			up[0].rotation = Vector3(-1.5 - ap, 0, -0.1)
+			fo[0].rotation.x = -0.15
+		else:
+			# pistola com as duas mãos
+			up[1].rotation = Vector3(-1.5 - ap, 0, 0.18)
+			fo[1].rotation.x = -0.05
+			up[0].rotation = Vector3(-1.42 - ap, 0, -0.38)
+			fo[0].rotation.x = -0.3
+			bones.chest.rotation.y = 0.05
+		bones.chest.rotation.x = -ap * 0.35
+		bones.head.rotation.x = -ap * 0.4
+
+func _swim(speed: float, dt: float, th: Array, sh: Array, up: Array, fo: Array) -> void:
+	phase += dt * 4.0
+	bones.hips.rotation.x = 1.25 + (0.55 if dive else 0.0)
+	bones.hips.position.y = 0.6
+	bones.head.rotation.x = -0.9 + (0.5 if dive else 0.0)
+	for k in 2:
+		var sg := 1.0 if k == 0 else -1.0
+		th[k].rotation.x = sin(phase * 1.6) * sg * 0.35 * clampf(speed + 0.3, 0.3, 1.0)
+		sh[k].rotation.x = 0.25
+		up[k].rotation = Vector3(-2.6 + sin(phase + k * PI) * 1.4 * clampf(speed + 0.25, 0.25, 1.0), 0, sg * 0.3)
+		fo[k].rotation.x = -0.3
+
+## poses especiais (parkour, carregar/arrastar corpo, derrubar, puxar da porta, quebrar vidro, mixa, cobertura)
+func _pose(dt: float, th: Array, sh: Array, up: Array, fo: Array) -> void:
+	var k := pose_t
+	match pose:
+		"vault":
+			var tuck := sin(k * PI)
+			for i in 2:
+				th[i].rotation.x = -1.35 * tuck
+				sh[i].rotation.x = 1.7 * tuck
+				up[i].rotation.x = -0.55 - 0.4 * (1.0 - tuck)
+				fo[i].rotation.x = -0.2
+			bones.chest.rotation.x = 0.45 * tuck
+			bones.hips.rotation.z = 0.25 * tuck
+		"climb":
+			if k < 0.45:
+				for i in 2:
+					up[i].rotation = Vector3(-2.9, 0, 0.15 if i == 0 else -0.15)
+					fo[i].rotation.x = -0.35
+					th[i].rotation.x = -0.25 + sin(_t * 9.0 + i * PI) * 0.25
+					sh[i].rotation.x = 0.5
+			else:
+				var kk := (k - 0.45) / 0.55
+				for i in 2:
+					up[i].rotation.x = lerpf(-2.9, -0.4, kk)
+					fo[i].rotation.x = lerpf(-0.35, -1.4, kk)
+				th[1].rotation.x = -1.5 * sin(kk * PI)
+				sh[1].rotation.x = 1.6 * sin(kk * PI)
+				bones.chest.rotation.x = 0.7 * sin(kk * PI)
+		"carry":
+			up[1].rotation = Vector3(-2.7, 0, -0.2)
+			fo[1].rotation.x = -1.7
+			bones.chest.rotation.x = 0.12
+			var p := phase
+			for i in 2:
+				th[i].rotation.x = -sin(p + i * PI) * 0.45 * _w
+				sh[i].rotation.x = (0.1 + maxf(0.0, sin(p + i * PI + 1.1)) * 0.7) * _w
+			up[0].rotation.x = sin(p) * 0.3 * _w
+		"drag":
+			bones.chest.rotation.x = 0.6
+			bones.hips.position.y = 0.86
+			for i in 2:
+				up[i].rotation.x = -0.75
+				fo[i].rotation.x = -0.25
+				th[i].rotation.x = -0.5 - sin(phase + i * PI) * 0.35 * _w
+				sh[i].rotation.x = 0.7
+		"tackle":
+			bones.hips.rotation.x = 1.0 * k
+			bones.hips.position.y = lerpf(0.98, 0.5, k)
+			for i in 2:
+				up[i].rotation.x = -2.8 * k
+				th[i].rotation.x = 0.5 * k
+		"pull":
+			var pl := sin(_t * 9.0)
+			bones.chest.rotation.x = 0.25 - k * 0.35
+			for i in 2:
+				up[i].rotation.x = -1.3 + pl * 0.15 + k * 0.6
+				fo[i].rotation.x = -0.6 - k * 0.8
+			th[0].rotation.x = -0.35
+			sh[0].rotation.x = 0.4
+		"break":
+			var hit := sin(clampf(k * 2.0, 0.0, 1.0) * PI)
+			up[1].rotation = Vector3(-1.4 + hit * 0.5, 0, 0.5)
+			fo[1].rotation.x = -2.0 + hit * 0.8
+			bones.chest.rotation.y = -0.6 * hit
+		"lockpick":
+			bones.hips.position.y = 0.8
+			bones.chest.rotation.x = 0.35
+			for i in 2:
+				th[i].rotation.x = -0.6
+				sh[i].rotation.x = 0.9
+				up[i].rotation.x = -1.0
+				fo[i].rotation.x = -0.9 + sin(_t * 14.0 + i) * 0.08
+		"cover":
+			bones.hips.position.y = 0.56
+			bones.chest.rotation.x = 0.35
+			for i in 2:
+				th[i].rotation.x = -1.3
+				sh[i].rotation.x = 1.95
+				up[i].rotation.x = -0.9
+				fo[i].rotation.x = -0.9
+		"carried":
+			# jogado no ombro de alguém: corpo dobrado, braços e pernas pendurados
+			bones.chest.rotation.x = 1.4
+			bones.head.rotation.x = 0.6
+			for i in 2:
+				up[i].rotation.x = -2.6 + sin(_t * 4.0 + i) * 0.1
+				th[i].rotation.x = -0.3
+				sh[i].rotation.x = 0.6
 
 ## Ragdoll físico: cada osso vira um corpo rígido ligado por juntas com limites.
 ## gore = arranca um membro se o impacto for forte.

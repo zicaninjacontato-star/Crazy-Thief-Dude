@@ -52,6 +52,16 @@ func on_crime() -> void:
 	unseen = 0.0
 	seen = true
 
+## algum policial/viatura vê este ponto?
+func seen_by_cop(pos: Vector3) -> bool:
+	for cp in cops:
+		if is_instance_valid(cp) and not cp.down and cp.global_position.distance_to(pos) < 30.0:
+			return true
+	for u in units:
+		if is_instance_valid(u.car) and u.car.global_position.distance_to(pos) < 40.0:
+			return true
+	return false
+
 func is_unit_car(c) -> bool:
 	for u in units:
 		if u.car == c and (not u.out or u.crew > 0):
@@ -165,8 +175,12 @@ func _units_tick(dt: float, s: int, p: Node3D, pp: Vector3) -> void:
 			if pv.length() > 3.0 and d > 10.0:
 				var side := Vector3(-pv.z, 0, pv.x).normalized()
 				lead += side * (5.0 if k % 2 == 0 else -5.0) * clampf((d - 10.0) / 20.0, 0.0, 1.0)
-			main.traffic_sys.chase(c, pp, lead, u.nav, dt, 30.0 if u.kind == "car" else 26.0)
-			if d < 17.0 and (on_foot or pv.length() < 4.0):
+			# jogador a pé: chega devagar (não atropela), para perto e a equipe desce
+			var vmax: float = 30.0 if u.kind == "car" else 26.0
+			if on_foot:
+				vmax = clampf((d - 9.0) * 0.8, 2.0, vmax)
+			main.traffic_sys.chase(c, pp, lead, u.nav, dt, vmax)
+			if d < (22.0 if on_foot else 17.0) and (on_foot or pv.length() < 4.0):
 				_crew_out(u, s)
 		else:
 			c.ai_target = null
@@ -198,6 +212,7 @@ func _crew_out(u: Dictionary, s: int) -> void:
 		cp.unit = c
 		cp.shot_player.connect(main.combat._on_cop_shot)
 		cp.died.connect(func(_x): u.crew -= 1)
+		cp.died.connect(_on_cop_down)
 		cops.append(cp)
 		main.audio.play("door", c.global_position)
 
@@ -248,21 +263,65 @@ func _visibility(dt: float, s: int, pp: Vector3) -> void:
 			if main.wanted == 0:
 				main._msg("Você despistou a polícia!")
 
+## 1★: o policial pula em cima (a pé) ou abre a porta e puxa você do carro parado → PRESO.
+## 2★+: preso se ficar encostado num policial por 2 s.
+var arresting := false
 func _bust(dt: float, s: int, pp: Vector3) -> void:
-	var close := false
+	if arresting or main.combat.dead or main.combat.busted_t > 0.0:
+		return
 	var v = main.player.vehicle
 	for cp in cops:
-		if cp.down:
+		if cp.down or cp.anim != "":
 			continue
 		var d: float = cp.global_position.distance_to(pp)
-		if v == null and d < 1.6:
-			close = true
-		elif v != null and v.linear_velocity.length() < 1.2 and d < v.body_size.x * 0.5 + 1.6 and v.get("kind") != "plane":
-			close = true
-	bust_t = bust_t + dt if close and not main.combat.dead else 0.0
-	if bust_t > (2.0 if v == null else 2.8):
-		bust_t = 0.0
-		main.combat.busted()
+		if s <= 1 and cp.arrest_only:
+			if v == null and d < 2.6:
+				arresting = true
+				cp.play_anim("tackle", 0.45, func():
+					main.combat.knockdown((pp - cp.global_position).normalized() * 3.0 + Vector3(0, 1.0, 0), 4.0)
+					main.get_tree().create_timer(1.4).timeout.connect(func(): arresting = false; main.combat.busted()))
+				return
+			if v != null and v.linear_velocity.length() < 2.0 and v.get("kind") not in ["plane", "heli", "boat"] and cp.global_position.distance_to(v.door_world()) < 1.8:
+				arresting = true
+				v.set_door(1.0)
+				cp.play_anim("pull", 1.0, func():
+					var c2 = main.player.vehicle
+					if c2:
+						main.eject_player(Vector3.ZERO)
+						c2.set_door(0.0)
+					main.combat.knockdown(cp.global_transform.basis.z * -2.0 + Vector3(0, 1.0, 0), 4.0)
+					main.get_tree().create_timer(1.4).timeout.connect(func(): arresting = false; main.combat.busted()))
+				return
+		elif v == null and d < 1.6:
+			bust_t += dt
+			if bust_t > 2.0:
+				bust_t = 0.0
+				main.combat.busted()
+			return
+	bust_t = 0.0
+
+## policial caído: outro colega (se houver pelo menos 2) arrasta o corpo para trás de uma viatura
+func _on_cop_down(dead_cop) -> void:
+	var alive := cops.filter(func(c): return is_instance_valid(c) and not c.down and c.rescue_rb == null and c.anim == "")
+	if alive.size() < 2 or dead_cop.body.parts.is_empty():
+		return
+	var rb: RigidBody3D = dead_cop.body.parts[1] if dead_cop.body.parts.size() > 1 else dead_cop.body.parts[0]
+	var best = null
+	var bd := 1e9
+	for c in alive:
+		var d: float = c.global_position.distance_to(rb.global_position)
+		if d < bd:
+			bd = d
+			best = c
+	if best == null or bd > 25.0:
+		return
+	var pp: Vector3 = main.player.global_position
+	var dest: Vector3 = rb.global_position + (rb.global_position - pp).normalized() * 6.0
+	if dead_cop.unit and is_instance_valid(dead_cop.unit):
+		var uc: Vector3 = dead_cop.unit.global_position
+		dest = uc + (uc - pp).normalized() * 2.8
+	dest.y = best.global_position.y
+	best.start_rescue(rb, dest)
 
 func _retreat(pp: Vector3) -> void:
 	for u in units.duplicate():

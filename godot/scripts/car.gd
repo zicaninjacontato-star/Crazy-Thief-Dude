@@ -44,6 +44,14 @@ var paint_c := Color.WHITE
 var door_info := {}
 var door_node: Node3D
 var door_cover: MeshInstance3D
+var trunk_node: Node3D
+var trunk_open := 0.0
+var cargo := 0              # corpos no porta-malas
+var unlocked := false       # vidro quebrado / tiro no vidro / carro próprio
+var engine_hp := 100.0      # motor: batidas de frente estragam; 0 = motor morto
+var burst: Array = []       # rodas com pneu estourado
+var down := false           # moto caída (piloto derrubado)
+signal engine_died(car)
 var door_open := 0.0
 var parked := false
 var broken_wheels: Array = []
@@ -72,6 +80,9 @@ func setup(kind: String, paint: Color) -> void:
 		max_brake = 380.0
 		max_steer = 0.5
 	can_sleep = false
+	contact_monitor = true
+	max_contacts_reported = 4
+	body_entered.connect(_on_body_entered)
 	center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
 	# centro de massa abaixo do eixo das rodas: o carro inclina mas não capota em curva normal
 	center_of_mass = Vector3(0, 0.05, 0.05)
@@ -148,43 +159,22 @@ func _light_bar() -> void:
 			_lights.append(b)
 
 func _make_door() -> void:
-	var d := door_info
-	var h: float = d.y1 - d.y0
-	var ln: float = d.zf - d.zb
-	door_node = Node3D.new()
-	door_node.position = Vector3(d.x + 0.015, d.y0, d.zf)
-	model_root.add_child(door_node)
-	var panel := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = Vector3(0.06, h, ln)
-	panel.mesh = bm
-	panel.position = Vector3(0.03, h * 0.5, -ln * 0.5)
-	panel.material_override = M.car_paint(Color(0.93, 0.93, 0.94) if police else paint_c)
-	door_node.add_child(panel)
-	var inner := MeshInstance3D.new()
-	var im := BoxMesh.new()
-	im.size = Vector3(0.02, h * 0.85, ln * 0.9)
-	inner.mesh = im
-	inner.position = Vector3(-0.02, h * 0.5, -ln * 0.5)
-	inner.material_override = M.plain(Color(0.12, 0.12, 0.13), 0.8)
-	door_node.add_child(inner)
-	door_cover = MeshInstance3D.new()
-	var cm := BoxMesh.new()
-	cm.size = Vector3(0.02, h * 0.98, ln * 0.98)
-	door_cover.mesh = cm
-	door_cover.position = Vector3(d.x + 0.02, d.y0 + h * 0.5, d.zf - ln * 0.5)
-	door_cover.material_override = M.plain(Color(0.03, 0.03, 0.035), 0.9)
-	model_root.add_child(door_cover)
-	set_door(0.0)
+	door_node = door_info.get("node")
+	trunk_node = door_info.get("trunk")
 
-## 0 = fechada, 1 = aberta (~70°)
+## 0 = fechada, 1 = aberta (~70°). A porta é a peça recortada da própria carroceria.
 func set_door(a: float) -> void:
 	door_open = a
-	if door_node == null:
-		return
-	door_node.visible = a > 0.02
-	door_cover.visible = a > 0.02
-	door_node.rotation.y = -a * 1.2
+	if door_node:
+		door_node.rotation.y = -a * 1.2
+
+func set_trunk(a: float) -> void:
+	trunk_open = a
+	if trunk_node:
+		trunk_node.rotation.x = a * 1.15
+
+func trunk_world() -> Vector3:
+	return global_transform * Vector3(0, 0, -body_size.z * 0.5 - 0.8)
 
 func door_world() -> Vector3:
 	## ponto na calçada ao lado da porta do motorista
@@ -231,7 +221,7 @@ var _dv_local := Vector3.ZERO
 
 ## batida: amassa do lado do impacto, quebra faróis (frente) e, se forte, solta uma roda
 func _impact(dv: float) -> void:
-	_dent(dv)
+	_impact_at(Vector3(-_dv_local.x, 0, -_dv_local.z), dv * 0.9)
 	var ld := _dv_local
 	var front := ld.z < -absf(ld.x) * 0.6     # perdeu velocidade para a frente = bateu de frente
 	var back := ld.z > absf(ld.x) * 0.6
@@ -273,6 +263,107 @@ func _dent(dv: float) -> void:
 	model_root.scale.z = maxf(0.88, model_root.scale.z - k)
 	model_root.scale.y = maxf(0.9, model_root.scale.y - k * 0.4)
 	model_root.rotation.z = clampf(model_root.rotation.z + randf_range(-k, k), -0.05, 0.05)
+
+## batida com outro veículo: os dois levam dano pela velocidade relativa (antes só quem freava bruscamente)
+var _hit_cd := {}
+func _on_body_entered(other: Node) -> void:
+	if not (other is VehicleBody3D or other is CharacterBody3D) or not other.has_method("take_damage"):
+		return
+	var t := Time.get_ticks_msec()
+	if _hit_cd.get(other.get_instance_id(), 0) > t:
+		return
+	_hit_cd[other.get_instance_id()] = t + 400
+	var ov: Vector3 = other.linear_velocity if "linear_velocity" in other else Vector3.ZERO
+	var rel := (linear_velocity - ov).length()
+	if rel < 6.0:
+		return
+	var dir: Vector3 = (other.global_position - global_position)
+	dir.y = 0
+	var local := global_transform.basis.inverse() * dir.normalized()
+	var my_share := 0.5 + 0.5 * clampf((ov.length() - linear_velocity.length()) / maxf(rel, 1.0), -1.0, 1.0)
+	var sev := rel * (0.6 + my_share * 0.8)
+	_impact_at(local, sev)
+	take_damage(maxf(0.0, sev - 6.0) * 2.6)
+	crashed.emit(self, sev)
+
+## deforma a lataria de verdade: vértices perto do ponto de impacto afundam para dentro
+func _impact_at(local_dir: Vector3, sev: float) -> void:
+	if model_root == null or sev < 7.0:
+		return
+	var hx: float = body_size.x * 0.5
+	var hz: float = body_size.z * 0.5
+	var ld := Vector3(local_dir.x, 0, local_dir.z)
+	if ld.length() < 0.01:
+		ld = Vector3(0, 0, 1)
+	ld = ld.normalized()
+	var k := 1.0 / maxf(absf(ld.x) / hx, absf(ld.z) / hz)
+	var pt := ld * k + Vector3(0, 0.75, 0)
+	var depth := clampf((sev - 7.0) * 0.028, 0.03, 0.5)
+	_deform(model_root, pt, ld, depth, 0.75 + depth)
+	# batida de frente estraga o motor
+	if ld.z > 0.6:
+		engine_hp -= (sev - 7.0) * 5.5
+		if engine_hp < 35.0 and _smoke == null:
+			_smoke = FX.smoke_emitter(model_root, Vector3(0, body_size.y * 0.6, hz * 0.75))
+		if engine_hp <= 0.0 and engine_hp + (sev - 7.0) * 5.5 > 0.0:
+			engine_died.emit(self)
+		if sev > 11.0 and not lights_broken:
+			lights_broken = true
+			var lf := model_root.find_child("lights_front", true, false)
+			if lf:
+				lf.visible = false
+			FX.sparks(get_tree().current_scene, global_transform * Vector3(0, 0.7, hz))
+
+func _deform(root: Node, pt: Vector3, dir: Vector3, depth: float, radius: float) -> void:
+	for n in root.find_children("*", "MeshInstance3D", true, false):
+		var mi := n as MeshInstance3D
+		if mi.mesh == null or not (mi.mesh is ArrayMesh) or mi.get_parent() is VehicleWheel3D:
+			continue
+		var mesh := mi.mesh as ArrayMesh
+		var xf: Transform3D = (model_root.global_transform.affine_inverse() * mi.global_transform)
+		var inv := xf.affine_inverse()
+		var lp: Vector3 = inv * pt
+		var ldir: Vector3 = (inv.basis * dir).normalized()
+		var out := ArrayMesh.new()
+		var changed := false
+		for si in mesh.get_surface_count():
+			var arr := mesh.surface_get_arrays(si)
+			var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+			for vi in vs.size():
+				var dd := vs[vi].distance_to(lp)
+				if dd < radius:
+					var f := 1.0 - dd / radius
+					vs[vi] -= ldir * depth * f * f
+					changed = true
+			arr[Mesh.ARRAY_VERTEX] = vs
+			out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+			out.surface_set_material(si, mesh.surface_get_material(si))
+		if changed:
+			mi.mesh = out
+
+## estoura o pneu de uma roda (tiro): perde aderência, o carro puxa; se estiver rápido, roda/derrapa
+func burst_tire(w: VehicleWheel3D) -> void:
+	if w in burst:
+		return
+	burst.append(w)
+	w.wheel_friction_slip = 0.7
+	w.suspension_stiffness *= 0.55
+	for n in w.get_children():
+		if n is Node3D:
+			n.scale = Vector3(1.0, 0.82, 0.82)
+	FX.sparks(get_tree().current_scene, w.global_position)
+	var spd := linear_velocity.length()
+	if spd > 8.0:
+		apply_torque_impulse(Vector3.UP * mass * randf_range(-1.0, 1.0) * spd * 0.25)
+
+## moto: piloto caiu → a moto tomba e desliza
+func fall_over() -> void:
+	if down:
+		return
+	down = true
+	throttle = 0.0
+	ai_target = null
+	apply_torque_impulse(global_transform.basis.z * mass * (2.2 if randf() < 0.5 else -2.2))
 
 func _paint(n: Node, name: String, mat: Material) -> void:
 	var t := _find(n, name)
@@ -342,6 +433,12 @@ func _physics_process(dt: float) -> void:
 		eng = 0.0
 	if handbrake:
 		brk = max_brake * 0.6
+	if engine_hp <= 0.0:
+		eng = 0.0
+	elif engine_hp < 35.0:
+		eng *= 0.5
+	if down:
+		eng = 0.0
 	engine_force = eng
 	brake = brk
 	# esterço progressivo e menor em alta velocidade
@@ -356,7 +453,7 @@ func _physics_process(dt: float) -> void:
 		if lean:
 			lean.rotation.z = lerpf(lean.rotation.z, -steering * clampf(absf(fs) / 12.0, 0.0, 1.0) * 0.9, minf(1.0, dt * 5.0))
 	for w in wheels:
-		if w.use_as_traction and not (w in broken_wheels):
+		if w.use_as_traction and not (w in broken_wheels) and not (w in burst):
 			w.wheel_friction_slip = 1.6 if handbrake else 2.6
 
 func _ai(dt: float) -> void:
@@ -379,6 +476,8 @@ func _ai(dt: float) -> void:
 ## Estabilidade estilo jogo de mundo aberto: torque que endireita o carro quando ele inclina demais
 ## e, se mesmo assim virar e ficar parado, ele é recolocado de pé depois de 2,5 s.
 func _anti_flip(dt: float) -> void:
+	if down:
+		return
 	var up := global_transform.basis.y
 	var tilt := up.angle_to(Vector3.UP)
 	if tilt > 0.25 and tilt < 2.0:

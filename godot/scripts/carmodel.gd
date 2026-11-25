@@ -81,6 +81,27 @@ static func build(kind: String, paint: Color) -> Dictionary:
 		meta.append({"g": g, "slope": slope, "yt": yt, "bl": bl})
 	# --- quads ---
 	var b_pillar: float = (top[3][0] + top[5][0]) * 0.5 if kind != "pickup" else 0.2
+	# porta do motorista (+x) e tampa do porta-malas são recortadas da carroceria e vão para nós próprios
+	var zc0 := _first_cabin_z(top, belt, false)
+	var zc1 := _first_cabin_z(top, belt, true)
+	var d_zf := zc1 - 0.05
+	var d_zb: float = b_pillar if kind != "pickup" else zc0 + 0.1
+	var d_piv := Vector3(W * 0.5, 0.0, d_zf)
+	var t_piv := Vector3(0.0, _top(top, zc0 - 0.12), zc0 - 0.12)
+	var has_trunk: bool = kind in ["sedan", "sport", "police", "taxi"] or (kind == "hatch")
+	var dst := {}
+	var tst := {}
+	for kst in [st_p, st_d, st_g, st_t]:
+		var sa := SurfaceTool.new()
+		sa.begin(Mesh.PRIMITIVE_TRIANGLES)
+		dst[kst] = sa
+		var sb := SurfaceTool.new()
+		sb.begin(Mesh.PRIMITIVE_TRIANGLES)
+		tst[kst] = sb
+	var d_in := SurfaceTool.new()
+	d_in.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var t_in := SurfaceTool.new()
+	t_in.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for i in NZ:
 		var z0: float = rings[i][0]
 		var z1: float = rings[i + 1][0]
@@ -116,7 +137,21 @@ static func build(kind: String, paint: Color) -> Dictionary:
 					st = st_d
 				if j == 2 and absf(zc) > L * 0.5 - 0.45:
 					st = st_t
-				if side > 0:
+				var in_door: bool = side > 0 and j >= 2 and j <= 7 and zc > d_zb and zc < d_zf
+				var in_trunk: bool = has_trunk and j >= 8 and zc < zc0 - 0.12 and zc > -L * 0.5 + 0.12
+				if in_door:
+					var o := d_piv
+					_quad(dst[st], p00 - o, p10 - o, p11 - o, p01 - o)
+					_quad(d_in, p00 - o + Vector3(-0.03, 0, 0), p01 - o + Vector3(-0.03, 0, 0), p11 - o + Vector3(-0.03, 0, 0), p10 - o + Vector3(-0.03, 0, 0))
+				elif in_trunk:
+					var o2 := t_piv
+					if side > 0:
+						_quad(tst[st], p00 - o2, p10 - o2, p11 - o2, p01 - o2)
+						_quad(t_in, p00 - o2 + Vector3(0, -0.03, 0), p01 - o2 + Vector3(0, -0.03, 0), p11 - o2 + Vector3(0, -0.03, 0), p10 - o2 + Vector3(0, -0.03, 0))
+					else:
+						_quad(tst[st], p00 - o2, p01 - o2, p11 - o2, p10 - o2)
+						_quad(t_in, p00 - o2 + Vector3(0, -0.03, 0), p10 - o2 + Vector3(0, -0.03, 0), p11 - o2 + Vector3(0, -0.03, 0), p01 - o2 + Vector3(0, -0.03, 0))
+				elif side > 0:
 					_quad(st, p00, p10, p11, p01)
 				else:
 					_quad(st, p00, p01, p11, p10)
@@ -141,6 +176,24 @@ static func build(kind: String, paint: Color) -> Dictionary:
 	_add(root, st_d, door_m)
 	_add(root, st_g, glass_m)
 	_add(root, st_t, trim_m)
+	var inner_m := M.plain(Color(0.07, 0.07, 0.075), 0.9)
+	var door_node := Node3D.new()
+	door_node.name = "porta"
+	door_node.position = d_piv
+	root.add_child(door_node)
+	var mats := {st_p: paint_m, st_d: door_m, st_g: glass_m, st_t: trim_m}
+	for kd in dst:
+		_add(door_node, dst[kd], mats[kd])
+	_add(door_node, d_in, inner_m)
+	var trunk_node: Node3D = null
+	if has_trunk:
+		trunk_node = Node3D.new()
+		trunk_node.name = "portamalas"
+		trunk_node.position = t_piv
+		root.add_child(trunk_node)
+		for kt in tst:
+			_add(trunk_node, tst[kt], mats[kt])
+		_add(trunk_node, t_in, inner_m)
 	# --- detalhes (fundidos: 1 malha com cor por vértice + 1 malha de luzes) ---
 	var det := SurfaceTool.new()
 	det.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -166,8 +219,6 @@ static func build(kind: String, paint: Color) -> Dictionary:
 	_ell(det, Vector3(0, 0.42, zf - 0.02), Vector3(0.5, 0.11, 0.05), Color(0.85, 0.85, 0.83))
 	_ell(det, Vector3(0, 0.45, -zf + 0.02), Vector3(0.5, 0.11, 0.05), Color(0.85, 0.85, 0.83))
 	# interior simples (bancos e painel) visível pelos vidros
-	var zc0 := _first_cabin_z(top, belt, false)
-	var zc1 := _first_cabin_z(top, belt, true)
 	var seat_c := Color(0.09, 0.09, 0.1)
 	_box(det, Vector3(W * 0.78, 0.25, 0.4), Vector3(0, belt - 0.05, zc1 - 0.35), seat_c)
 	for s in [-1.0, 1.0]:
@@ -220,7 +271,7 @@ static func build(kind: String, paint: Color) -> Dictionary:
 			n.material_override = vc_mat()
 			wheels.append({"node": n, "pos": Vector3((W * 0.5 - 0.15) * s, wr, wz), "front": wz > 0})
 	var seat_z := (zc0 + zc1) * 0.5 + 0.1
-	var door := {"zf": zc1 - 0.05, "zb": b_pillar if kind != "pickup" else zc0 + 0.1, "y0": 0.32, "y1": belt + 0.02, "x": W * 0.5}
+	var door := {"zf": d_zf, "zb": d_zb, "y0": 0.32, "y1": belt + 0.02, "x": W * 0.5, "node": door_node, "trunk": trunk_node, "trunk_z": zc0, "L": L}
 	return {"root": root, "wheels": wheels, "wr": wr, "seat": Vector3(0.38, 0.38 if kind == "sport" else 0.5, seat_z), "size": Vector3(W, roof_max, L), "door": door, "paint": paint}
 
 static func _first_cabin_z(top: Array, belt: float, front: bool) -> float:

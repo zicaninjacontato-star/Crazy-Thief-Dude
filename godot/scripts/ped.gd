@@ -36,12 +36,16 @@ func setup(path: Array, start: int, rng: RandomNumberGenerator) -> void:
 	_rng.seed = rng.randi()
 	var shirts := [Color(0.7, 0.2, 0.2), Color(0.2, 0.35, 0.65), Color(0.85, 0.75, 0.3), Color(0.9, 0.9, 0.88), Color(0.2, 0.2, 0.22), Color(0.45, 0.6, 0.35), Color(0.55, 0.35, 0.6)]
 	var skins := [Color(0.92, 0.75, 0.6), Color(0.55, 0.36, 0.22), Color(0.78, 0.56, 0.38), Color(0.35, 0.22, 0.14)]
+	beach = path.size() > 0 and path[0].x > 170.0     # laço da praia
 	_cols = [shirts[rng.randi() % shirts.size()], Color(0.15, 0.16, 0.2).lightened(rng.randf() * 0.3), skins[rng.randi() % skins.size()], Color(0.1, 0.07, 0.05).lightened(rng.randf() * 0.4)]
+	if beach:
+		_cols[1] = Color.from_hsv(rng.randf(), 0.65, 0.75)
 	_make_body()
 
+var beach := false
 func _make_body() -> void:
 	body = Humanoid.new()
-	body.build(_cols[0], _cols[1], _cols[2], _cols[3])
+	body.build(_cols[0], _cols[1], _cols[2], _cols[3], {"beach": beach})
 	add_child(body)
 	body.set_far(55.0)
 

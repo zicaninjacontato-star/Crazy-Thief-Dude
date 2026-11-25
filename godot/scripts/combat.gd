@@ -57,13 +57,14 @@ func _equip() -> void:
 	var p = main.player
 	if p.body and not p.body.ragdolled:
 		p.body.give_gun(W.gun_mesh(weapon))
+		p.body.gun_kind = weapon
 
 func label() -> String:
 	var d: Dictionary = W.DATA[weapon]
 	return d.name if weapon == "fist" else "%s  %d" % [d.name, ammo.get(weapon, 0)]
 
 func _process(dt: float) -> void:
-	if main.god:
+	if main.god and not force_dead:
 		main.hp = 100.0
 	cool -= dt
 	aim_t -= dt
@@ -84,6 +85,18 @@ func _process(dt: float) -> void:
 		return
 	if down_t > 0.0:
 		down_t -= dt
+		# caindo (ex.: pulou do avião): continua no chão até parar; dano pelo impacto
+		if p.body.parts.size() > 0 and is_instance_valid(p.body.parts[0]):
+			var hv: Vector3 = p.body.parts[0].linear_velocity
+			if hv.y < fall_peak:
+				fall_peak = hv.y
+			if hv.length() > 3.0:
+				down_t = maxf(down_t, 0.8)
+			elif fall_peak < -13.0:
+				main.hp -= (-fall_peak - 13.0) * 8.0
+				main.audio.play("hit", p.body.parts[0].global_position, 4.0)
+				FX.blood_burst(main, p.body.parts[0].global_position, Vector3.UP, 12)
+				fall_peak = 0.0
 		if down_t <= 0.0:
 			_get_up()
 		return
@@ -101,7 +114,7 @@ func _process(dt: float) -> void:
 		_vy = 0.0
 	else:
 		_vy = p.velocity.y
-	if fire_held and cool <= 0.0 and not p.swimming:
+	if fire_held and cool <= 0.0 and not p.swimming and carrying == null:
 		var auto: bool = W.DATA[weapon].auto
 		shoot()
 		if not auto:
@@ -162,7 +175,17 @@ func shoot() -> void:
 				W.tracer(main, muzzle, end)
 				continue
 		var h := _ray_hit(muzzle, sd, d.range)
+		var vh := _vehicle_parts(muzzle, sd, muzzle.distance_to(h.pos) + 0.3)
+		if not vh.is_empty():
+			end = vh.pos
+			_hit_vehicle_part(vh, d.dmg)
+			W.tracer(main, muzzle, end)
+			continue
 		end = h.pos
+		if h.car != null and h.car.has_method("burst_tire"):
+			var lp: Vector3 = h.car.global_transform.affine_inverse() * end
+			if lp.y > 0.95:
+				h.car.unlocked = true       # tiro no vidro: porta destrancada
 		if h.who != null:
 			_damage(h.who, d.dmg * (2.0 if h.get("head", false) else 1.0), sd)
 		elif h.car != null:
@@ -179,6 +202,43 @@ func shoot() -> void:
 		main._add_wanted(1)
 	if ammo[weapon] <= 0:
 		cycle()
+
+## pneus e motoristas na linha do tiro (antes do primeiro obstáculo)
+func _vehicle_parts(from: Vector3, dir: Vector3, maxd: float) -> Dictionary:
+	var best := {}
+	var bt := maxd
+	for c in main.cars:
+		if not is_instance_valid(c) or c == main.player.vehicle or not (c is VehicleBody3D):
+			continue
+		if c.global_position.distance_to(from) > maxd + 6.0:
+			continue
+		for w in c.wheels:
+			var cpos: Vector3 = w.global_position
+			var t := (cpos - from).dot(dir)
+			if t < 0.3 or t > bt:
+				continue
+			if (from + dir * t).distance_to(cpos) < c.wheel_r * 1.05:
+				bt = t
+				best = {"kind": "wheel", "car": c, "w": w, "pos": from + dir * t}
+		var drv = main.traffic_sys.driver_of(c)
+		if drv and is_instance_valid(drv):
+			var dc: Vector3 = drv.global_transform * Vector3(0, 1.15, 0)
+			var t2 := (dc - from).dot(dir)
+			if t2 > 0.3 and t2 < bt and (from + dir * t2).distance_to(dc) < 0.38:
+				bt = t2
+				best = {"kind": "driver", "car": c, "pos": from + dir * t2}
+	return best
+
+func _hit_vehicle_part(vh: Dictionary, dmg: float) -> void:
+	var c = vh.car
+	if vh.kind == "wheel":
+		c.burst_tire(vh.w)
+		main.audio.play("hit", vh.pos, 2.0)
+	else:
+		FX.blood_burst(main, vh.pos, Vector3.UP, 14)
+		main.traffic_sys.kill_driver(c)
+		main._add_wanted(1)
+		main.audio.play("scream", vh.pos, -4.0)
 
 func _peds_near(pos: Vector3, r: float) -> bool:
 	for q in main.peds:
@@ -413,10 +473,17 @@ func clear_police() -> void:
 
 # ---------------------------------------------------------------- derrubada, morte, prisão
 ## joga o jogador no chão (ragdoll) e ele levanta depois de 'dur' segundos
+var fall_peak := 0.0
+var force_dead := false
+var carrying: Node3D = null     # corpo no ombro
+var carry_cols := []
+
 func knockdown(impulse: Vector3, dur := 2.4) -> void:
 	var p = main.player
 	if dead or down_t > 0.0 or p.body.ragdolled:
 		return
+	fall_peak = minf(0.0, impulse.y)
+	drop_body()
 	if p.vehicle != null:
 		main.eject_player(impulse)
 	p.collision_layer = 0
@@ -442,6 +509,8 @@ func _get_up() -> void:
 	p.collision_mask = 1
 
 func _die() -> void:
+	force_dead = false
+	drop_body()
 	dead = true
 	dead_t = 0.0
 	down_t = 0.0
@@ -457,11 +526,99 @@ func _die() -> void:
 	main.audio.play("scream", p.global_position)
 	main.missions.fail("Você morreu")
 
+## preso: tela "PRESO" por 3 s, perde as armas e 10% do dinheiro (mín. $100), sai da delegacia
+var busted_t := 0.0
 func busted() -> void:
+	if busted_t > 0.0 or dead:
+		return
 	main.hud.wasted = "PRESO"
+	main.hud.flash = 0.6
 	main.missions.fail("Você foi preso")
-	_respawn(main.city.police_pos + Vector3(0, 0, 3.0), "PRESO! Você saiu da delegacia (-$100)")
-	main.get_tree().create_timer(2.0).timeout.connect(func(): if main.hud.wasted == "PRESO": main.hud.wasted = "")
+	busted_t = 3.0
+	var p = main.player
+	if p.vehicle != null:
+		main.eject_player(Vector3.ZERO)
+	p.collision_layer = 0
+	p.collision_mask = 0
+	main.get_tree().create_timer(3.0).timeout.connect(_busted_end)
+
+func _busted_end() -> void:
+	busted_t = 0.0
+	var lost := maxi(100, int(main.money * 0.1))
+	owned = {"fist": true}
+	ammo = {}
+	weapon = "fist"
+	main.money += 100 - lost      # _respawn tira mais 100
+	_respawn(main.city.police_pos + Vector3(0, 0, 3.0), "PRESO! Perdeu as armas e $%d" % lost)
+	main.hud.wasted = ""
+
+## mordida do tubarão etc.: morre mesmo com vida infinita
+func kill_now() -> void:
+	force_dead = true
+	main.hp = 0.0
+
+# ---------------------------------------------------------------- carregar corpos
+func pick_body(ped) -> void:
+	if carrying or ped == null or not is_instance_valid(ped) or not ped.down:
+		return
+	carry_cols = ped._cols.duplicate()
+	for part in ped.body.parts:
+		if is_instance_valid(part):
+			part.queue_free()
+	ped.queue_free()
+	main.peds.erase(ped)
+	_make_carried()
+
+func _make_carried() -> void:
+	var p = main.player
+	var h = preload("res://scripts/humanoid.gd").new()
+	h.build(carry_cols[0], carry_cols[1], carry_cols[2], carry_cols[3])
+	h.pose = "carried"
+	p.body.bones.chest.add_child(h)
+	h.scale = Vector3.ONE * 0.95
+	h.position = Vector3(0.05, 0.45, -0.1)
+	h.rotation = Vector3(0, PI * 0.5, PI * 0.5)
+	h.animate(0, 0)
+	carrying = h
+	p.body.pose = "carry"
+	weapon = "fist"
+	_equip()
+
+## solta o corpo no chão (ragdoll)
+func drop_body() -> void:
+	if carrying == null:
+		return
+	var p = main.player
+	var pos: Vector3 = carrying.global_position
+	carrying.queue_free()
+	carrying = null
+	if p.body:
+		p.body.pose = ""
+	var Ped := preload("res://scripts/ped.gd")
+	var d = Ped.new()
+	main.add_child(d)
+	d.setup([pos, pos, pos, pos], 0, rng)
+	d._cols = carry_cols.duplicate()
+	d.body.queue_free()
+	d._make_body()
+	d.global_position = Vector3(pos.x, p.global_position.y, pos.z)
+	main.peds.append(d)
+	d.down = true
+	d.body.ragdoll(Vector3(0, -1, 0), null, false)
+	d._rag = d.body.parts
+
+## põe o corpo carregado no porta-malas (ou tira de lá)
+func trunk_action(car) -> void:
+	if carrying:
+		carrying.queue_free()
+		carrying = null
+		main.player.body.pose = ""
+		car.cargo += 1
+		main._msg("Corpo no porta-malas (%d)" % car.cargo)
+	elif car.cargo > 0:
+		car.cargo -= 1
+		carry_cols = [Color(0.5, 0.5, 0.5), Color(0.15, 0.16, 0.2), Color(0.78, 0.56, 0.38), Color(0.1, 0.07, 0.05)]
+		_make_carried()
 
 func _respawn(pos: Vector3, text: String) -> void:
 	var p = main.player

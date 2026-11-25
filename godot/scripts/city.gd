@@ -34,6 +34,15 @@ func _ready() -> void:
 	_landmarks()
 	_bus_line()
 	_flush()
+	for sc in _store_cars:
+		var b: Dictionary = preload("res://scripts/carmodel.gd").build(sc[2], sc[3])
+		var root: Node3D = b.root
+		add_child(root)
+		root.position = sc[0]
+		root.rotation.y = sc[1]
+		for wd in b.wheels:
+			root.add_child(wd.node)
+			wd.node.position = wd.pos
 
 ## linha de ônibus: retângulo em volta das quadras 1..3 x 1..3, com ponto no meio de cada lado
 func _bus_line() -> void:
@@ -131,11 +140,15 @@ func _ground() -> void:
 	var gm := PlaneMesh.new()
 	gm.size = Vector2(3200, 3200)
 	grass.mesh = gm
-	grass.position.y = -0.03
+	grass.position = Vector3(-1364.0, -0.03, 0)     # termina na praia (x≈236): o mar é fundo
 	grass.material_override = M.grass()
 	add_child(grass)
+	# chão firme só em terra (o leito do mar fica no world2, a −12 m)
 	var cs := CollisionShape3D.new()
-	cs.shape = WorldBoundaryShape3D.new()
+	var bx := BoxShape3D.new()
+	bx.size = Vector3(3800.0, 20.0, 7000.0)
+	cs.shape = bx
+	cs.position = Vector3(244.0 - 1900.0, -10.0, 0)
 	body.add_child(cs)
 
 func _block(cx: float, cz: float) -> void:
@@ -147,6 +160,17 @@ func _block(cx: float, cz: float) -> void:
 	var inner := BLOCK - SIDE * 2.0
 	var downtown: float = 1.0 - clamp(Vector2(cx, cz).length() / (extent() * 1.1), 0.0, 1.0)
 	var plan := rng.randi_range(0, 9)
+	# quadra com loja: prédios ao redor e a loja (com vitrine e interior visível) de frente para a rua sul
+	var bi := roundi(cx / CELL + (N - 1) * 0.5)
+	var bj := roundi(cz / CELL + (N - 1) * 0.5)
+	var stype: String = STORE_BLOCKS.get(Vector2i(bi, bj), "")
+	if stype != "":
+		var hh := inner * 0.5
+		_building(Rect2(cx - hh, cz - hh, hh - 9.0, inner), downtown * 0.6)
+		_building(Rect2(cx + 9.0, cz - hh, hh - 9.0, inner), downtown * 0.6)
+		_building(Rect2(cx - 9.0, cz - hh + 14.0, 18.0, inner - 14.0), downtown * 0.6)
+		_store(Rect2(cx - 9.0, cz - hh, 18.0, 14.0), stype)
+		return
 	if plan == 0:
 		_park(cx, cz, inner)
 		return
@@ -185,12 +209,85 @@ func _building(lot: Rect2, downtown: float) -> void:
 	# platibanda e laje de cobertura
 	var top := hgt + 0.15
 	var roof := M.concrete(Color(0.42, 0.41, 0.4))
-	_box(Vector3(w + 0.5, 0.9, d + 0.5), Vector3(c.x, top + 0.45, c.y), roof, false)
-	_box(Vector3(w - 0.3, 0.2, d - 0.3), Vector3(c.x, top + 0.95, c.y), M.concrete(Color(0.3, 0.3, 0.31)), false)
+	# platibanda e laje COM colisão (antes o jogador pisava 1 m abaixo e "afundava" no telhado)
+	_box(Vector3(w + 0.5, 0.9, d + 0.5), Vector3(c.x, top + 0.45, c.y), roof, true)
+	_box(Vector3(w - 0.3, 0.2, d - 0.3), Vector3(c.x, top + 0.95, c.y), M.concrete(Color(0.3, 0.3, 0.31)), true)
 	# equipamentos no telhado
 	for k in rng.randi_range(1, 4):
 		var p := Vector3(c.x + rng.randf_range(-w * 0.3, w * 0.3), top + 1.6, c.y + rng.randf_range(-d * 0.3, d * 0.3))
-		_box(Vector3(rng.randf_range(1.5, 3.0), 1.2, rng.randf_range(1.5, 2.5)), p, M.plain(Color(0.6, 0.62, 0.63), 0.4, 0.6), false)
+		_box(Vector3(rng.randf_range(1.5, 3.0), 1.2, rng.randf_range(1.5, 2.5)), p, M.plain(Color(0.6, 0.62, 0.63), 0.4, 0.6), true)
+
+const STORE_BLOCKS := {Vector2i(3, 3): "guns", Vector2i(1, 1): "cars", Vector2i(2, 3): "clothes"}
+
+## loja de um andar: paredes, vitrine de vidro na frente (sul) e um interior de verdade visto de fora
+func _store(r: Rect2, type: String) -> void:
+	var x0 := r.position.x + 0.6
+	var x1 := r.end.x - 0.6
+	var z0 := r.position.y + 0.6        # frente (rua)
+	var z1 := r.end.y - 0.6
+	var H := 5.2
+	var cx := (x0 + x1) * 0.5
+	var w := x1 - x0
+	var d := z1 - z0
+	var wall_c: Color = {"guns": Color(0.3, 0.28, 0.26), "clothes": Color(0.9, 0.87, 0.85), "cars": Color(0.88, 0.9, 0.93)}[type]
+	var wall := M.plain(wall_c, 0.8)
+	var ext := M.facade(4)
+	# casca externa
+	_box(Vector3(w, H, 0.3), Vector3(cx, H * 0.5 + 0.15, z1), ext)
+	_box(Vector3(0.3, H, d), Vector3(x0, H * 0.5 + 0.15, (z0 + z1) * 0.5), ext)
+	_box(Vector3(0.3, H, d), Vector3(x1, H * 0.5 + 0.15, (z0 + z1) * 0.5), ext)
+	_box(Vector3(w + 0.6, 0.5, d + 0.6), Vector3(cx, H + 0.4, (z0 + z1) * 0.5), M.concrete(Color(0.4, 0.4, 0.42)))
+	_box(Vector3(w + 1.2, 0.9, 0.4), Vector3(cx, H + 0.6, z0 - 0.1), M.plain(Color(0.08, 0.08, 0.09), 0.5))
+	# paredes de dentro (cor da loja), piso e teto com luzes
+	_box(Vector3(w - 0.4, H - 0.2, 0.05), Vector3(cx, H * 0.5 + 0.15, z1 - 0.18), wall, false)
+	_box(Vector3(0.05, H - 0.2, d), Vector3(x0 + 0.18, H * 0.5 + 0.15, (z0 + z1) * 0.5), wall, false)
+	_box(Vector3(0.05, H - 0.2, d), Vector3(x1 - 0.18, H * 0.5 + 0.15, (z0 + z1) * 0.5), wall, false)
+	_box(Vector3(w - 0.3, 0.06, d - 0.3), Vector3(cx, 0.2, (z0 + z1) * 0.5), M.plain(Color(0.82, 0.8, 0.76) if type != "cars" else Color(0.9, 0.9, 0.92), 0.25, 0.1), false)
+	_box(Vector3(w - 0.3, 0.1, d - 0.3), Vector3(cx, H + 0.1, (z0 + z1) * 0.5), M.plain(Color(0.95, 0.95, 0.95), 0.9), false)
+	for k in 3:
+		_box(Vector3(2.4, 0.06, 0.5), Vector3(cx - 5.0 + k * 5.0, H + 0.03, (z0 + z1) * 0.5), M.emissive(Color(1, 0.97, 0.9), 2.5), false)
+	# vitrine: pilares, vidro (com colisão) e porta
+	for xx in [x0, cx - 1.4, cx + 1.4, x1]:
+		_box(Vector3(0.3, H, 0.3), Vector3(xx, H * 0.5 + 0.15, z0), M.plain(Color(0.1, 0.1, 0.11), 0.4, 0.6))
+	var glass := M.plain(Color(0.55, 0.7, 0.78), 0.05, 0.3)
+	var g2: StandardMaterial3D = glass.duplicate()
+	g2.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	g2.albedo_color = Color(0.55, 0.72, 0.82, 0.22)
+	_box(Vector3(cx - 1.4 - x0, H - 0.6, 0.06), Vector3((x0 + cx - 1.4) * 0.5, H * 0.5 - 0.1, z0), g2)
+	_box(Vector3(x1 - cx - 1.4, H - 0.6, 0.06), Vector3((x1 + cx + 1.4) * 0.5, H * 0.5 - 0.1, z0), g2)
+	_box(Vector3(2.6, 3.0, 0.06), Vector3(cx, 1.65, z0), g2)
+	_box(Vector3(2.8, H - 3.2, 0.3), Vector3(cx, 3.2 + (H - 3.2) * 0.5, z0), M.plain(Color(0.1, 0.1, 0.11), 0.4, 0.6))
+	# vitrine por dentro (o que se vê da rua)
+	match type:
+		"guns":
+			for xx in [x0 + 0.5, x1 - 0.5]:
+				for yy in [1.3, 2.2, 3.1]:
+					_box(Vector3(0.35, 0.05, d - 2.0), Vector3(xx, yy, (z0 + z1) * 0.5), M.wood(), false)
+					for zz in range(int(z0 + 2), int(z1 - 1), 2):
+						_box(Vector3(0.1, 0.08, 0.9), Vector3(xx, yy + 0.1, zz), M.plain(Color(0.08, 0.08, 0.09), 0.4, 0.8), false)
+			_box(Vector3(6.0, 1.05, 0.9), Vector3(cx, 0.65, z1 - 2.2), M.plain(Color(0.25, 0.18, 0.12), 0.5), false)
+			_box(Vector3(6.0, 2.0, 0.08), Vector3(cx, 3.3, z1 - 0.25), M.plain(Color(0.6, 0.08, 0.05), 0.6), false)
+		"clothes":
+			for xx in [cx - 5.0, cx - 2.5, cx + 2.5, cx + 5.0]:
+				_box(Vector3(0.05, 1.5, 0.05), Vector3(xx, 0.95, (z0 + z1) * 0.5), M.plain(Color(0.7, 0.7, 0.72), 0.3, 0.9), false)
+				_box(Vector3(0.05, 0.05, 3.0), Vector3(xx, 1.7, (z0 + z1) * 0.5), M.plain(Color(0.7, 0.7, 0.72), 0.3, 0.9), false)
+				for k in 6:
+					_box(Vector3(0.55, 0.85, 0.08), Vector3(xx, 1.2, (z0 + z1) * 0.5 - 1.2 + k * 0.48), M.plain(Color.from_hsv(fmod(k * 0.17 + xx * 0.03 + 2.0, 1.0), 0.6, 0.8), 0.9), false)
+			for xx in [x0 + 2.0, x1 - 2.0]:
+				_box(Vector3(0.5, 1.75, 0.35), Vector3(xx, 1.05, z0 + 1.5), M.plain(Color(0.92, 0.85, 0.78), 0.6), false)   # manequins
+				_box(Vector3(0.62, 0.7, 0.42), Vector3(xx, 1.5, z0 + 1.5), M.plain(Color(0.8, 0.2, 0.4), 0.8), false)
+		"cars":
+			_store_cars.append([Vector3(cx - 4.0, 0.25, (z0 + z1) * 0.5), 0.7, "sport", Color(0.85, 0.08, 0.05)])
+			_store_cars.append([Vector3(cx + 4.0, 0.25, (z0 + z1) * 0.5), -0.7, "suv", Color(0.08, 0.2, 0.5)])
+			_box(Vector3(w - 1.0, 0.05, d - 1.0), Vector3(cx, 0.24, (z0 + z1) * 0.5), M.plain(Color(0.95, 0.95, 0.97), 0.1, 0.1), false)
+	# luz interna (só desta loja)
+	var l := OmniLight3D.new()
+	l.omni_range = 12.0
+	l.light_energy = 1.6
+	l.position = Vector3(cx, H - 0.6, (z0 + z1) * 0.5)
+	add_child(l)
+
+var _store_cars: Array = []
 
 func _park(cx: float, cz: float, inner: float) -> void:
 	var g := MeshInstance3D.new()
