@@ -9,6 +9,7 @@ const Hud := preload("res://scripts/hud.gd")
 const Humanoid := preload("res://scripts/humanoid.gd")
 const Audio := preload("res://scripts/audio.gd")
 const FX := preload("res://scripts/fx.gd")
+const Combat := preload("res://scripts/combat.gd")
 
 var city: Node3D
 var player: CharacterBody3D
@@ -43,6 +44,7 @@ var hp := 100.0
 var gore := true
 var _step_ph := 0.0
 var _lastv := Vector3.ZERO
+var combat: Node
 
 func _ready() -> void:
 	rng.seed = 7
@@ -103,6 +105,15 @@ func _ready() -> void:
 		p.setup(loopw, rng.randi_range(0, 3), rng)
 		p.position = loopw[p.idx].lerp(loopw[(p.idx + 1) % 4], rng.randf())
 		peds.append(p)
+	for p in peds:
+		p.died.connect(_on_ped_died)
+	combat = Combat.new()
+	add_child(combat)
+	combat.setup(self)
+	hud.weapon_pressed.connect(func(): combat.cycle())
+
+func _on_ped_died(p) -> void:
+	combat.drop_cash(p.global_position)
 
 func _block_loop(i: int, j: int, k: int) -> Array:
 	var cx: float = city._center(i)
@@ -125,7 +136,7 @@ func _spawn_car(pos: Vector3, yaw: float, paint: Color, police := false, kind :=
 	return c
 
 func _inputs() -> void:
-	var map := {"move_f": [KEY_W, KEY_UP], "move_b": [KEY_S, KEY_DOWN], "move_l": [KEY_A, KEY_LEFT], "move_r": [KEY_D, KEY_RIGHT], "enter": [KEY_E, KEY_F], "jump": [KEY_SPACE], "sprint": [KEY_SHIFT]}
+	var map := {"move_f": [KEY_W, KEY_UP], "move_b": [KEY_S, KEY_DOWN], "move_l": [KEY_A, KEY_LEFT], "move_r": [KEY_D, KEY_RIGHT], "enter": [KEY_E, KEY_F], "jump": [KEY_SPACE], "sprint": [KEY_SHIFT], "fire": [KEY_J, KEY_CTRL], "weapon": [KEY_Q, KEY_TAB]}
 	for a in map:
 		if not InputMap.has_action(a):
 			InputMap.add_action(a)
@@ -226,6 +237,9 @@ func _toggle_car() -> void:
 func _unhandled_input(e: InputEvent) -> void:
 	if e.is_action_pressed("enter"): _toggle_car()
 	if e.is_action_pressed("jump"): player.jump()
+	if e.is_action_pressed("fire"): combat.fire_held = true
+	if e.is_action_released("fire"): combat.fire_held = false
+	if e.is_action_pressed("weapon"): combat.cycle()
 
 func _physics_process(dt: float) -> void:
 	var k := Vector2(Input.get_axis("move_l", "move_r"), Input.get_axis("move_b", "move_f"))
@@ -257,6 +271,10 @@ func _physics_process(dt: float) -> void:
 		_lastv = v
 	else:
 		_lastv = Vector3.ZERO
+	if hud.fire:
+		combat.fire_held = true
+	elif not Input.is_action_pressed("fire"):
+		combat.fire_held = false
 	_traffic()
 	_crimes(dt)
 	_police(dt)
@@ -302,6 +320,7 @@ func _crimes(dt: float) -> void:
 		wanted_timer -= dt
 		if wanted_timer <= 0 and (police_car == null or police_car.global_position.distance_to(player.global_position) > 80.0):
 			wanted = 0
+			combat.clear_police()
 			if police_car:
 				police_car.queue_free()
 				cars.erase(police_car)
@@ -390,6 +409,7 @@ func _process(dt: float) -> void:
 	hud.info.text = "%d FPS · %s · b%s · Fatia de teste Godot" % [round(fps_show), RenderingServer.get_video_adapter_name(), build_id]
 	hud.stars.text = "★".repeat(wanted) + "☆".repeat(5 - wanted)
 	hud.money.text = "$%d,00" % money
+	hud.weapon_text = combat.label()
 	hud.hp = hp
 	hud.map_player = player.global_position
 	hud.map_yaw = cam_yaw + PI
@@ -411,6 +431,25 @@ func _shot_tick() -> void:
 		match shot_view:
 			"drive":
 				_toggle_car()
+	if shot_view == "combat":
+		if frames == 4:
+			player.global_position = my_car.global_position + Vector3(-5.0, 0, 12.0)
+			shot_ped = Ped.new()
+			add_child(shot_ped)
+			var pp: Vector3 = player.global_position + Vector3(0, 0, 6.0)
+			shot_ped.setup([pp, pp + Vector3(0, 0, 0.1), pp, pp], 0, rng)
+			shot_ped.died.connect(_on_ped_died)
+			peds.append(shot_ped)
+			cam_yaw = -PI
+			cam_pitch = -0.2
+		if frames > 8 and frames < 40:
+			combat.fire_held = true
+		if frames % 60 == 0:
+			print("CMB ", frames, " pedDown=", (shot_ped.down if is_instance_valid(shot_ped) else "removido"), " wanted=", wanted, " hp=", snappedf(hp, 1), " cops=", combat.cops.size(), " dead=", combat.dead, " money=", money, " cash=", combat.cash.size(), " pos=", player.global_position.snapped(Vector3.ONE), " pol=", police_car != null)
+		if frames == 70:
+			# vai até a nota de dinheiro
+			if combat.cash.size() > 0:
+				player.global_position = combat.cash[0].n.global_position
 	if shot_view == "rag" and frames == 4:
 		player.global_position = my_car.global_position + Vector3(-5.0, 0, 12.0)
 		shot_ped = Ped.new()

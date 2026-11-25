@@ -14,6 +14,17 @@ var spec := {}           # nome -> {len, rad, parent, mass}
 var skin_c := Color.WHITE
 var ragdolled := false
 var parts: Array = []    # RigidBody3D do ragdoll
+var aiming := false
+var punch_t := 0.0
+var gun: Node3D
+
+## arma na mão direita (apontando para frente quando o braço está esticado)
+func give_gun(g: Node3D) -> void:
+	if gun:
+		gun.queue_free()
+	gun = g
+	bones.foreR.add_child(g)
+	g.position = Vector3(0, -0.33, 0.02)
 
 static func material() -> StandardMaterial3D:
 	if _mat == null:
@@ -158,6 +169,20 @@ func animate(speed: float, dt: float) -> void:
 	bones.hips.rotation.y = -s * 0.08 * amp
 	bones.hips.position.y = 0.98 - run * 0.04 + absf(cos(phase)) * lerpf(0.025, 0.07, run) * walk
 	bones.head.rotation.x = -run * 0.15
+	if punch_t > 0.0:
+		punch_t -= dt
+		var k := sin(clampf(punch_t / 0.3, 0.0, 1.0) * PI)
+		up[1].rotation.x = -1.5 * k
+		up[1].rotation.z = 0.0
+		fo[1].rotation.x = -0.2 * k
+	elif aiming:
+		up[1].rotation.x = -1.48
+		up[1].rotation.z = 0.0
+		fo[1].rotation.x = 0.0
+		up[0].rotation.x = -1.25
+		up[0].rotation.z = -0.45
+		fo[0].rotation.x = -0.35
+		bones.chest.rotation.y = 0.0
 
 ## Ragdoll físico: cada osso vira um corpo rígido ligado por juntas com limites.
 ## gore = arranca um membro se o impacto for forte.

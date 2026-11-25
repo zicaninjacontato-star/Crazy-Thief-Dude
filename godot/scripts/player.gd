@@ -22,17 +22,22 @@ func _ready() -> void:
 	cs.shape = cap
 	cs.position.y = 0.89
 	add_child(cs)
+	rebuild_body()
+	floor_snap_length = 0.3
+
+func rebuild_body() -> void:
+	if body and is_instance_valid(body):
+		body.queue_free()
 	body = Humanoid.new()
 	body.build(Color(0.13, 0.42, 0.26), Color(0.12, 0.16, 0.27), Color(0.86, 0.66, 0.5), Color(0.16, 0.1, 0.06))
 	add_child(body)
-	floor_snap_length = 0.3
 
 func jump() -> void:
 	if is_on_floor():
 		velocity.y = jump_v
 
 func _physics_process(dt: float) -> void:
-	if vehicle != null:
+	if vehicle != null or body.ragdolled:
 		return
 	var f := Vector3(sin(cam_yaw), 0, cos(cam_yaw))
 	var r := Vector3(-f.z, 0, f.x)

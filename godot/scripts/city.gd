@@ -14,6 +14,8 @@ var body: StaticBody3D
 var rng := RandomNumberGenerator.new()
 var lanes: Array = []   # pontos de rota de carros (centro das faixas)
 var walk_loops: Array = []  # percursos de pedestres (um por quadra)
+var hospital_pos := Vector3.ZERO
+var police_pos := Vector3.ZERO
 
 func _ready() -> void:
 	rng.seed = 2026
@@ -26,6 +28,7 @@ func _ready() -> void:
 			_block(_center(i), _center(j))
 	_markings()
 	_props()
+	_landmarks()
 	_flush()
 
 func _flush() -> void:
@@ -251,3 +254,22 @@ func _multimesh(mesh: Mesh, mat: Material, xf: Array) -> void:
 	mmi.multimesh = mm
 	mmi.material_override = mat
 	add_child(mmi)
+
+## hospital e delegacia: placas grandes na calçada e pontos de reaparecimento
+func _landmarks() -> void:
+	hospital_pos = Vector3(_center(1), 0.3, _center(3) - BLOCK * 0.5 + 1.6)
+	police_pos = Vector3(_center(3), 0.3, _center(1) - BLOCK * 0.5 + 1.6)
+	var white := M.emissive(Color(0.95, 0.95, 0.95), 0.6)
+	var red := M.emissive(Color(0.9, 0.08, 0.08), 1.4)
+	var blue := M.emissive(Color(0.12, 0.3, 0.9), 1.4)
+	var pole := M.plain(Color(0.25, 0.25, 0.27), 0.4, 0.7)
+	for spec in [[hospital_pos, red, "H"], [police_pos, blue, "P"]]:
+		var p: Vector3 = spec[0] + Vector3(2.5, 0, 0)
+		_box(Vector3(0.15, 4.0, 0.15), p + Vector3(0, 2.0, 0), pole, true)
+		_box(Vector3(2.2, 2.2, 0.2), p + Vector3(0, 5.0, 0), white, false)
+		if spec[2] == "H":
+			_box(Vector3(1.6, 0.45, 0.25), p + Vector3(0, 5.0, 0), red, false)
+			_box(Vector3(0.45, 1.6, 0.25), p + Vector3(0, 5.0, 0), red, false)
+		else:
+			_box(Vector3(1.7, 1.7, 0.25), p + Vector3(0, 5.0, 0), blue, false)
+			_box(Vector3(0.9, 0.9, 0.3), p + Vector3(0, 5.0, 0), white, false)

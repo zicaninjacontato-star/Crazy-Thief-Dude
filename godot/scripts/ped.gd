@@ -12,6 +12,8 @@ var down := false
 var flee := 0.0
 var _rag: Array = []
 var _t := 0.0
+var hp := 100.0
+signal died(ped)
 
 func setup(path: Array, start: int, rng: RandomNumberGenerator) -> void:
 	loop = path
@@ -29,6 +31,7 @@ func hit(from_body: PhysicsBody3D, vel: Vector3, gore: bool) -> void:
 	if down:
 		return
 	down = true
+	died.emit(self)
 	var v := vel * 0.85 + Vector3(0, 2.5 + vel.length() * 0.18, 0)
 	var r: Array = body.ragdoll(v, from_body, gore)
 	if r.is_empty():
@@ -40,6 +43,18 @@ func hit(from_body: PhysicsBody3D, vel: Vector3, gore: bool) -> void:
 		var torn: RigidBody3D = r[0][r[1]]
 		FX.blood_burst(get_tree().current_scene, torn.global_position, Vector3.UP, 40)
 		FX.blood_trail(torn)
+
+## dano de arma/soco; true se morreu
+func damage(amount: float, dir: Vector3, gore: bool, src: PhysicsBody3D = null) -> bool:
+	if down:
+		return false
+	hp -= amount
+	FX.blood_burst(get_tree().current_scene, global_position + Vector3(0, 1.3, 0), dir, 10)
+	if hp <= 0.0:
+		hit(src, dir * (5.0 if amount < 60.0 else 9.0), gore and amount > 60.0)
+		return true
+	flee = 8.0
+	return false
 
 func scare() -> void:
 	if not down:

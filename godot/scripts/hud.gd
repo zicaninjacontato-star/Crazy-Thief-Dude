@@ -3,11 +3,17 @@ extends CanvasLayer
 
 signal enter_pressed
 signal jump_pressed
+signal weapon_pressed
 
 var joy := Vector2.ZERO
 var gas := false
 var brk := false
 var sprint := false
+var fire := false
+var flash := 0.0
+var wasted := ""
+var weapon_text := ""
+var big: Label
 var cam_drag := Vector2.ZERO
 
 var _joy_id := -1
@@ -51,6 +57,10 @@ func _ready() -> void:
 	money.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	money.add_theme_color_override("font_color", Color(0.35, 0.95, 0.35))
 	info.position = Vector2(230, 10)
+	big = _label(Vector2.ZERO, 84)
+	big.size = Vector2(600, 110)
+	big.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	big.add_theme_color_override("font_color", Color(0.85, 0.1, 0.1))
 	hint = _label(Vector2(0, 0), 22)
 	hint.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	hint.position = Vector2(-200, 70)
@@ -76,8 +86,10 @@ func _layout() -> void:
 		buttons["gas"] = Rect2(s.x - b - 24, s.y - b - 30, b, b * 1.15)
 		buttons["brake"] = Rect2(s.x - b * 2 - 44, s.y - b - 30, b, b * 1.15)
 	else:
-		buttons["jump"] = Rect2(s.x - b - 24, s.y - b - 30, b, b)
-		buttons["sprint"] = Rect2(s.x - b * 2 - 44, s.y - b - 30, b, b)
+		buttons["fire"] = Rect2(s.x - b * 1.2 - 24, s.y - b * 1.2 - 30, b * 1.2, b * 1.2)
+		buttons["jump"] = Rect2(s.x - b * 2.2 - 44, s.y - b - 30, b, b)
+		buttons["sprint"] = Rect2(s.x - b * 1.2 - 24, s.y - b * 2.3 - 50, b * 1.2, b * 0.8)
+	buttons["weapon"] = Rect2(s.x - 250, 128, 230, 44)
 
 func _input(e: InputEvent) -> void:
 	_layout()
@@ -124,6 +136,9 @@ func _press(k: String, on: bool) -> void:
 		"gas": gas = on
 		"brake": brk = on
 		"sprint": sprint = on
+		"fire": fire = on
+		"weapon":
+			if on: weapon_pressed.emit()
 
 func _draw_controls() -> void:
 	_layout()
@@ -132,9 +147,11 @@ func _draw_controls() -> void:
 	root.draw_circle(c, R, Color(0, 0, 0, 0.28))
 	root.draw_arc(c, R, 0, TAU, 48, Color(1, 1, 1, 0.5), 3.0)
 	root.draw_circle(c + joy * R, 32, Color(1, 1, 1, 0.75))
+	if flash > 0.0:
+		root.draw_rect(Rect2(Vector2.ZERO, s), Color(0.8, 0, 0, flash))
 	_draw_minimap()
 	_draw_bars(s)
-	var names := {"enter": "CARRO", "jump": "PULO", "sprint": "CORRER", "gas": "ACEL", "brake": "FREIO"}
+	var names := {"enter": "CARRO", "jump": "PULO", "sprint": "CORRER", "gas": "ACEL", "brake": "FREIO", "fire": "ATIRAR", "weapon": weapon_text}
 	var font := ThemeDB.fallback_font
 	for k in buttons:
 		var r: Rect2 = buttons[k]
@@ -145,6 +162,9 @@ func _draw_controls() -> void:
 
 func _process(_dt: float) -> void:
 	var s := root.get_viewport_rect().size
+	flash = maxf(0.0, flash - _dt)
+	big.text = wasted
+	big.position = Vector2(s.x * 0.5 - 300, s.y * 0.38)
 	money.position = Vector2(s.x - 300, 40)
 	stars.position = Vector2(s.x - 232, 88)
 	hint.position = Vector2(s.x * 0.5 - 200, 70)
