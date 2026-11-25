@@ -3,6 +3,9 @@ on:
   push:
     paths: ['godot/**', '.github/workflows/godot-apk.yml']
   workflow_dispatch:
+concurrency:
+  group: godot-slice-release
+  cancel-in-progress: false
 permissions:
   contents: write
 jobs:
