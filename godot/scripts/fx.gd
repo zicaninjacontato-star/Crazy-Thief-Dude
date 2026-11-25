@@ -7,6 +7,47 @@ static var blood_on := true   # configuração "Sangue"
 static var _blood_mat: StandardMaterial3D
 static var _pool_mesh: CylinderMesh
 
+## tudo o que é temporário entra no grupo "tmp" (o main apaga tudo ao reiniciar o mundo)
+## e os efeitos que duram muito (poças, marcas, destroços) têm um limite: o mais antigo sai.
+static var _caps := {}
+static var _meshes := {}
+static var _mats := {}
+
+static func tmp(n: Node) -> void:
+	n.add_to_group("tmp")
+
+static func _capped(kind: String, n: Node, maxn: int) -> void:
+	tmp(n)
+	if not _caps.has(kind):
+		_caps[kind] = []
+	var arr: Array = _caps[kind]
+	arr.append(n)
+	while arr.size() > maxn:
+		var old = arr.pop_front()
+		if is_instance_valid(old):
+			old.queue_free()
+	if arr.size() > 4 and not is_instance_valid(arr[0]):
+		_caps[kind] = arr.filter(func(x): return is_instance_valid(x))
+
+static func _sphere(r: float, seg := 6, rings := 3) -> SphereMesh:
+	var k := "s%f_%d" % [r, seg]
+	if not _meshes.has(k):
+		var s := SphereMesh.new()
+		s.radius = r
+		s.height = r * 2.0
+		s.radial_segments = seg
+		s.rings = rings
+		_meshes[k] = s
+	return _meshes[k]
+
+static func _boxm(sz: Vector3) -> BoxMesh:
+	var k := "b%s" % [sz]
+	if not _meshes.has(k):
+		var b := BoxMesh.new()
+		b.size = sz
+		_meshes[k] = b
+	return _meshes[k]
+
 static func blood_mat() -> StandardMaterial3D:
 	if _blood_mat == null:
 		_blood_mat = StandardMaterial3D.new()
@@ -24,12 +65,7 @@ static func blood_burst(world: Node, pos: Vector3, dir: Vector3, amount := 20) -
 	p.amount = amount
 	p.lifetime = 1.1
 	p.explosiveness = 0.95
-	var s := SphereMesh.new()
-	s.radius = 0.035
-	s.height = 0.07
-	s.radial_segments = 6
-	s.rings = 3
-	p.mesh = s
+	p.mesh = _sphere(0.035)
 	p.material_override = blood_mat()
 	p.direction = (dir + Vector3(0, 0.8, 0)).normalized()
 	p.spread = 45.0
@@ -39,6 +75,7 @@ static func blood_burst(world: Node, pos: Vector3, dir: Vector3, amount := 20) -
 	p.scale_amount_min = 0.6
 	p.scale_amount_max = 1.6
 	world.add_child(p)
+	tmp(p)
 	p.global_position = pos
 	p.emitting = true
 	p.get_tree().create_timer(2.0).timeout.connect(p.queue_free)
@@ -57,6 +94,7 @@ static func blood_pool(world: Node, pos: Vector3) -> void:
 	mi.material_override = blood_mat()
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	world.add_child(mi)
+	_capped("pool", mi, 30)
 	var ground := 0.16 if absf(pos.y - 0.15) < 0.4 else 0.01
 	mi.global_position = Vector3(pos.x, ground + 0.006, pos.z)
 	mi.scale = Vector3(0.1, 1, 0.1)
@@ -71,12 +109,7 @@ static func blood_trail(rb: Node3D) -> void:
 	var p := CPUParticles3D.new()
 	p.amount = 24
 	p.lifetime = 0.7
-	var s := SphereMesh.new()
-	s.radius = 0.025
-	s.height = 0.05
-	s.radial_segments = 6
-	s.rings = 3
-	p.mesh = s
+	p.mesh = _sphere(0.025)
 	p.material_override = blood_mat()
 	p.initial_velocity_min = 0.5
 	p.initial_velocity_max = 2.0
@@ -91,15 +124,14 @@ static func sparks(world: Node, pos: Vector3) -> void:
 	p.amount = 18
 	p.lifetime = 0.5
 	p.explosiveness = 1.0
-	var s := BoxMesh.new()
-	s.size = Vector3(0.03, 0.03, 0.12)
-	p.mesh = s
+	p.mesh = _boxm(Vector3(0.03, 0.03, 0.12))
 	p.material_override = M.emissive(Color(1.0, 0.7, 0.25), 4.0)
 	p.spread = 90.0
 	p.initial_velocity_min = 3.0
 	p.initial_velocity_max = 8.0
 	p.gravity = Vector3(0, -15, 0)
 	world.add_child(p)
+	tmp(p)
 	p.global_position = pos
 	p.emitting = true
 	p.get_tree().create_timer(1.0).timeout.connect(p.queue_free)
@@ -116,15 +148,23 @@ static func _puff_mesh() -> SphereMesh:
 	return _puff
 
 static func _smoke_mat(c: Color) -> StandardMaterial3D:
+	var key := "sm" + c.to_html()
+	if _mats.has(key):
+		return _mats[key]
 	var m := StandardMaterial3D.new()
+	_mats[key] = m
 	m.albedo_color = c
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.vertex_color_use_as_albedo = true
 	return m
 
+static var _fade_g: Gradient
 static func _fade() -> Gradient:
+	if _fade_g:
+		return _fade_g
 	var g := Gradient.new()
+	_fade_g = g
 	g.set_color(0, Color(1, 1, 1, 0.75))
 	g.set_color(1, Color(1, 1, 1, 0.0))
 	return g
@@ -170,7 +210,11 @@ static func fire_emitter(parent: Node3D, local: Vector3) -> CPUParticles3D:
 	return p
 
 static func emissive_alpha(c: Color, e: float) -> StandardMaterial3D:
+	var key := "ea%s%f" % [c.to_html(), e]
+	if _mats.has(key):
+		return _mats[key]
 	var m := StandardMaterial3D.new()
+	_mats[key] = m
 	m.albedo_color = c
 	m.emission_enabled = true
 	m.emission = c
@@ -199,6 +243,7 @@ static func explosion(world: Node, pos: Vector3, size := 1.0) -> void:
 	f.scale_amount_max = 3.2 * size
 	f.color_ramp = _fade()
 	world.add_child(f)
+	tmp(f)
 	f.global_position = pos
 	f.emitting = true
 	f.get_tree().create_timer(1.5).timeout.connect(f.queue_free)
@@ -220,6 +265,7 @@ static func explosion(world: Node, pos: Vector3, size := 1.0) -> void:
 	s.scale_amount_max = 4.0 * size
 	s.color_ramp = _fade()
 	world.add_child(s)
+	tmp(s)
 	s.global_position = pos + Vector3(0, 0.6, 0)
 	s.emitting = true
 	s.get_tree().create_timer(4.5).timeout.connect(s.queue_free)
@@ -229,6 +275,7 @@ static func explosion(world: Node, pos: Vector3, size := 1.0) -> void:
 	l.light_energy = 8.0
 	l.omni_range = 18.0 * size
 	world.add_child(l)
+	tmp(l)
 	l.global_position = pos + Vector3(0, 1.5, 0)
 	var tw := l.create_tween()
 	tw.tween_property(l, "light_energy", 0.0, 0.45)
@@ -238,15 +285,19 @@ static func explosion(world: Node, pos: Vector3, size := 1.0) -> void:
 		debris(world, pos + Vector3(randf_range(-0.6, 0.6), 0.8, randf_range(-0.6, 0.6)), Color(0.08, 0.08, 0.08), Vector3(randf_range(-7, 7), randf_range(6, 12), randf_range(-7, 7)) * size)
 	# marca de queimado
 	var mk := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = 2.2 * size
-	cm.bottom_radius = 2.2 * size
-	cm.height = 0.01
-	cm.radial_segments = 16
-	mk.mesh = cm
+	if not _meshes.has("scorch"):
+		var cm := CylinderMesh.new()
+		cm.top_radius = 2.2
+		cm.bottom_radius = 2.2
+		cm.height = 0.01
+		cm.radial_segments = 16
+		_meshes["scorch"] = cm
+	mk.mesh = _meshes["scorch"]
+	mk.scale = Vector3(size, 1.0, size)
 	mk.material_override = _scorch()
 	mk.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	world.add_child(mk)
+	_capped("scorch", mk, 20)
 	mk.global_position = Vector3(pos.x, 0.17 if absf(pos.y) < 2.0 else pos.y, pos.z)
 	mk.get_tree().create_timer(60.0).timeout.connect(mk.queue_free)
 
@@ -271,16 +322,16 @@ static func debris(world: Node, pos: Vector3, col: Color, vel: Vector3, size := 
 	cs.shape = bx
 	rb.add_child(cs)
 	var mi := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = size
-	mi.mesh = bm
+	mi.mesh = _boxm(size)
 	mi.material_override = M.plain(col, 0.6)
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	rb.add_child(mi)
 	world.add_child(rb)
+	_capped("debris", rb, 36)
 	rb.global_position = pos
 	rb.linear_velocity = vel
 	rb.angular_velocity = Vector3(randf_range(-8, 8), randf_range(-8, 8), randf_range(-8, 8))
-	rb.get_tree().create_timer(20.0).timeout.connect(rb.queue_free)
+	rb.get_tree().create_timer(14.0).timeout.connect(rb.queue_free)
 	return rb
 
 ## respingo de água
@@ -301,6 +352,7 @@ static func splash(world: Node, pos: Vector3, size := 1.0) -> void:
 	p.scale_amount_max = 0.6 * size
 	p.color_ramp = _fade()
 	world.add_child(p)
+	tmp(p)
 	p.global_position = pos
 	p.emitting = true
 	p.get_tree().create_timer(1.6).timeout.connect(p.queue_free)

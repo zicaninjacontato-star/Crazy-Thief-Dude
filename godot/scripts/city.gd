@@ -306,6 +306,7 @@ func _park(cx: float, cz: float, inner: float) -> void:
 var _trees: Array = []
 var _lamps: Array = []
 var props: Array = []        # postes e árvores quebráveis
+var _fallen: Array = []
 var pmm := {}                # MultiMeshInstance3D: pole, head, trunk, crown
 var _pgrid := {}
 
@@ -428,6 +429,10 @@ func break_prop(i: int, vel: Vector3) -> void:
 		return
 	pr.alive = false
 	pr.shape.queue_free()
+	if not pr.has("xf0"):
+		var a: MultiMesh = (pmm.pole if pr.type == "lamp" else pmm.trunk).multimesh
+		var b2: MultiMesh = (pmm.head if pr.type == "lamp" else pmm.crown).multimesh
+		pr.xf0 = [a.get_instance_transform(pr.idx), b2.get_instance_transform(pr.idx)]
 	var zero := Transform3D(Basis().scaled(Vector3(0.001, 0.001, 0.001)), Vector3(0, -50, 0))
 	var rb := RigidBody3D.new()
 	rb.collision_layer = 4
@@ -469,10 +474,35 @@ func break_prop(i: int, vel: Vector3) -> void:
 	rb.center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
 	rb.center_of_mass = Vector3(0, 2.0, 0)
 	get_parent().add_child(rb)
+	rb.add_to_group("tmp")
+	# no máximo 14 postes/árvores caídos com física ao mesmo tempo (o mais antigo some)
+	_fallen.append(rb)
+	while _fallen.size() > 14:
+		var old = _fallen.pop_front()
+		if is_instance_valid(old):
+			old.queue_free()
 	rb.global_position = p + Vector3(0, 0.02, 0)
 	var dir := Vector3(vel.x, 0, vel.z)
 	rb.apply_impulse(dir * rb.mass * 0.45, Vector3(0, 2.5, 0))
 	rb.get_tree().create_timer(60.0).timeout.connect(rb.queue_free)
+
+## reinício do mundo: postes e árvores derrubados voltam ao lugar
+func restore_props() -> void:
+	for pr in props:
+		if pr.alive:
+			continue
+		pr.alive = true
+		var p: Vector3 = pr.pos
+		if pr.type == "lamp":
+			pmm.pole.multimesh.set_instance_transform(pr.idx, pr.xf0[0])
+			pmm.head.multimesh.set_instance_transform(pr.idx, pr.xf0[1])
+			_lamps.append(p)
+			pr.shape = _prop_shape(p, 0.15, 7.0)
+		else:
+			pmm.trunk.multimesh.set_instance_transform(pr.idx, pr.xf0[0])
+			pmm.crown.multimesh.set_instance_transform(pr.idx, pr.xf0[1])
+			_trees.append(p)
+			pr.shape = _prop_shape(p, 0.25, 3.0)
 
 func _rb_part(rb: RigidBody3D, mesh: Mesh, mat: Material, pos: Vector3, b: Basis) -> void:
 	var mi := MeshInstance3D.new()

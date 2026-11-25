@@ -404,6 +404,7 @@ func _fire_rocket(from: Vector3, dir: Vector3) -> void:
 	n.mesh = bm
 	n.material_override = M.plain(Color(0.25, 0.3, 0.18), 0.6)
 	main.add_child(n)
+	n.add_to_group("tmp")
 	n.global_position = from
 	n.look_at(from + dir, Vector3.UP if absf(dir.y) < 0.98 else Vector3.RIGHT)
 	FX.fire_emitter(n, Vector3(0, 0, 0.35))
@@ -427,6 +428,7 @@ func _throw_grenade(fwd: Vector3) -> void:
 	rb.add_child(cs)
 	rb.add_child(W.gun_mesh("grenade"))
 	main.add_child(rb)
+	rb.add_to_group("tmp")
 	rb.global_position = p.global_position + Vector3(0, 1.7, 0) + Vector3(dir.x, 0, dir.z).normalized() * 0.5
 	rb.linear_velocity = Vector3(dir.x, 0, dir.z).normalized() * 13.0 + Vector3(0, 5.5 + dir.y * 8.0, 0)
 	rb.angular_velocity = Vector3(rng.randf_range(-6, 6), 0, rng.randf_range(-6, 6))
@@ -514,6 +516,7 @@ func drop_cash(pos: Vector3) -> void:
 	mi.mesh = bm
 	mi.material_override = M.emissive(Color(0.2, 0.75, 0.25), 0.8)
 	main.add_child(mi)
+	mi.add_to_group("tmp")
 	mi.global_position = Vector3(pos.x, pos.y + 0.3, pos.z)
 	cash.append({"n": mi, "v": rng.randi_range(8, 60), "t": 0.0, "y": pos.y + 0.3})
 
@@ -726,6 +729,7 @@ func _respawn(pos: Vector3, text: String) -> void:
 	main.money = maxi(0, main.money - 100)
 	main.wanted = 0
 	clear_police()
+	main.reset_world()
 	main._msg(text)
 
 # ---------------------------------------------------------------- arma apontada: reações, assalto e refém

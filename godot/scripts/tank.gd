@@ -134,6 +134,7 @@ func _fire(tgt: Vector3) -> void:
 	n.mesh = sm
 	n.material_override = preload("res://scripts/mats.gd").emissive(Color(1.0, 0.7, 0.3), 3.0)
 	main.add_child(n)
+	n.add_to_group("tmp")
 	n.global_position = tip
 	_shells.append({"n": n, "v": (aim - tip).normalized() * 80.0, "t": 0.0})
 	FX.sparks(main, tip)

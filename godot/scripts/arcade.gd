@@ -22,7 +22,9 @@ var max_engine := 1.0
 var police := false
 var ai_target: Node3D = null
 var ai_mode := ""           # "" ou "follow" (helicóptero da polícia)
-var ai_speed := 24.0        # velocidade máxima seguindo o alvo
+var ai_speed := 24.0
+var _far_chk := 0.0
+var _far := false        # velocidade máxima seguindo o alvo
 var driver: Node = null
 var wheels: Array = []
 var lean: Node3D = null
@@ -98,6 +100,7 @@ func setup(k: String, paint: Color) -> void:
 	cs.shape = bx
 	cs.position = Vector3(0, 0.8, 0)
 	add_child(cs)
+	preload("res://scripts/car.gd").optimize_visuals(model_root)
 
 func door_world() -> Vector3:
 	return global_transform * Vector3(body_size.x * 0.5 + 0.9 if kind != "plane" else 1.6, 0, seat.z)
@@ -163,6 +166,17 @@ func _physics_process(dt: float) -> void:
 		_rot_tail.rotate_x(dt * (40.0 if engine_on else 0.0))
 	if _prop:
 		_prop.rotate_z(dt * (30.0 * clampf(v / 10.0 + (0.4 if engine_on else 0.0), 0.0, 1.5)))
+	# otimização: veículo parado, sem piloto e longe do jogador não roda física
+	if driver == null and ai_mode == "" and (npc_drv == null or ai_path.is_empty()) and not sinking and not _fall and absf(v) < 0.05 and velocity.length_squared() < 0.01 and absf(throttle) < 0.01:
+		_far_chk -= dt
+		if _far_chk <= 0.0:
+			_far_chk = 0.5
+			var pl = world2.main.player if world2 and world2.main else null
+			_far = pl != null and global_position.distance_squared_to(pl.global_position) > 90.0 * 90.0
+		if _far:
+			return
+	else:
+		_far = false
 	if sinking:
 		velocity = velocity.lerp(Vector3(0, -1.4, 0), dt * 1.5)
 		move_and_slide()

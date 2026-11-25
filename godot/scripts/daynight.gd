@@ -89,6 +89,7 @@ func _warmup() -> void:
 ## O céu (ProceduralSky) é re-renderizado pelo Godot sempre que suas cores ou a direção do sol mudam;
 ## por isso céu, ambiente e direção do sol mudam em degraus pequenos (não a cada quadro).
 var _sky_key := ""
+var _night_q := -1.0
 func apply(dt: float, force := false) -> void:
 	var tod: float = main.tod
 	var e := sin((tod - 6.0) / 12.0 * PI)
@@ -122,10 +123,14 @@ func apply(dt: float, force := false) -> void:
 		env.ambient_light_color = Color(0.34, 0.39, 0.52).lerp(Color(0.56, 0.56, 0.58), day)
 		env.fog_light_color = Color(0.09, 0.11, 0.18).lerp(Color(0.68, 0.75, 0.84), day).lerp(Color(0.85, 0.6, 0.45), dusk * 0.5)
 		env.tonemap_exposure = lerpf(1.3, 0.95, day)
-	# janelas e postes (só valores de material: barato)
-	M.set_night(night)
-	if main.city.lamp_mat:
-		main.city.lamp_mat.emission_energy_multiplier = lerpf(0.3, 5.0, night)
+	# janelas e postes: só mexe nos materiais quando a noite muda de verdade (cada mudança
+	# de material reenvia os parâmetros para a GPU; fazer isso todo quadro custava caro)
+	var nq := roundf(night * 60.0) / 60.0
+	if nq != _night_q or force:
+		_night_q = nq
+		M.set_night(nq)
+		if main.city.lamp_mat:
+			main.city.lamp_mat.emission_energy_multiplier = lerpf(0.3, 5.0, nq)
 	_t -= dt
 	if _t <= 0.0 or force:
 		_t = 0.4

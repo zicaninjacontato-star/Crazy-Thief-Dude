@@ -33,6 +33,7 @@ var rng := RandomNumberGenerator.new()
 
 func setup(seed: int, kind := "cop") -> void:
 	rng.seed = seed
+	add_to_group("tmp")
 	collision_layer = 0
 	collision_mask = 1
 	var cs := CollisionShape3D.new()

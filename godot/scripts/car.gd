@@ -133,6 +133,26 @@ func setup(kind: String, paint: Color) -> void:
 		wheels.append(w)
 	if police:
 		_light_bar()
+	optimize_visuals(model_root)
+	for w in wheels:
+		for n in w.get_children():
+			if n is MeshInstance3D:
+				n.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				n.visibility_range_end = 110.0
+
+## peças pequenas não projetam sombra e somem de longe (vidro, faróis, detalhes); a carroceria fica
+static func optimize_visuals(root: Node) -> void:
+	for mi in root.find_children("*", "MeshInstance3D", true, false):
+		if mi.visibility_range_end > 0.0:
+			continue          # motorista/ocupante (já tem distância própria)
+		var sz: Vector3 = mi.get_aabb().size
+		var longest := maxf(sz.x, maxf(sz.y, sz.z))
+		var mat = mi.material_override
+		var glass: bool = mat is BaseMaterial3D and mat.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED
+		if glass or longest < 1.6 or (mat is BaseMaterial3D and mat.shading_mode == BaseMaterial3D.SHADING_MODE_UNSHADED):
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		if longest < 1.2:
+			mi.visibility_range_end = 90.0
 
 func make_police() -> void:
 	police = true
@@ -184,6 +204,7 @@ func door_world() -> Vector3:
 	return global_transform * Vector3(door_info.x + 0.75, 0, (door_info.zf + door_info.zb) * 0.5 - 0.3)
 
 func take_damage(d: float) -> void:
+	freeze = false
 	if dead or d <= 0.0:
 		return
 	hp -= d
@@ -386,11 +407,26 @@ func speed_kmh() -> float:
 func forward_speed() -> float:
 	return linear_velocity.dot(global_transform.basis.z)
 
+var _idle_chk := 0.0
 func _physics_process(dt: float) -> void:
 	_t += dt
 	if police:
 		for k in _lights.size():
 			_lights[k].visible = siren_on and int(_t * 6.0 + k) % 2 == 0
+	# otimização: carro parado longe do jogador "dorme" (sem física) até alguém mexer nele
+	if freeze and (absf(throttle) > 0.01 or driver != null):
+		freeze = false
+	_idle_chk -= dt
+	if _idle_chk <= 0.0:
+		_idle_chk = 0.5
+		var pl = get_tree().current_scene.get("player")
+		var far: bool = pl != null and global_position.distance_squared_to(pl.global_position) > 85.0 * 85.0
+		if freeze and not far:
+			freeze = false
+		elif not freeze and far and linear_velocity.length_squared() < 0.01 and absf(throttle) < 0.01 and driver == null and _t > 3.0:
+			freeze = true
+	if freeze:
+		return
 	# batida: variação brusca de velocidade
 	var dvv := (linear_velocity - _lastv).length()
 	_dv_local = global_transform.basis.inverse() * (linear_velocity - _lastv)

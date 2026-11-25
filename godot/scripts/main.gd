@@ -119,27 +119,6 @@ func _ready() -> void:
 		hud.map_roads.append((k - city.N * 0.5) * city.CELL)
 	hud.map_roadw = city.ROADW
 	hud.jump_pressed.connect(func(): player.jump())
-	# carro do jogador estacionado ao lado
-	var road_x: float = city._center(2) - city.CELL * 0.5
-	my_car = _spawn_car(Vector3(road_x + 5.9, 0.6, city._center(2) + 4.0), 0.0, Color(0.06, 0.2, 0.55), false, "sport")
-	var palette := [Color(0.55, 0.02, 0.03), Color(0.85, 0.85, 0.86), Color(0.05, 0.05, 0.06), Color(0.75, 0.45, 0.05), Color(0.2, 0.22, 0.25)]
-	for k in 5:
-		var rx: float = city._center(rng.randi_range(0, 4)) + city.CELL * 0.5 * (1 if rng.randf() < 0.5 else -1)
-		_spawn_car(Vector3(rx + 5.9, 0.6, rng.randf_range(-120, 120)), 0.0 if rng.randf() < 0.5 else PI, palette[k % palette.size()])
-	my_car.unlocked = true
-	var mcols := [Color(0.05, 0.05, 0.06), Color(0.95, 0.6, 0.05), Color(0.1, 0.3, 0.75)]
-	for k in 3:
-		_spawn_car(my_car.global_position + Vector3(0.3, 0, -8.0 - k * 3.2), 0.0, mcols[k], false, "moto")
-	# pedestres
-	for k in 26:
-		var p := Ped.new()
-		add_child(p)
-		var loopw: Array = city.walk_loops[rng.randi() % city.walk_loops.size()]
-		p.setup(loopw, rng.randi_range(0, 3), rng)
-		p.position = loopw[p.idx].lerp(loopw[(p.idx + 1) % 4], rng.randf())
-		peds.append(p)
-	for p in peds:
-		p.died.connect(_on_ped_died)
 	police = Police.new()
 	add_child(police)
 	police.setup(self)
@@ -153,6 +132,7 @@ func _ready() -> void:
 	combat.setup(self)
 	missions.setup(self)
 	_spawn_extras()
+	_spawn_population()
 	hud.weapon_pressed.connect(func(): ui.show_wheel())
 	hud.shop_pressed.connect(_shop_action)
 	hud.siren_pressed.connect(_toggle_siren)
@@ -301,66 +281,10 @@ func _spawn_arcade(kind: String, pos: Vector3, yaw: float, paint: Color):
 
 ## táxis, barcos, aviões, helicóptero, viaturas da delegacia, banhistas
 func _spawn_extras() -> void:
-	var road_x: float = city._center(2) - city.CELL * 0.5
-	_spawn_car(Vector3(road_x + 5.9, 0.7, city._center(2) + 14.0), 0.0, Color.YELLOW, false, "taxi")
-	_spawn_car(Vector3(city._center(1) - city.CELL * 0.5 - 5.9, 0.7, city._center(3)), PI, Color.YELLOW, false, "taxi")
 	# trânsito com regras (traffic.gd): carros, motos, táxis e 2 ônibus na linha
 	traffic_sys = Traffic.new()
 	add_child(traffic_sys)
 	traffic_sys.setup(self)
-	var palette := [Color(0.55, 0.02, 0.03), Color(0.85, 0.85, 0.86), Color(0.05, 0.05, 0.06), Color(0.75, 0.45, 0.05), Color(0.2, 0.22, 0.25), Color(0.1, 0.25, 0.55), Color(0.3, 0.4, 0.3)]
-	var used := {str(Vector2i(1, 3)) + str(Vector2i(0, 1)): true, str(Vector2i(4, 2)) + str(Vector2i(0, -1)): true}
-	var kinds := ["sedan", "hatch", "suv", "pickup", "sedan", "hatch", "taxi", "sport", "sedan", "suv", "moto", "moto", "moto", "hatch", "pickup", "taxi"]
-	for k in kinds.size():
-		var n := Vector2i(rng.randi_range(0, city.N), rng.randi_range(0, city.N))
-		var dirs := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
-		var d: Vector2i = dirs[rng.randi() % 4]
-		var tries := 0
-		while (not traffic_sys._valid(n - d) or used.has(str(n) + str(d))) and tries < 40:
-			n = Vector2i(rng.randi_range(0, city.N), rng.randi_range(0, city.N))
-			d = dirs[rng.randi() % 4]
-			tries += 1
-		used[str(n) + str(d)] = true
-		var c = _spawn_car(Vector3(0, 0.7, 0), 0.0, palette[k % palette.size()], false, kinds[k])
-		traffic_sys.add_agent(c, n, d)
-	for k in 2:
-		var b = _spawn_car(Vector3(0, 0.9, 0), 0.0, [Color(0.1, 0.45, 0.2), Color(0.7, 0.12, 0.1)][k], false, "bus")
-		traffic_sys.add_agent(b, Vector2i(1, 3) if k == 0 else Vector2i(4, 2), Vector2i(0, 1) if k == 0 else Vector2i(0, -1), true)
-	var bcols := [Color(0.1, 0.3, 0.7), Color(0.75, 0.1, 0.1), Color(0.1, 0.5, 0.3)]
-	for i in world2.boat_spots.size():
-		var bs: Array = world2.boat_spots[i]
-		_spawn_arcade("boat", bs[0], bs[1], bcols[i % 3])
-	for i in world2.plane_spots.size():
-		var ps: Array = world2.plane_spots[i]
-		_spawn_arcade("plane", ps[0], ps[1], [Color(0.75, 0.1, 0.1), Color(0.1, 0.25, 0.6)][i % 2])
-	for hs in world2.heli_spots:
-		_spawn_arcade("heli", hs[0], hs[1], Color(0.85, 0.55, 0.05))
-	# jet-ski no píer e embarcações com piloto dando a volta na ilha (dá para roubar)
-	var js = world2.boat_spots[0]
-	_spawn_arcade("jetski", js[0] + Vector3(0, 0, -11.0), js[1], Color(0.9, 0.85, 0.1))
-	var specs := [["boat", 70.0, Color(0.8, 0.8, 0.82)], ["boat", 140.0, Color(0.1, 0.3, 0.6)], ["boat", 95.0, Color(0.7, 0.15, 0.1)], ["jetski", 45.0, Color(0.1, 0.7, 0.3)], ["jetski", 55.0, Color(0.9, 0.3, 0.6)], ["ship", 320.0, Color.WHITE]]
-	for i in specs.size():
-		var off: float = specs[i][1]
-		var x0: float = world2.PEN_X0 - off
-		var x1: float = world2.SHORE_X + off
-		var z0: float = world2.ISL_Z0 - off
-		var z1: float = world2.ISL_Z1 + off
-		var path := [Vector3(x1, 0, z1), Vector3(x1, 0, z0), Vector3(x0, 0, z0), Vector3(x0, 0, z1)]
-		if i % 2 == 1:
-			path.reverse()
-		var start: Vector3 = path[i % 4].lerp(path[(i + 1) % 4], 0.3 + 0.1 * i)
-		var b = _spawn_arcade(specs[i][0], start + Vector3(0, 0.4, 0), 0.0, specs[i][2])
-		b.ai_path = path
-		b.ai_i = (i + 1) % 4
-		var dh := Humanoid.new()
-		dh.build(Color(0.9, 0.9, 0.88), Color(0.15, 0.2, 0.35), Color(0.78, 0.56, 0.38), Color(0.08, 0.06, 0.05))
-		dh.sitting = true
-		dh.scale = Vector3.ONE * 0.85
-		dh.position = Vector3(b.seat.x, b.seat.y + 0.07 - 0.98 * 0.85, b.seat.z)
-		b.model_root.add_child(dh)
-		dh.animate(0, 0)
-		dh.set_far(70.0)
-		b.npc_drv = dh
 	# pescadores nos deques do costão
 	for fs in world2.fish_spots:
 		var fh := Humanoid.new()
@@ -391,16 +315,6 @@ func _spawn_extras() -> void:
 	sea = Sea.new()
 	add_child(sea)
 	sea.setup(self)
-	for sc in world2.station_cars:
-		var pc = _spawn_car(sc[0], sc[1], Color.WHITE, true)
-		pc.parked = true
-	for k in 6:
-		var p := Ped.new()
-		add_child(p)
-		p.setup(world2.beach_loop, k % 4, rng)
-		p.position = world2.beach_loop[k % 4].lerp(world2.beach_loop[(k + 1) % 4], rng.randf())
-		p.died.connect(_on_ped_died)
-		peds.append(p)
 
 ## batida de qualquer veículo
 func _on_crash(c, dv: float) -> void:
@@ -533,9 +447,12 @@ var shark_cd := 0.0
 var shark_jump := -1.0
 var _shark_from := Vector3.ZERO
 func _water_tick(dt: float) -> void:
-	for c in cars.duplicate():
-		if not is_instance_valid(c) or not (c is VehicleBody3D):
+	for c in cars:
+		if not is_instance_valid(c) or not (c is VehicleBody3D) or c.freeze:
 			continue
+		var cp: Vector3 = c.global_position
+		if not c.has_meta("sink_t") and absf(cp.x) < 165.0 and absf(cp.z) < 175.0:
+			continue          # no meio da cidade não precisa checar o mar
 		if world2.sea_dist(c.global_position.x, c.global_position.z) > 11.0 and world2.is_water(c.global_position.x, c.global_position.z) and not c.has_meta("sinking"):
 			# boia alguns segundos e vai afundando devagar (quem fica dentro se afoga)
 			c.set_meta("sinking", true)
@@ -930,7 +847,7 @@ func _car_vs_player() -> void:
 	if player.vehicle != null or combat.dead or combat.down_t > 0.0 or vehanim.busy():
 		return
 	for c in cars:
-		if not is_instance_valid(c) or c.kind in ["plane", "heli", "boat"]:
+		if not is_instance_valid(c) or c.global_position.distance_squared_to(player.global_position) > 64.0 or c.kind in ["plane", "heli", "boat"]:
 			continue
 		var lp: Vector3 = c.global_transform.affine_inverse() * player.global_position
 		var hs: Vector3 = c.body_size * 0.5
@@ -949,11 +866,10 @@ func _car_vs_player() -> void:
 			player.global_position += away.normalized() * 0.08
 
 func _crimes(dt: float) -> void:
-	peds = peds.filter(func(q): return is_instance_valid(q))
 	var vc = player.vehicle
 	if vc != null and vc.linear_velocity.length() > 3.0:
 		for p in peds:
-			if p.down: continue
+			if not is_instance_valid(p) or p.down: continue
 			var d: Vector3 = p.global_position - vc.global_position
 			d.y = 0
 			if d.length() < 2.2:
@@ -987,6 +903,7 @@ func _msg(t: String) -> void:
 	msg_t = 3.0
 
 func _process(dt: float) -> void:
+	_upkeep(dt)
 	frames += 1
 	# câmera em 3ª pessoa
 	var drag: Vector2 = hud.take_cam_drag()
@@ -1377,6 +1294,92 @@ func _test9(v: String) -> void:
 			var c2 = get_meta("ac")
 			var ag: Dictionary = traffic_sys._agent_of(c2)
 			print("ACR ", frames, " mode=", ag.get("mode", "-"), " agent=", not ag.is_empty(), " handsup=", peds.filter(func(q): return is_instance_valid(q) and q.mode == "handsup").size(), " spd=", snappedf(c2.linear_velocity.length(), 0.1))
+	if v == "soak":
+		if frames == 4:
+			god = false
+		if frames > 10 and frames < 330 and frames % 6 == 0:
+			var ang := frames * 0.7
+			var at: Vector3 = player.global_position + Vector3(cos(ang), 0, sin(ang)) * rng.randf_range(8.0, 30.0)
+			var tgt = null
+			for c in cars:
+				if is_instance_valid(c) and not c.get("dead") and c != player.vehicle and c.global_position.distance_to(player.global_position) < 70.0:
+					tgt = c
+					break
+			if tgt and frames % 12 == 0:
+				at = tgt.global_position
+			explode_at(at + Vector3(0, 0.5, 0), 6.0, 160.0)
+			hp = 100.0
+			for i in 3:
+				var pi = rng.randi() % city.props.size()
+				city.break_prop(pi, Vector3(4, 0, 0))
+		if frames == 340:
+			combat.kill_now()
+		if frames == 5 or frames == 425:
+			var hist := {}
+			for n in find_children("*", "", true, false):
+				var k2: String = n.get_class() + ("@root" if n.get_parent() == self else "")
+				hist[k2] = hist.get(k2, 0) + 1
+			if frames == 5:
+				set_meta("h5", hist)
+			else:
+				var h5: Dictionary = get_meta("h5")
+				for k3 in hist:
+					if hist[k3] != h5.get(k3, 0):
+						print("HDIFF ", k3, " ", h5.get(k3, 0), " -> ", hist[k3])
+				for k3 in h5:
+					if not hist.has(k3):
+						print("HDIFF ", k3, " ", h5[k3], " -> 0")
+		if frames in [5, 100, 200, 330, 345, 400] or (frames > 345 and frames % 25 == 0):
+			var rb := 0
+			for n in get_tree().get_nodes_in_group("tmp"):
+				if n is RigidBody3D:
+					rb += 1
+			var parts := 0
+			for n in find_children("*", "CPUParticles3D", true, false):
+				if n.emitting:
+					parts += 1
+			print("SOAK ", frames, " nodes=", get_tree().get_node_count(), " tmp=", get_tree().get_nodes_in_group("tmp").size(), " rigid=", rb, " emit=", parts, " cars=", cars.filter(func(c): return is_instance_valid(c)).size(), " wrecks=", cars.filter(func(c): return is_instance_valid(c) and c.get("dead")).size(), " peds=", peds.filter(func(q): return is_instance_valid(q) and not q.down).size(), " agents=", traffic_sys.agents.size(), " props_down=", city.props.filter(func(x): return not x.alive).size(), " dc=", RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME), " dead=", combat.dead, " wanted=", wanted)
+	if v == "dcprof":
+		var groups := {"peds": peds, "cars": cars}
+		if frames == 20:
+			set_meta("dc0", RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME))
+			for q in peds: q.visible = false
+		if frames == 24:
+			print("DCP base=", get_meta("dc0"), " no_peds=", RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME))
+			for c in cars: c.visible = false
+		if frames == 28:
+			print("DCP no_peds_cars=", RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME))
+			sun.shadow_enabled = false
+		if frames == 32:
+			print("DCP +no_shadow=", RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME))
+			sun.shadow_enabled = true
+			for q in peds: q.visible = true
+			for c in cars: c.visible = true
+		if frames == 36:
+			sun.shadow_enabled = false
+		if frames == 40:
+			print("DCP all_no_shadow=", RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME))
+			sun.shadow_enabled = true
+			var cnt := {}
+			for n in find_children("*", "MeshInstance3D", true, false):
+				if not n.is_visible_in_tree():
+					continue
+				var o: Node = n
+				var cat := "other"
+				while o != null and o != self:
+					if o is Car or o.get_script() == Arcade:
+						cat = "car"
+						break
+					if o.get_script() == Ped:
+						cat = "ped"
+						break
+					if o is Humanoid:
+						cat = "human"
+					o = o.get_parent()
+				cnt[cat] = cnt.get(cat, 0) + 1
+			print("DCP meshes ", cnt, " nodes=", get_tree().get_node_count())
+		if frames >= 41 and frames <= 60 and frames % 5 == 0:
+			print("PERF proc_ms=", snappedf(Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0, 0.01), " phys_ms=", snappedf(Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0, 0.01), " active_bodies=", Performance.get_monitor(Performance.PHYSICS_3D_ACTIVE_OBJECTS), " pairs=", Performance.get_monitor(Performance.PHYSICS_3D_COLLISION_PAIRS), " objs=", Performance.get_monitor(Performance.OBJECT_COUNT))
 	if v == "sinkcar":
 		if frames == 4:
 			player.global_position = my_car.door_world()
@@ -2119,3 +2122,212 @@ func _surface() -> String:
 	if world2.sea_dist(p.x, p.z) > -26.0:
 		return "road"       # costão de pedra
 	return "grass"
+
+# ---------------------------------------------------------------- população do mundo (recriada ao morrer)
+var _pop_agents := 0
+var _pop_peds := 26
+var _upkeep_t := 0.0
+
+## carros estacionados, trânsito, ônibus, barcos, aviões, helicóptero, viaturas da delegacia e pedestres
+func _spawn_population() -> void:
+	rng.seed = 7
+	# carro do jogador estacionado ao lado
+	var road_x: float = city._center(2) - city.CELL * 0.5
+	my_car = _spawn_car(Vector3(road_x + 5.9, 0.6, city._center(2) + 4.0), 0.0, Color(0.06, 0.2, 0.55), false, "sport")
+	var palette := [Color(0.55, 0.02, 0.03), Color(0.85, 0.85, 0.86), Color(0.05, 0.05, 0.06), Color(0.75, 0.45, 0.05), Color(0.2, 0.22, 0.25)]
+	for k in 5:
+		var rx: float = city._center(rng.randi_range(0, 4)) + city.CELL * 0.5 * (1 if rng.randf() < 0.5 else -1)
+		_spawn_car(Vector3(rx + 5.9, 0.6, rng.randf_range(-120, 120)), 0.0 if rng.randf() < 0.5 else PI, palette[k % palette.size()])
+	my_car.unlocked = true
+	var mcols := [Color(0.05, 0.05, 0.06), Color(0.95, 0.6, 0.05), Color(0.1, 0.3, 0.75)]
+	for k in 3:
+		_spawn_car(my_car.global_position + Vector3(0.3, 0, -8.0 - k * 3.2), 0.0, mcols[k], false, "moto")
+	# pedestres
+	for k in 26:
+		var p := Ped.new()
+		add_child(p)
+		var loopw: Array = city.walk_loops[rng.randi() % city.walk_loops.size()]
+		p.setup(loopw, rng.randi_range(0, 3), rng)
+		p.position = loopw[p.idx].lerp(loopw[(p.idx + 1) % 4], rng.randf())
+		peds.append(p)
+	for p in peds:
+		p.died.connect(_on_ped_died)
+	_spawn_vehicles2()
+
+func _spawn_vehicles2() -> void:
+	var road_x: float = city._center(2) - city.CELL * 0.5
+	_spawn_car(Vector3(road_x + 5.9, 0.7, city._center(2) + 14.0), 0.0, Color.YELLOW, false, "taxi")
+	_spawn_car(Vector3(city._center(1) - city.CELL * 0.5 - 5.9, 0.7, city._center(3)), PI, Color.YELLOW, false, "taxi")
+	var palette := [Color(0.55, 0.02, 0.03), Color(0.85, 0.85, 0.86), Color(0.05, 0.05, 0.06), Color(0.75, 0.45, 0.05), Color(0.2, 0.22, 0.25), Color(0.1, 0.25, 0.55), Color(0.3, 0.4, 0.3)]
+	var used := {str(Vector2i(1, 3)) + str(Vector2i(0, 1)): true, str(Vector2i(4, 2)) + str(Vector2i(0, -1)): true}
+	var kinds := ["sedan", "hatch", "suv", "pickup", "sedan", "hatch", "taxi", "sport", "sedan", "suv", "moto", "moto", "moto", "hatch", "pickup", "taxi"]
+	for k in kinds.size():
+		var n := Vector2i(rng.randi_range(0, city.N), rng.randi_range(0, city.N))
+		var dirs := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+		var d: Vector2i = dirs[rng.randi() % 4]
+		var tries := 0
+		while (not traffic_sys._valid(n - d) or used.has(str(n) + str(d))) and tries < 40:
+			n = Vector2i(rng.randi_range(0, city.N), rng.randi_range(0, city.N))
+			d = dirs[rng.randi() % 4]
+			tries += 1
+		used[str(n) + str(d)] = true
+		var c = _spawn_car(Vector3(0, 0.7, 0), 0.0, palette[k % palette.size()], false, kinds[k])
+		traffic_sys.add_agent(c, n, d)
+	for k in 2:
+		var b = _spawn_car(Vector3(0, 0.9, 0), 0.0, [Color(0.1, 0.45, 0.2), Color(0.7, 0.12, 0.1)][k], false, "bus")
+		traffic_sys.add_agent(b, Vector2i(1, 3) if k == 0 else Vector2i(4, 2), Vector2i(0, 1) if k == 0 else Vector2i(0, -1), true)
+	var bcols := [Color(0.1, 0.3, 0.7), Color(0.75, 0.1, 0.1), Color(0.1, 0.5, 0.3)]
+	for i in world2.boat_spots.size():
+		var bs: Array = world2.boat_spots[i]
+		_spawn_arcade("boat", bs[0], bs[1], bcols[i % 3])
+	for i in world2.plane_spots.size():
+		var ps: Array = world2.plane_spots[i]
+		_spawn_arcade("plane", ps[0], ps[1], [Color(0.75, 0.1, 0.1), Color(0.1, 0.25, 0.6)][i % 2])
+	for hs in world2.heli_spots:
+		_spawn_arcade("heli", hs[0], hs[1], Color(0.85, 0.55, 0.05))
+	# jet-ski no píer e embarcações com piloto dando a volta na ilha (dá para roubar)
+	var js = world2.boat_spots[0]
+	_spawn_arcade("jetski", js[0] + Vector3(0, 0, -11.0), js[1], Color(0.9, 0.85, 0.1))
+	var specs := [["boat", 70.0, Color(0.8, 0.8, 0.82)], ["boat", 140.0, Color(0.1, 0.3, 0.6)], ["boat", 95.0, Color(0.7, 0.15, 0.1)], ["jetski", 45.0, Color(0.1, 0.7, 0.3)], ["jetski", 55.0, Color(0.9, 0.3, 0.6)], ["ship", 320.0, Color.WHITE]]
+	for i in specs.size():
+		var off: float = specs[i][1]
+		var x0: float = world2.PEN_X0 - off
+		var x1: float = world2.SHORE_X + off
+		var z0: float = world2.ISL_Z0 - off
+		var z1: float = world2.ISL_Z1 + off
+		var path := [Vector3(x1, 0, z1), Vector3(x1, 0, z0), Vector3(x0, 0, z0), Vector3(x0, 0, z1)]
+		if i % 2 == 1:
+			path.reverse()
+		var start: Vector3 = path[i % 4].lerp(path[(i + 1) % 4], 0.3 + 0.1 * i)
+		var b = _spawn_arcade(specs[i][0], start + Vector3(0, 0.4, 0), 0.0, specs[i][2])
+		b.ai_path = path
+		b.ai_i = (i + 1) % 4
+		var dh := Humanoid.new()
+		dh.build(Color(0.9, 0.9, 0.88), Color(0.15, 0.2, 0.35), Color(0.78, 0.56, 0.38), Color(0.08, 0.06, 0.05))
+		dh.sitting = true
+		dh.scale = Vector3.ONE * 0.85
+		dh.position = Vector3(b.seat.x, b.seat.y + 0.07 - 0.98 * 0.85, b.seat.z)
+		b.model_root.add_child(dh)
+		dh.animate(0, 0)
+		dh.set_far(70.0)
+		b.npc_drv = dh
+	for sc in world2.station_cars:
+		var pc = _spawn_car(sc[0], sc[1], Color.WHITE, true)
+		pc.parked = true
+	for k in 6:
+		var p := Ped.new()
+		add_child(p)
+		p.setup(world2.beach_loop, k % 4, rng)
+		p.position = world2.beach_loop[k % 4].lerp(world2.beach_loop[(k + 1) % 4], rng.randf())
+		p.died.connect(_on_ped_died)
+		peds.append(p)
+
+	_pop_agents = traffic_sys.agents.size()
+	for i in owned_cars.size():
+		var oc: Dictionary = owned_cars[i]
+		_place_owned(oc.get("kind", "sedan"), Color.html(oc.get("color", "#2244aa")), i)
+
+## reinicia o mundo do zero (morte ou prisão): todos os veículos, carcaças, pedestres, corpos,
+## destroços, sangue, marcas, postes/árvores derrubados, polícia, exército e missão em andamento
+func reset_world() -> void:
+	vehanim.cancel()
+	combat.release_hostage()
+	combat._surrender.clear()
+	if missions.active != "":
+		if missions.active == "taxi":
+			missions._taxi_end()
+		else:
+			missions._cleanup()
+	police.clear()
+	for c in cars:
+		if is_instance_valid(c):
+			c.queue_free()
+	cars.clear()
+	traffic_sys.agents.clear()
+	traffic_sys.drifting.clear()
+	for q in peds:
+		if is_instance_valid(q):
+			q.queue_free()
+	peds.clear()
+	for n in get_tree().get_nodes_in_group("tmp"):
+		n.queue_free()
+	combat.cash.clear()
+	combat.rockets.clear()
+	combat.grenades.clear()
+	combat.carrying = null
+	city.restore_props()
+	sea.reset()
+	if shark and is_instance_valid(shark):
+		shark.queue_free()
+	shark = null
+	police_car = null
+	act_target = null
+	wanted = 0
+	breath = 100.0
+	_spawn_population()
+
+## manutenção (a cada 2 s): tira referências mortas, apaga o fogo e depois a carcaça dos veículos
+## destruídos (longe e fora da tela) e repõe trânsito e pedestres que sumiram, sempre fora da vista
+func _upkeep(dt: float) -> void:
+	_upkeep_t -= dt
+	if _upkeep_t > 0.0:
+		return
+	_upkeep_t = 2.0
+	cars = cars.filter(func(c): return is_instance_valid(c))
+	peds = peds.filter(func(q): return is_instance_valid(q))
+	var pp: Vector3 = player.global_position
+	for c in cars.duplicate():
+		if not c.get("dead") or c == player.vehicle:
+			continue
+		var wt: float = c.get_meta("wreck_t", 0.0) + 2.0
+		c.set_meta("wreck_t", wt)
+		if wt > 20.0:
+			for e in c.find_children("*", "CPUParticles3D", true, false):
+				e.emitting = false
+		if wt > 45.0 and c.global_position.distance_to(pp) > 60.0 and not _seen(c.global_position):
+			cars.erase(c)
+			c.queue_free()
+	# corpos no chão: no máximo 10 (o mais antigo some antes dos 40 s normais)
+	var dead_peds := peds.filter(func(q): return q.down)
+	if dead_peds.size() > 10:
+		dead_peds.sort_custom(func(a, b): return a._t > b._t)
+		for q in dead_peds.slice(0, dead_peds.size() - 10):
+			q._t = 39.9
+	if interior != "" or combat.dead:
+		return
+	# trânsito: repõe carros que foram destruídos/roubados
+	if traffic_sys.agents.size() < _pop_agents:
+		var kinds := ["sedan", "hatch", "suv", "pickup", "taxi", "sport", "moto"]
+		var dirs := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+		for t in 12:
+			var n := Vector2i(rng.randi_range(0, city.N), rng.randi_range(0, city.N))
+			var d: Vector2i = dirs[rng.randi() % 4]
+			if not traffic_sys._valid(n - d):
+				continue
+			var mid: Vector3 = traffic_sys.node_pos(n - d).lerp(traffic_sys.node_pos(n), 0.5)
+			if mid.distance_to(pp) < 90.0 or (mid.distance_to(pp) < 160.0 and _seen(mid)):
+				continue
+			var c = _spawn_car(Vector3(0, 0.7, 0), 0.0, Color.from_hsv(rng.randf(), rng.randf_range(0.2, 0.8), rng.randf_range(0.15, 0.85)), false, kinds[rng.randi() % kinds.size()])
+			traffic_sys.add_agent(c, n, d)
+			break
+	# pedestres da cidade
+	var alive := 0
+	for q in peds:
+		if not q.down and not q.beach:
+			alive += 1
+	if alive < _pop_peds:
+		for t in 8:
+			var loopw: Array = city.walk_loops[rng.randi() % city.walk_loops.size()]
+			var k := rng.randi_range(0, 3)
+			var pos: Vector3 = loopw[k]
+			if pos.distance_to(pp) < 55.0 or (pos.distance_to(pp) < 120.0 and _seen(pos)):
+				continue
+			var q := Ped.new()
+			add_child(q)
+			q.setup(loopw, k, rng)
+			q.died.connect(_on_ped_died)
+			peds.append(q)
+			break
+
+func _seen(p: Vector3) -> bool:
+	return not cam.is_position_behind(p) and cam.global_position.distance_to(p) < 160.0

@@ -37,6 +37,7 @@ var _atk_cd := 0.8
 var _atk_hit := -1.0
 
 func setup(path: Array, start: int, rng: RandomNumberGenerator) -> void:
+	add_to_group("tmp")
 	loop = path
 	idx = start % path.size()
 	position = path[idx]
@@ -245,7 +246,25 @@ func _mode_tick(dt: float) -> void:
 		"hostage":
 			body.animate(0.0, dt)
 
+## otimização: pedestre longe do jogador (fora da distância em que é desenhado) atualiza 5×/s
+var _acc := 0.0
+var _far_t := 0.0
+var _is_far := false
 func _process(dt: float) -> void:
+	_far_t -= dt
+	if _far_t <= 0.0:
+		_far_t = 0.4 + _rng.randf() * 0.2
+		var pl = get_tree().current_scene.get("player")
+		_is_far = pl != null and mode == "" and knocked <= 0.0 and global_position.distance_squared_to(pl.global_position) > 62.0 * 62.0
+	if _is_far:
+		_acc += dt
+		if _acc < 0.2:
+			return
+		dt = _acc
+	_acc = 0.0
+	_ped_tick(dt)
+
+func _ped_tick(dt: float) -> void:
 	if down:
 		_t += dt
 		if _t > 1.6 and _t - dt <= 1.6 and _rag.size() > 1 and is_instance_valid(_rag[1]):

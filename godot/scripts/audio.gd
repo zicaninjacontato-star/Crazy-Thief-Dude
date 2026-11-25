@@ -3,6 +3,7 @@ extends Node
 ## batida, impacto em pedestre, grito, passos e buzina.
 
 const RATE := 22050.0
+const GEN := 16000.0     # motor e sirene (gerados em tempo real): taxa menor = menos trabalho por quadro
 
 var engine_p: AudioStreamPlayer
 var engine_pb: AudioStreamGeneratorPlayback
@@ -85,7 +86,7 @@ func _ready() -> void:
 func _gen_player() -> AudioStreamPlayer:
 	var p := AudioStreamPlayer.new()
 	var g := AudioStreamGenerator.new()
-	g.mix_rate = RATE
+	g.mix_rate = GEN
 	g.buffer_length = 0.12
 	p.stream = g
 	p.volume_db = -6.0
@@ -113,29 +114,40 @@ func _process(_dt: float) -> void:
 			sounds[job[0]] = w
 
 func _fill_engine() -> void:
+	# otimização: sem som de motor (a pé) não gera amostras
+	if eng_vol < 0.0005 and eng_target_vol <= 0.0:
+		return
 	var n := engine_pb.get_frames_available()
+	var buf := PackedVector2Array()
+	buf.resize(n)
 	for i in n:
 		eng_rpm = lerpf(eng_rpm, eng_target_rpm, 0.0004)
 		eng_vol = lerpf(eng_vol, eng_target_vol, 0.0008)
 		var f := 38.0 + eng_rpm * 150.0
-		eng_phase = fmod(eng_phase + f / RATE, 1.0)
-		eng_phase2 = fmod(eng_phase2 + f * 0.5 / RATE, 1.0)
+		eng_phase = fmod(eng_phase + f / GEN, 1.0)
+		eng_phase2 = fmod(eng_phase2 + f * 0.5 / GEN, 1.0)
 		# dente de serra + sub-harmônico + ruído: ronco de motor
 		var s := (eng_phase * 2.0 - 1.0) * 0.55 + sin(eng_phase2 * TAU) * 0.45 + (randf() * 2.0 - 1.0) * 0.08
 		s = clampf(s * 1.4, -1.0, 1.0) * eng_vol
-		engine_pb.push_frame(Vector2(s, s))
+		buf[i] = Vector2(s, s)
+	engine_pb.push_buffer(buf)
 
 func _fill_siren() -> void:
+	if sir_vol < 0.0005 and sir_target <= 0.0:
+		return
 	var n := siren_pb.get_frames_available()
+	var buf := PackedVector2Array()
+	buf.resize(n)
 	for i in n:
 		sir_vol = lerpf(sir_vol, sir_target, 0.0005)
-		sir_t += 1.0 / RATE
+		sir_t += 1.0 / GEN
 		var sweep := (sin(sir_t * TAU * 0.33) * 0.5 + 0.5)
 		var f := lerpf(620.0, 1350.0, sweep)
-		sir_phase = fmod(sir_phase + f / RATE, 1.0)
+		sir_phase = fmod(sir_phase + f / GEN, 1.0)
 		var tri := absf(sir_phase * 4.0 - 2.0) - 1.0
 		var s := tri * sir_vol
-		siren_pb.push_frame(Vector2(s, s))
+		buf[i] = Vector2(s, s)
+	siren_pb.push_buffer(buf)
 
 func play(name: String, pos = null, vol_db := 0.0) -> void:
 	if not sounds.has(name):

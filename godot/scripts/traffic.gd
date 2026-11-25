@@ -109,7 +109,12 @@ func _mm(mesh: Mesh, mat: Material, xf: Array) -> void:
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mmi)
 
+var _lamp_key := -1
 func _update_lamps() -> void:
+	var key := (1 if green("ns") else 0) + (2 if yellow("ns") else 0) + (4 if green("ew") else 0) + (8 if yellow("ew") else 0)
+	if key == _lamp_key:
+		return            # só muda o material quando o semáforo troca
+	_lamp_key = key
 	for ax in ["ns", "ew"]:
 		var g := green(ax)
 		var y := yellow(ax)
@@ -238,14 +243,19 @@ func _physics_process(dt: float) -> void:
 		dc.steer_in = d.st
 		dc.throttle = 0.35 if d.t < 2.5 else 0.0
 		dc.brake_in = 0.0 if d.t < 4.0 else 0.4
+	# otimização: cada motorista decide a cada 2 quadros de física (metade num, metade no outro)
+	_tick += 1
+	var i := 0
 	for a in agents.duplicate():
+		i += 1
 		var c = a.car
 		if not is_instance_valid(c) or c.dead:
 			agents.erase(a)
 			continue
 		if c == main.player.vehicle:
 			continue
-		_drive(a, dt)
+		if (i + _tick) % 2 == 0 or a.get("mode", "") == "ram":
+			_drive(a, dt if a.get("mode", "") == "ram" else dt * 2.0)
 
 func _drive(a: Dictionary, dt: float) -> void:
 	var c = a.car
@@ -413,6 +423,7 @@ func _begin_turn(a: Dictionary) -> void:
 
 ## limite de velocidade por obstáculo à frente (carros, jogador, pedestres, policiais)
 var last_block = null
+var _tick := 0
 func _ahead_limit(c, pos: Vector3, no_cars := false, ign = null) -> float:
 	last_block = null
 	var f: Vector3 = c.global_transform.basis.z

@@ -545,6 +545,7 @@ func ragdoll(impulse: Vector3, ignore: PhysicsBody3D = null, gore := false) -> A
 		rb.collision_layer = 4
 		rb.collision_mask = 1
 		world.add_child(rb)
+		rb.add_to_group("tmp")
 		rb.global_transform = b.global_transform
 		var cs := CollisionShape3D.new()
 		var cap := CapsuleShape3D.new()
@@ -578,6 +579,9 @@ func ragdoll(impulse: Vector3, ignore: PhysicsBody3D = null, gore := false) -> A
 		j.node_a = rbs[parent_of[n]].get_path()
 		j.node_b = rbs[n].get_path()
 		rbs[n].set_meta("joint", j)
+		# a junta vai embora junto com a peça (antes ficavam soltas na cena para sempre)
+		j.add_to_group("tmp")
+		rbs[n].tree_exiting.connect(func(): if is_instance_valid(j): j.queue_free())
 	for n in rbs:
 		var rb: RigidBody3D = rbs[n]
 		var k := 1.0 if n in ["hips", "chest"] else 0.7

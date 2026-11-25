@@ -102,6 +102,7 @@ func _launch(from: Vector3, tgt: Vector3) -> void:
 	n.mesh = bm
 	n.material_override = M.plain(Color(0.85, 0.85, 0.85), 0.5)
 	main.add_child(n)
+	n.add_to_group("tmp")
 	n.global_position = from
 	FX.fire_emitter(n, Vector3(0, 0, -0.8))
 	_missiles.append({"n": n, "tgt": tgt, "v": _dir * 62.0, "t": 0.0})

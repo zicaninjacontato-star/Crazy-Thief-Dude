@@ -55,6 +55,13 @@ func _physics_process(dt: float) -> void:
 	_whale_tick(dt, pp, w2)
 	_squid_tick(dt, pp, w2)
 
+## reinício do mundo: tira a baleia (a cena do tubarão gigante termina sozinha)
+func reset() -> void:
+	if whale and is_instance_valid(whale):
+		whale.queue_free()
+	whale = null
+	whale_cd = 20.0
+
 func _fish_tick(dt: float, pp: Vector3, w2) -> void:
 	var mm := fish_mm.multimesh
 	for i in fish.size():

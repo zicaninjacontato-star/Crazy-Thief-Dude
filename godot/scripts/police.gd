@@ -78,6 +78,9 @@ func is_unit_car(c) -> bool:
 	return c == heli
 
 func tick(dt: float) -> void:
+	if main.wanted == 0 and units.is_empty() and cops.is_empty() and heli == null and army.is_empty():
+		main.police_car = null
+		return            # sem polícia em campo: nada a fazer
 	cops = cops.filter(func(c): return is_instance_valid(c))
 	units = units.filter(func(u): return is_instance_valid(u.car) and not u.car.dead)
 	armed_t -= dt
