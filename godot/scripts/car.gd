@@ -158,6 +158,33 @@ func make_police() -> void:
 	police = true
 	_light_bar()
 
+## oficina: nova pintura (troca o material da tinta da carroceria e da porta)
+func repaint(c: Color) -> void:
+	var old: Material = M.car_paint(paint_c)
+	var nm: Material = M.car_paint(c)
+	for n in model_root.find_children("*", "MeshInstance3D", true, false):
+		if n.material_override == old:
+			n.material_override = nm
+	if door_node:
+		for n in door_node.find_children("*", "MeshInstance3D", true, false):
+			if n.material_override == old:
+				n.material_override = nm
+	paint_c = c
+
+## oficina: conserto (vida, motor, fumaça/fogo e pneus)
+func repair() -> void:
+	hp = 100.0
+	engine_hp = 100.0
+	if _smoke and is_instance_valid(_smoke):
+		_smoke.queue_free()
+	_smoke = null
+	if _fire and is_instance_valid(_fire):
+		_fire.queue_free()
+	_fire = null
+	for w in wheels:
+		w.wheel_friction_slip = 2.4
+		w.suspension_stiffness = maxf(w.suspension_stiffness, 30.0)
+
 ## viatura toda preta (3 estrelas ou mais)
 func paint_black() -> void:
 	var blk := M.car_paint(Color(0.03, 0.03, 0.035))

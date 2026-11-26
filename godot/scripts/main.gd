@@ -5,6 +5,7 @@ const City := preload("res://scripts/city.gd")
 const Player := preload("res://scripts/player.gd")
 const Car := preload("res://scripts/car.gd")
 const Ped := preload("res://scripts/ped.gd")
+const Cop := preload("res://scripts/cop.gd")
 const Hud := preload("res://scripts/hud.gd")
 const Humanoid := preload("res://scripts/humanoid.gd")
 const M := preload("res://scripts/mats.gd")
@@ -111,7 +112,7 @@ func _ready() -> void:
 	player.world2 = world2
 	add_child(player)
 	player.set_meta("player", true)
-	player.position = Vector3(city._center(2) - city.BLOCK * 0.5 + 1.5, 0.3, city._center(2))
+	player.position = city.safehouse.get("spawn", Vector3(city._center(2) - city.BLOCK * 0.5 + 1.5, 0.3, city._center(2)))
 	hud = Hud.new()
 	add_child(hud)
 	hud.enter_pressed.connect(_toggle_car)
@@ -152,6 +153,8 @@ func _ready() -> void:
 
 ## novo jogo: só soco, $600, sem carros comprados
 func new_game() -> void:
+	player.global_position = spawn_point()
+	player.velocity = Vector3.ZERO
 	money = 600
 	hp = 100.0
 	armor = 0.0
@@ -169,6 +172,8 @@ func new_game() -> void:
 	ui.save_game()
 
 func load_game() -> void:
+	player.global_position = spawn_point()
+	player.velocity = Vector3.ZERO
 	var d: Dictionary = ui.load_save()
 	if d.is_empty():
 		new_game()
@@ -404,6 +409,26 @@ func _shop_action() -> void:
 			ui.cinematic(SHOP_NAMES.get(interior, ""), "saindo...", leave_interior)
 		"buy":
 			ui.show_shop(interior)
+		"eat":
+			if money >= 12:
+				money -= 12
+				hp = minf(100.0, hp + 50.0)
+				audio.play("cash")
+				_msg("Lanche: +50 de vida")
+			else:
+				_msg("Dinheiro insuficiente")
+		"snack":
+			if money >= 5:
+				money -= 5
+				hp = minf(100.0, hp + 15.0)
+				audio.play("cash")
+				_msg("Salgadinho: +15 de vida")
+		"rob":
+			_rob_store()
+		"sleep":
+			ui.show_sleep()
+		"tune":
+			ui.show_tuning()
 		"carry":
 			combat.pick_body(act_target)
 		"drop":
@@ -1035,7 +1060,15 @@ func _process(dt: float) -> void:
 			for sh in city.shops:
 				if Vector2(sh.pos.x - player.global_position.x, sh.pos.z - player.global_position.z).length() < 3.2:
 					shop_near = sh.type
-					shop_action = "enter"
+					match sh.type:
+						"food": shop_action = "eat"
+						"shop24": shop_action = "rob" if combat.weapon not in ["fist", "grenade"] else "snack"
+						"tuning": shop_action = ""
+						_: shop_action = "enter"
+			# casa segura: cama
+			if not city.safehouse.is_empty() and player.global_position.distance_to(city.safehouse.bed) < 2.0:
+				shop_action = "sleep"
+				shop_near = "safe"
 			# corpos e porta-malas
 			if shop_action == "" and combat.down_t <= 0.0:
 				act_target = null
@@ -1052,6 +1085,12 @@ func _process(dt: float) -> void:
 							shop_action = "carry"
 							act_target = q
 							break
+	# oficina: entrar com o carro na frente da loja
+	if player.vehicle != null and interior == "" and not combat.dead:
+		for sh in city.shops:
+			if sh.type == "tuning" and Vector2(sh.pos.x - player.global_position.x, sh.pos.z - player.global_position.z).length() < 7.0 and player.vehicle is VehicleBody3D:
+				shop_action = "tune"
+				shop_near = "tuning"
 	hud.action_kind = shop_action
 	hud.weapon_kind = combat.weapon
 	hud.heli = player.vehicle != null and player.vehicle.kind == "heli"
@@ -1063,20 +1102,32 @@ func _process(dt: float) -> void:
 				ce = true
 				break
 	hud.can_enter = ce
-	hud.shop_label = {"enter": "ENTRAR", "exit": "SAIR", "buy": "COMPRAR", "carry": "CARREGAR", "drop": "SOLTAR", "trunk": "PORTA-MALAS"}.get(shop_action, "")
+	hud.shop_label = {"enter": "ENTRAR", "exit": "SAIR", "buy": "COMPRAR", "carry": "CARREGAR", "drop": "SOLTAR", "trunk": "PORTA-MALAS", "eat": "COMER", "rob": "ASSALTAR", "snack": "COMPRAR", "sleep": "DORMIR", "tune": "OFICINA"}.get(shop_action, "")
 	var pk: String = player.vehicle.kind if player.vehicle else ""
 	hud.gas_name = "SUBIR" if pk == "heli" else "ACEL"
 	hud.brk_name = "DESCER" if pk == "heli" else "FREIO"
 	hud.stars_blink = wanted > 0 and not police.seen
 	var bl: Array = missions.blips()
-	for u in police.units:
-		if is_instance_valid(u.car):
-			bl.append({"pos": u.car.global_position, "col": Color(0.2, 0.45, 1.0) if int(Time.get_ticks_msec() / 250) % 2 == 0 else Color(1, 0.15, 0.15)})
-	if police.heli and is_instance_valid(police.heli):
-		bl.append({"pos": police.heli.global_position, "col": Color(0.2, 0.45, 1.0)})
+	var flash_c: Color = Color(0.2, 0.45, 1.0) if int(Time.get_ticks_msec() / 250) % 2 == 0 else Color(1, 0.15, 0.15)
 	if interior == "":
 		for sh in city.shops:
-			bl.append({"pos": sh.pos, "col": {"guns": Color(1, 0.3, 0.2), "cars": Color(0.3, 0.8, 1), "clothes": Color(0.95, 0.45, 0.85)}[sh.type]})
+			bl.append({"pos": sh.pos, "col": sh.col.darkened(0.2), "icon": sh.type})
+		if not city.safehouse.is_empty():
+			bl.append({"pos": city.safehouse.door, "col": Color(0.2, 0.65, 0.3), "icon": "safe"})
+		bl.append({"pos": city.police_pos, "col": Color(0.15, 0.3, 0.75), "icon": "police"})
+		bl.append({"pos": city.hospital_pos, "col": Color(0.85, 0.15, 0.15), "icon": "hospital"})
+		bl.append({"pos": Vector3(world2.BASE.get_center().x, 0, world2.BASE.get_center().y), "col": Color(0.3, 0.38, 0.2), "icon": "base"})
+	for u in police.units:
+		if is_instance_valid(u.car):
+			bl.append({"pos": u.car.global_position, "col": flash_c, "icon": {"car": "pcar", "moto": "pmoto", "swat": "pvan", "armored": "armored"}.get(u.kind, "pcar")})
+	for cp in police.cops:
+		if is_instance_valid(cp) and not cp.down:
+			bl.append({"pos": cp.global_position, "col": flash_c, "icon": "cop"})
+	if police.heli and is_instance_valid(police.heli):
+		bl.append({"pos": police.heli.global_position, "col": flash_c, "icon": "pheli"})
+	for a in police.army:
+		if is_instance_valid(a) and not a.dead:
+			bl.append({"pos": a.global_position, "col": Color(0.35, 0.45, 0.2), "icon": a.kind})
 	hud.map_blips = bl
 	# rastro até o destino (missão/táxi tem prioridade sobre o ponto marcado no mapa)
 	_route_t -= dt
@@ -1106,8 +1157,8 @@ func _process(dt: float) -> void:
 	if msg_t > 0:
 		msg_t -= dt
 		if msg_t <= 0: hud.hint.text = ""
-	elif shop_action in ["enter", "exit", "buy"]:
-		hud.hint.text = {"guns": "AMMU★NATION", "cars": "Concessionária", "clothes": "Loja de roupas"}[shop_near] + " · toque em " + hud.shop_label
+	elif shop_action in ["enter", "exit", "buy", "eat", "rob", "snack", "sleep", "tune"]:
+		hud.hint.text = {"guns": "AMMU★NATION", "cars": "Concessionária", "clothes": "Loja de roupas", "food": "Lanchonete · lanche $12 (+50 de vida)", "shop24": "Loja 24h" + (" · ASSALTE com a arma na mão" if shop_action == "rob" else " · salgadinho $5 (+15 de vida)"), "safe": "Casa segura · dormir salva o jogo", "tuning": "Oficina · pintura e conserto"}.get(shop_near, "") + " · toque em " + hud.shop_label
 	elif player.swimming and player.underwater:
 		hud.hint.text = "Debaixo d'água · segure ⬆ (SUBIR) para voltar"
 	elif player.swimming:
@@ -1380,6 +1431,104 @@ func _test9(v: String) -> void:
 			print("DCP meshes ", cnt, " nodes=", get_tree().get_node_count())
 		if frames >= 41 and frames <= 60 and frames % 5 == 0:
 			print("PERF proc_ms=", snappedf(Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0, 0.01), " phys_ms=", snappedf(Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0, 0.01), " active_bodies=", Performance.get_monitor(Performance.PHYSICS_3D_ACTIVE_OBJECTS), " pairs=", Performance.get_monitor(Performance.PHYSICS_3D_COLLISION_PAIRS), " objs=", Performance.get_monitor(Performance.OBJECT_COUNT))
+	if v == "station" or v == "station2" or v == "station3":
+		var st: Dictionary = city.station
+		if frames == 4:
+			if v == "station":
+				player.global_position = st.cell + Vector3(0, 0, -3.2)
+			elif v == "station2":
+				player.global_position = st.door + Vector3(-6.0, 0, -10.0)
+			else:
+				player.global_position = st.garage_out + Vector3(0, 0, 6.0)
+		if frames > 5:
+			cam_yaw = {"station": PI * 0.5 + 0.3, "station2": 0.5, "station3": PI}[v]
+			cam_pitch = -0.05 if v == "station" else 0.25
+	if v == "busted2":
+		if frames == 6:
+			combat.busted()
+		if frames % 20 == 0:
+			print("BST ", frames, " pos=", player.global_position.snapped(Vector3.ONE * 0.1), " cell=", city.station.cell, " busted_t=", snappedf(combat.busted_t, 0.1))
+	if v == "safe":
+		if frames == 4:
+			player.global_position = city.safehouse.bed + Vector3(0, 0, -0.5)
+		if frames == 10:
+			print("SAFE action=", shop_action, " spawn=", spawn_point(), " mycar=", my_car.global_position.snapped(Vector3.ONE))
+			sleep_until(20.0)
+		if frames == 40:
+			print("SAFE tod=", snappedf(tod, 0.1), " hp=", hp)
+		if frames > 5:
+			cam_yaw = PI * 0.75
+			cam_pitch = -0.2
+	if v == "ragshot":
+		if frames == 6:
+			var q = peds[0]
+			for pq in peds:
+				if pq.global_position.distance_to(player.global_position) < q.global_position.distance_to(player.global_position):
+					q = pq
+			set_meta("rq", q)
+			q.damage(20.0, Vector3(1, 0, 0), false, null, "leg")
+			q._rng.seed = 5
+		if frames % 6 == 0 and frames < 40:
+			var q2 = get_meta("rq")
+			print("RAG ", frames, " limp=", snappedf(q2.body.limp, 0.01), " knocked=", snappedf(q2.knocked, 0.1), " hp=", q2.hp)
+		if frames == 40:
+			var q3 = get_meta("rq")
+			player.global_position = q3.global_position + Vector3(0, 0, -5)
+			q3.knocked = 0.0
+			q3.hit(null, Vector3(4, 1, 0), false)
+		if frames > 40:
+			var q4 = get_meta("rq")
+			if q4.body.parts.size() > 0 and is_instance_valid(q4.body.parts[0]):
+				var to: Vector3 = q4.body.parts[0].global_position - player.global_position
+				cam_yaw = atan2(to.x, to.z) + PI
+				cam_pitch = -0.2
+			if frames % 10 == 0:
+				var spread := 0.0
+				var pts = q4.body.parts.filter(func(b): return is_instance_valid(b))
+				for b in pts:
+					spread = maxf(spread, b.global_position.distance_to(pts[0].global_position))
+				print("RAG2 ", frames, " spread=", snappedf(spread, 0.01))
+	if v == "waterdeath":
+		if frames == 4:
+			player.global_position = Vector3(world2.SHORE_X + 60.0, 0.3, 30.0)
+		if frames == 12:
+			combat.kill_now()
+		if frames % 10 == 0 and player.body.ragdolled:
+			var ys = player.body.parts.filter(func(b): return is_instance_valid(b)).map(func(b): return snappedf(b.global_position.y, 0.1))
+			print("WDT ", frames, " ys=", ys, " water=", world2.WATER_Y)
+	if v == "patrol":
+		if frames == 20:
+			print("PAT before agents_patrol=", traffic_sys.agents.filter(func(a): return a.car.has_meta("patrol")).size(), " foot=", police.patrol_cops.size())
+			wanted = 1
+			police.on_crime()
+		if frames % 15 == 0 and frames > 20:
+			print("PAT ", frames, " units=", police.units.map(func(u): return u.kind), " cops=", police.cops.size(), " patrol_left=", police.patrol_cops.size())
+	if v == "basetank":
+		if frames == 4:
+			wanted = 5
+			god = true
+		if frames % 20 == 0:
+			var tk = police.army.filter(func(a): return is_instance_valid(a) and a.kind == "tank")
+			print("BTK ", frames, " tanks=", tk.map(func(t): return t.global_position.snapped(Vector3.ONE)), " jets=", police.army.filter(func(a): return is_instance_valid(a) and a.kind == "jet").map(func(t): return t.global_position.snapped(Vector3.ONE)))
+	if v == "base":
+		if frames > 3:
+			player.global_position = world2.base_gate + Vector3(10, 0, -20)
+			cam_yaw = PI + 0.6
+			cam_pitch = 0.45
+	if v == "parked":
+		if frames == 6:
+			for c in cars:
+				if is_instance_valid(c) and c.get("parked") and c is VehicleBody3D:
+					var p: Vector3 = c.global_position
+					var rx := fposmod(p.x + 32.0, 64.0) - 32.0
+					var rz := fposmod(p.z + 32.0, 64.0) - 32.0
+					print("PRK ", p.snapped(Vector3.ONE * 0.1), " kind=", c.kind, " near_x_road=", snappedf(absf(rx), 0.1), " near_z_road=", snappedf(absf(rz), 0.1))
+	if v == "icons":
+		if frames == 6:
+			wanted = 3
+			police.on_crime()
+		if frames > 6:
+			player.global_position = city.station.door + Vector3(0, 0, -8)
 	if v == "sinkcar":
 		if frames == 4:
 			player.global_position = my_car.door_world()
@@ -2131,17 +2280,26 @@ var _upkeep_t := 0.0
 ## carros estacionados, trânsito, ônibus, barcos, aviões, helicóptero, viaturas da delegacia e pedestres
 func _spawn_population() -> void:
 	rng.seed = 7
-	# carro do jogador estacionado ao lado
-	var road_x: float = city._center(2) - city.CELL * 0.5
-	my_car = _spawn_car(Vector3(road_x + 5.9, 0.6, city._center(2) + 4.0), 0.0, Color(0.06, 0.2, 0.55), false, "sport")
-	var palette := [Color(0.55, 0.02, 0.03), Color(0.85, 0.85, 0.86), Color(0.05, 0.05, 0.06), Color(0.75, 0.45, 0.05), Color(0.2, 0.22, 0.25)]
-	for k in 5:
-		var rx: float = city._center(rng.randi_range(0, 4)) + city.CELL * 0.5 * (1 if rng.randf() < 0.5 else -1)
-		_spawn_car(Vector3(rx + 5.9, 0.6, rng.randf_range(-120, 120)), 0.0 if rng.randf() < 0.5 else PI, palette[k % palette.size()])
+	# carro do jogador na garagem da casa segura; motos na calçada em frente
+	var sh: Dictionary = city.safehouse
+	my_car = _spawn_car(sh.garage[0], sh.garage[1], Color(0.06, 0.2, 0.55), false, "sport")
 	my_car.unlocked = true
 	var mcols := [Color(0.05, 0.05, 0.06), Color(0.95, 0.6, 0.05), Color(0.1, 0.3, 0.75)]
+	var curb_z: float = city._center(2) - city.CELL * 0.5 + 5.9
 	for k in 3:
-		_spawn_car(my_car.global_position + Vector3(0.3, 0, -8.0 - k * 3.2), 0.0, mcols[k], false, "moto")
+		_spawn_car(Vector3(sh.door.x - 6.0 - k * 2.4, 0.6, curb_z), PI * 0.5, mcols[k], false, "moto")
+	# carros estacionados SÓ junto ao meio-fio, no meio dos quarteirões (nunca em cruzamento/no meio da rua)
+	var palette := [Color(0.55, 0.02, 0.03), Color(0.85, 0.85, 0.86), Color(0.05, 0.05, 0.06), Color(0.75, 0.45, 0.05), Color(0.2, 0.22, 0.25), Color(0.3, 0.4, 0.3)]
+	for k in 7:
+		var road: float = (rng.randi_range(1, city.N - 1) - city.N * 0.5) * city.CELL       # rua interna da grade
+		var mid: float = city._center(rng.randi_range(0, city.N - 1)) + rng.randf_range(-12.0, 12.0)
+		var side: float = 1.0 if rng.randf() < 0.5 else -1.0
+		var pos := Vector3(road + 5.9 * side, 0.6, mid) if k % 2 == 0 else Vector3(mid, 0.6, road + 5.9 * side)
+		if pos.distance_to(spawn_point()) < 14.0:
+			continue
+		var yaw: float = (0.0 if side > 0 else PI) if k % 2 == 0 else (PI * 0.5 if side > 0 else -PI * 0.5)
+		var pc = _spawn_car(pos, yaw, palette[k % palette.size()])
+		pc.parked = true
 	# pedestres
 	for k in 26:
 		var p := Ped.new()
@@ -2211,7 +2369,7 @@ func _spawn_vehicles2() -> void:
 		dh.animate(0, 0)
 		dh.set_far(70.0)
 		b.npc_drv = dh
-	for sc in world2.station_cars:
+	for sc in city.station_cars:
 		var pc = _spawn_car(sc[0], sc[1], Color.WHITE, true)
 		pc.parked = true
 	for k in 6:
@@ -2222,6 +2380,24 @@ func _spawn_vehicles2() -> void:
 		p.died.connect(_on_ped_died)
 		peds.append(p)
 
+	# polícia patrulhando: 2 viaturas e 1 moto no trânsito (sirene desligada) + 3 policiais a pé
+	var pdirs := [[Vector2i(2, 1), Vector2i(1, 0)], [Vector2i(3, 4), Vector2i(0, -1)], [Vector2i(1, 2), Vector2i(0, 1)]]
+	for k in 3:
+		var pk: String = "moto" if k == 2 else ""
+		var pc = _spawn_car(Vector3(0, 0.7, 0), 0.0, Color(0.92, 0.92, 0.93), pk == "", pk)
+		if pk == "moto":
+			pc.make_police()
+		pc.siren_on = false
+		pc.set_meta("patrol", true)
+		traffic_sys.add_agent(pc, pdirs[k][0], pdirs[k][1])
+	for k in 3:
+		var cp = Cop.new()
+		add_child(cp)
+		cp.setup(900 + k, "cop")
+		var loopw: Array = city.walk_loops[(k * 7 + 3) % city.walk_loops.size()]
+		cp.global_position = loopw[0] + Vector3(0, 0.1, 0)
+		cp.patrol = loopw
+		police.patrol_cops.append(cp)
 	_pop_agents = traffic_sys.agents.size()
 	for i in owned_cars.size():
 		var oc: Dictionary = owned_cars[i]
@@ -2331,3 +2507,40 @@ func _upkeep(dt: float) -> void:
 
 func _seen(p: Vector3) -> bool:
 	return not cam.is_position_behind(p) and cam.global_position.distance_to(p) < 160.0
+
+# ---------------------------------------------------------------- loja 24h, casa segura, oficina
+var _rob_cd := 0.0
+func _rob_store() -> void:
+	var now := Time.get_ticks_msec() / 1000.0
+	if now < _rob_cd:
+		_msg("O caixa está vazio. Volte mais tarde")
+		return
+	_rob_cd = now + 150.0
+	var v := rng.randi_range(180, 650)
+	money += v
+	audio.play("cash")
+	audio.play("scream", player.global_position + Vector3(0, 1, 2), -4.0)
+	hud.banner("ASSALTO: +$%d" % v, Color(0.4, 1, 0.4))
+	wanted = maxi(wanted, 2)
+	police.on_crime()
+
+## dormir na casa segura: tela escura, o tempo passa até a hora escolhida, vida cheia e jogo salvo
+func sleep_until(hour: float) -> void:
+	if wanted > 0:
+		_msg("Não dá para dormir sendo procurado!")
+		return
+	ui.cinematic("BOA NOITE", "dormindo...", func():
+		tod = hour
+		daynight.apply(0.0, true)
+		hp = 100.0
+		ui.save_game()
+		_msg("Jogo salvo · %02d:00" % int(hour)))
+
+func repair_vehicle(c) -> void:
+	if c.has_method("repair"):
+		c.repair()
+	else:
+		c.hp = 100.0
+
+func spawn_point() -> Vector3:
+	return city.safehouse.get("spawn", player.global_position)

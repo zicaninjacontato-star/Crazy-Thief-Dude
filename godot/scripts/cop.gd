@@ -13,7 +13,8 @@ signal died(cop)
 
 var target: Node3D
 var body: Node3D
-var hp := 100.0
+var hp := 170.0
+var _base_speed := -1.0
 var down := false
 var cool := 1.0
 var speed := 4.4
@@ -23,6 +24,8 @@ var rate := 1.3
 var arrest_only := false
 var pref := 10.0
 var unit = null              # viatura de origem
+var patrol: Array = []       # patrulha a pé: laço da calçada (sem alvo)
+var _pi := 0
 var weapon := "pistol"
 var _strafe := 1.0
 var _strafe_t := 0.0
@@ -31,7 +34,9 @@ var _los_t := 0.0
 var _t := 0.0
 var rng := RandomNumberGenerator.new()
 
+var kind := "cop"
 func setup(seed: int, kind := "cop") -> void:
+	self.kind = kind
 	rng.seed = seed
 	add_to_group("tmp")
 	collision_layer = 0
@@ -48,7 +53,7 @@ func setup(seed: int, kind := "cop") -> void:
 	match kind:
 		"swat":
 			body.build(Color(0.1, 0.1, 0.12), Color(0.08, 0.08, 0.1), skin, Color(0.05, 0.05, 0.06), {"hat": 2, "hat_c": Color(0.08, 0.08, 0.1), "glasses": true, "jacket": Color(0.12, 0.13, 0.15)})
-			hp = 160.0
+			hp = 240.0
 			weapon = "rifle"
 			dmg = 9.0
 			rate = 0.55
@@ -56,7 +61,7 @@ func setup(seed: int, kind := "cop") -> void:
 			# policial de armadura (5 estrelas): colete pesado, capacete, fuzil potente, aguenta muito
 			body.build(Color(0.16, 0.17, 0.14), Color(0.1, 0.1, 0.09), skin, Color(0.05, 0.05, 0.05), {"hat": 2, "hat_c": Color(0.12, 0.13, 0.11), "glasses": true, "jacket": Color(0.22, 0.24, 0.18)})
 			body.scale = Vector3(1.1, 1.06, 1.15)
-			hp = 340.0
+			hp = 420.0
 			weapon = "rifle"
 			dmg = 13.0
 			rate = 0.38
@@ -75,10 +80,27 @@ func setup(seed: int, kind := "cop") -> void:
 	pref = rng.randf_range(7.0, 14.0)
 	_strafe = 1.0 if rng.randf() < 0.5 else -1.0
 
-func damage(amount: float, dir: Vector3, gore: bool, src: PhysicsBody3D = null) -> bool:
+## polícia aguenta mais (hp maior), mas também sente: perna = manca e anda devagar, braço = mira
+## pior por um tempo, tronco = cambaleia e para de atirar um instante, cabeça = muito dano
+var limp_t := 0.0
+var arm_t := 0.0
+func damage(amount: float, dir: Vector3, gore: bool, src: PhysicsBody3D = null, zone := "torso") -> bool:
 	if down:
 		return false
+	amount *= {"head": 2.4 if kind != "heavy" else 1.5, "leg": 0.6, "arm": 0.5}.get(zone, 1.0)
 	hp -= amount
+	if hp > 0.0:
+		match zone:
+			"leg":
+				limp_t = 12.0
+				body.limp = 1.0
+			"arm":
+				arm_t = 8.0
+				body.arm_hurt = 8.0
+			_:
+				body.hurt_t = 0.35
+				cool = maxf(cool, 0.6)
+				velocity += Vector3(dir.x, 0, dir.z).normalized() * 2.0
 	FX.blood_burst(get_tree().current_scene, global_position + Vector3(0, 1.3, 0), dir, 10)
 	if hp <= 0.0:
 		_die(dir * (4.0 if amount < 60.0 else 9.0) + Vector3(0, 1.5, 0), src, gore and amount > 60.0)
@@ -217,6 +239,13 @@ func _physics_process(dt: float) -> void:
 	if down:
 		return
 	_t += dt
+	if _base_speed < 0.0:
+		_base_speed = speed
+	if limp_t > 0.0:
+		limp_t -= dt
+		body.limp = clampf(limp_t / 4.0, 0.0, 1.0)
+	arm_t -= dt
+	speed = _base_speed * (1.0 - 0.55 * body.limp)
 	if not is_on_floor():
 		velocity.y -= 18.0 * dt
 	else:
@@ -229,6 +258,21 @@ func _physics_process(dt: float) -> void:
 		return
 	if target == null or not is_instance_valid(target):
 		body.pose = ""
+		body.aiming = false
+		if not patrol.is_empty():
+			# patrulha: anda pela calçada em volta da quadra
+			var wp: Vector3 = patrol[_pi % patrol.size()]
+			var tw := wp - global_position
+			tw.y = 0
+			if tw.length() < 0.6:
+				_pi += 1
+			var v := tw.normalized() * 1.35
+			velocity.x = v.x
+			velocity.z = v.z
+			body.rotation.y = lerp_angle(body.rotation.y, atan2(v.x, v.z), minf(1.0, dt * 6.0))
+			move_and_slide()
+			body.animate(1.35, dt)
+			return
 		velocity.x = 0
 		velocity.z = 0
 		move_and_slide()
@@ -311,7 +355,7 @@ func _physics_process(dt: float) -> void:
 	if cool <= 0.0 and d < 34.0 and _los:
 		cool = rng.randf_range(rate * 0.7, rate * 1.3)
 		var muzzle := global_position + Vector3(0, 1.4, 0) + dirv * 0.6
-		var hitp: bool = rng.randf() < clampf(accuracy - d * 0.01, 0.12, 0.85)
+		var hitp: bool = rng.randf() < clampf(accuracy * (0.45 if arm_t > 0.0 else 1.0) - d * 0.01, 0.06, 0.85)
 		var aim := tp + Vector3(0, 1.2, 0)
 		if not hitp:
 			aim += Vector3(rng.randf_range(-1.5, 1.5), rng.randf_range(-0.5, 1.0), rng.randf_range(-1.5, 1.5))

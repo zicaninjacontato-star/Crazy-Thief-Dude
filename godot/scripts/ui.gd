@@ -531,3 +531,56 @@ func load_save() -> Dictionary:
 		return {}
 	var d = JSON.parse_string(FileAccess.get_file_as_string(SAVE))
 	return d if d is Dictionary else {}
+
+# ---------------------------------------------------------------- casa segura: dormir (salva e passa o tempo)
+func show_sleep() -> void:
+	var box := _open("DORMIR")
+	_info(box, "Dormir recupera a vida e salva o jogo. Acordar:", Color(0.85, 0.9, 1.0))
+	for opt in [["De manhã (07:00)", 7.0], ["À tarde (14:00)", 14.0], ["À noite (20:00)", 20.0]]:
+		var hour: float = opt[1]
+		_btn(box, opt[0], func(): _close(); main.sleep_until(hour))
+	_btn(box, "CANCELAR", _close)
+
+# ---------------------------------------------------------------- oficina tuning: pintura e conserto
+const TUNE_COLORS := [["Preto", Color(0.03, 0.03, 0.035)], ["Branco", Color(0.92, 0.92, 0.93)], ["Vermelho", Color(0.7, 0.03, 0.03)], ["Azul", Color(0.06, 0.2, 0.6)],
+	["Verde", Color(0.05, 0.4, 0.15)], ["Amarelo", Color(0.95, 0.75, 0.05)], ["Laranja", Color(0.95, 0.4, 0.05)], ["Roxo", Color(0.35, 0.08, 0.5)], ["Prata", Color(0.6, 0.62, 0.65)], ["Rosa", Color(0.95, 0.4, 0.65)]]
+func show_tuning() -> void:
+	var c = main.player.vehicle
+	if c == null:
+		return
+	var box := _open("OFICINA TUNING")
+	_info(box, "Dinheiro: $%d" % main.money, Color(0.4, 1, 0.4))
+	var hpv: float = c.get("hp") if c.get("hp") != null else 100.0
+	_btn(box, "Consertar tudo ($150)  · vida %d%%" % int(clampf(hpv, 0.0, 100.0)), func():
+		if main.money >= 150:
+			main.money -= 150
+			main.repair_vehicle(c)
+			main.audio.play("cash")
+		show_tuning(), main.money >= 150)
+	_info(box, "Pintura ($250):", Color(1, 0.85, 0.4))
+	var grid := GridContainer.new()
+	grid.columns = 5
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	box.add_child(grid)
+	for tc in TUNE_COLORS:
+		var b := Button.new()
+		b.custom_minimum_size = Vector2(92, 64)
+		b.tooltip_text = tc[0]
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = tc[1]
+		sb.set_corner_radius_all(8)
+		sb.border_color = Color(1, 1, 1, 0.6)
+		sb.set_border_width_all(2)
+		b.add_theme_stylebox_override("normal", sb)
+		b.add_theme_stylebox_override("hover", sb)
+		b.add_theme_stylebox_override("pressed", sb)
+		var col: Color = tc[1]
+		b.pressed.connect(func():
+			if main.money >= 250 and c.has_method("repaint"):
+				main.money -= 250
+				c.repaint(col)
+				main.audio.play("cash")
+				show_tuning())
+		grid.add_child(b)
+	_btn(box, "SAIR", _close)

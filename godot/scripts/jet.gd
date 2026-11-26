@@ -51,6 +51,13 @@ func start(pp: Vector3) -> void:
 	_dir = _dir.normalized()
 	main.audio.play("jet", global_position, 10.0)
 
+## decola da base do exército: sai baixo, sobe e vem atacar
+func start_from(p: Vector3) -> void:
+	global_position = p + Vector3(0, 8.0, 0)
+	var pp: Vector3 = main.player.global_position
+	_dir = Vector3(pp.x - p.x, 0, pp.z - p.z).normalized()
+	main.audio.play("jet", global_position, 10.0)
+
 func take_damage(d: float) -> void:
 	if dead:
 		return

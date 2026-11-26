@@ -27,8 +27,10 @@ var armed_t := 0.0          # >0: jogador sacou/atirou recentemente
 var rng := RandomNumberGenerator.new()
 var _mk: Marker3D
 var army: Array = []        # tanques e caças (5 estrelas)
+var patrol_cops: Array = []  # policiais a pé patrulhando (viram perseguidores com estrela)
 var jet_cd := 0.0
 var tank_cd := 3.0
+var _out_i := 0
 
 func setup(m: Node3D) -> void:
 	main = m
@@ -54,6 +56,10 @@ func clear() -> void:
 		if is_instance_valid(a):
 			a.queue_free()
 	army.clear()
+	for c in patrol_cops:
+		if is_instance_valid(c):
+			c.queue_free()
+	patrol_cops.clear()
 	unseen = 0.0
 	main.police_car = null
 
@@ -101,7 +107,9 @@ func tick(dt: float) -> void:
 	if s == 0:
 		_retreat(pp)
 		return
+	_activate_patrols(pp)
 	var want_cars: int = [0, 1, 2, 3, 3, 4][s]
+	var want_moto: int = 0 if s < 2 else 1
 	var want_swat: int = 0 if s < 3 else (1 if s < 5 else 1)
 	var want_arm: int = 2 if s >= 5 else 0
 	var n_car := units.filter(func(u): return u.kind == "car").size()
@@ -110,6 +118,9 @@ func tick(dt: float) -> void:
 	if spawn_cd <= 0.0:
 		if n_car < want_cars:
 			_spawn_unit("car", s, pp)
+			spawn_cd = 2.5
+		elif units.filter(func(u): return u.kind == "moto").size() < want_moto:
+			_spawn_unit("moto", s, pp)
 			spawn_cd = 2.5
 		elif n_swat < want_swat:
 			_spawn_unit("swat", s, pp)
@@ -151,13 +162,22 @@ func _spawn_point(pp: Vector3) -> Array:
 	return best
 
 func _spawn_unit(kind: String, s: int, pp: Vector3) -> void:
+	# reforços saem da garagem da delegacia (se ela existir), um atrás do outro
 	var sp := _spawn_point(pp)
+	var st: Dictionary = main.city.station
+	if not st.is_empty():
+		_out_i += 1
+		sp = [st.garage_out + Vector3(((_out_i % 3) - 1) * 4.0, 0, 0), 0.0]
 	var c
 	if kind == "swat":
 		c = main._spawn_car(sp[0], sp[1], Color(0.06, 0.06, 0.07), false, "suv")
 		c.make_police()
 		c.siren_on = true
 		c.max_engine = 7400.0
+	elif kind == "moto":
+		c = main._spawn_car(sp[0], sp[1], Color(0.92, 0.92, 0.93), false, "moto")
+		c.make_police()
+		c.siren_on = true
 	elif kind == "armored":
 		# carro-forte da polícia: blindado, pesado, 4 policiais de armadura
 		c = main._spawn_car(sp[0], sp[1], Color(0.18, 0.2, 0.16), false, "pickup")
@@ -171,7 +191,7 @@ func _spawn_unit(kind: String, s: int, pp: Vector3) -> void:
 		c.max_engine = 6600.0 + s * 300.0
 		if s >= 3:
 			c.paint_black()
-	units.append({"car": c, "kind": kind, "out": false, "crew": 4 if kind in ["swat", "armored"] else 2})
+	units.append({"car": c, "kind": kind, "out": false, "crew": 4 if kind in ["swat", "armored"] else (1 if kind == "moto" else 2)})
 
 func _spawn_heli(pp: Vector3) -> void:
 	var h = Arcade.new()
@@ -181,6 +201,8 @@ func _spawn_heli(pp: Vector3) -> void:
 	h.hp = 300.0
 	var a := rng.randf() * TAU
 	h.global_position = pp + Vector3(cos(a) * 140.0, 45.0, sin(a) * 140.0)
+	if not main.city.station.is_empty():
+		h.global_position = main.city.station.heli      # decola do heliponto da delegacia
 	h.ai_mode = "follow"
 	h.ai_target = main.player
 	h.world2 = main.world2
@@ -401,6 +423,12 @@ func _army_tick(dt: float, s: int, pp: Vector3) -> void:
 		t.setup(main)
 		t.global_position = sp[0] + Vector3(0, 0.6, 0)
 		t.rotation.y = sp[1]
+		var ts: Array = main.world2.tank_spots
+		if not ts.is_empty():
+			# sai da garagem da base do exército
+			var spot: Array = ts[army.filter(func(a): return a.kind == "tank").size() % ts.size()]
+			t.global_position = spot[0] + Vector3(0, 0.3, 0)
+			t.rotation.y = spot[1]
 		army.append(t)
 		tank_cd = 8.0
 		if tanks == 0:
@@ -412,5 +440,24 @@ func _army_tick(dt: float, s: int, pp: Vector3) -> void:
 		main.add_child(j)
 		j.setup(main)
 		j.start(pp)
+		if not main.world2.jet_spots.is_empty():
+			j.start_from(main.world2.jet_spots[0][0])
 		army.append(j)
 		jet_cd = 20.0
+
+## com estrela: as viaturas e a moto que patrulhavam e os policiais a pé passam a perseguir
+func _activate_patrols(pp: Vector3) -> void:
+	for a in main.traffic_sys.agents.duplicate():
+		var c = a.car
+		if is_instance_valid(c) and c.has_meta("patrol") and c.global_position.distance_to(pp) < 260.0:
+			main.traffic_sys.agents.erase(a)
+			c.remove_meta("patrol")
+			c.siren_on = true
+			units.append({"car": c, "kind": "moto" if c.kind == "moto" else "car", "out": false, "crew": 1 if c.kind == "moto" else 2})
+	for cp in patrol_cops:
+		if is_instance_valid(cp) and not cp.down:
+			cp.patrol = []
+			cp.shot_player.connect(main.combat._on_cop_shot)
+			cp.died.connect(_on_cop_down)
+			cops.append(cp)
+	patrol_cops.clear()

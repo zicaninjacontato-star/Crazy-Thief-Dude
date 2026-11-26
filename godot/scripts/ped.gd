@@ -95,6 +95,7 @@ func knock(vel: Vector3, dmg: float) -> void:
 		return
 	knocked = 3.2
 	flee = 0.0
+	body.rag_alive = true
 	body.ragdoll(vel + Vector3(0, 1.5, 0), null, false)
 	_rag = body.parts
 
@@ -112,11 +113,29 @@ func _get_up() -> void:
 	flee = 6.0
 	cross_to = Vector3.INF
 
-## dano de arma/soco; true se morreu
-func damage(amount: float, dir: Vector3, gore: bool, src: PhysicsBody3D = null) -> bool:
+## dano de arma/soco; true se morreu. zone = parte atingida (cabeça mata quase sempre; perna faz
+## mancar e às vezes cair; braço faz segurar o braço; tronco faz cambalear para trás)
+var limp_t := 0.0
+func damage(amount: float, dir: Vector3, gore: bool, src: PhysicsBody3D = null, zone := "torso") -> bool:
 	if down:
 		return false
+	amount *= {"head": 3.2, "leg": 0.55, "arm": 0.45}.get(zone, 1.0)
 	hp -= amount
+	if hp > 0.0 and amount > 5.0:
+		match zone:
+			"leg":
+				limp_t = 14.0
+				body.limp = 1.0
+				if _rng.randf() < 0.35:
+					knock(dir * 2.0 + Vector3(0, 0.5, 0), 0.0)       # a perna cede
+					return false
+			"arm":
+				body.arm_hurt = 10.0
+			"torso":
+				position += Vector3(dir.x, 0, dir.z).normalized() * 0.35   # empurrão do impacto
+			"head":
+				knock(dir * 3.0 + Vector3(0, 1.0, 0), 0.0)
+				return false
 	FX.blood_burst(get_tree().current_scene, global_position + Vector3(0, 1.3, 0), dir, 10)
 	if hp <= 0.0:
 		hit(src, dir * (5.0 if amount < 60.0 else 9.0), gore and amount > 60.0)
@@ -289,7 +308,10 @@ func _ped_tick(dt: float) -> void:
 		stagger -= dt
 		body.animate(0.5, dt)
 		return
-	var sp := speed * (2.8 if flee > 0.0 else 1.0)
+	if limp_t > 0.0:
+		limp_t -= dt
+		body.limp = clampf(limp_t / 4.0, 0.0, 1.0)
+	var sp: float = speed * (2.8 if flee > 0.0 else 1.0) * (1.0 - 0.6 * body.limp)
 	flee -= dt
 	var target: Vector3
 	if cross_to != Vector3.INF:

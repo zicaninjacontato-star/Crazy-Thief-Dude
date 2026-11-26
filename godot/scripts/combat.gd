@@ -215,7 +215,8 @@ func shoot() -> void:
 		if t != null and not aim:
 			if rng.randf() < (0.9 if pellets == 1 else 0.6):
 				end = t.global_position + Vector3(rng.randf_range(-0.2, 0.2), rng.randf_range(0.9, 1.5), rng.randf_range(-0.2, 0.2))
-				_damage(t, d.dmg, sd)
+				var rz := rng.randf()
+				_damage(t, d.dmg, sd, "torso" if rz < 0.55 else ("leg" if rz < 0.75 else ("arm" if rz < 0.9 else "head")))
 				W.tracer(main, muzzle, end)
 				continue
 		var h := _ray_hit(muzzle, sd, d.range)
@@ -231,7 +232,7 @@ func shoot() -> void:
 			if lp.y > 0.95:
 				h.car.unlocked = true       # tiro no vidro: porta destrancada
 		if h.who != null:
-			_damage(h.who, d.dmg * (2.0 if h.get("head", false) else 1.0), sd)
+			_damage(h.who, d.dmg, sd, h.get("zone", "torso"))
 		elif h.car != null:
 			h.car.take_damage(d.dmg * 0.35)
 			FX.sparks(main, end)
@@ -295,6 +296,7 @@ func _ray_hit(from: Vector3, dir: Vector3, length: float) -> Dictionary:
 	var best_t := length
 	var who = null
 	var head := false
+	var zone := "torso"
 	for c in main.peds + cops + main.missions.hostiles():
 		if not is_instance_valid(c) or c.down:
 			continue
@@ -313,6 +315,8 @@ func _ray_hit(from: Vector3, dir: Vector3, length: float) -> Dictionary:
 			best_t = tt
 			who = c
 			head = dy > 1.5
+			# parte do corpo atingida: cabeça, pernas, braços (laterais na altura do tronco) ou tronco
+			zone = "head" if dy > 1.5 else ("leg" if dy < 0.9 else ("arm" if horiz > 0.22 else "torso"))
 	var q := PhysicsRayQueryParameters3D.create(from, from + dir * length, 1)
 	q.exclude = [main.player.get_rid()]
 	var r := main.get_world_3d().direct_space_state.intersect_ray(q)
@@ -322,7 +326,7 @@ func _ray_hit(from: Vector3, dir: Vector3, length: float) -> Dictionary:
 			var col = r.collider
 			var car = col if col != null and col.has_method("take_damage") else null
 			return {"pos": r.position, "who": null, "car": car, "hit": true}
-	return {"pos": from + dir * best_t, "who": who, "car": null, "hit": who != null, "head": head}
+	return {"pos": from + dir * best_t, "who": who, "car": null, "hit": who != null, "head": head, "zone": zone}
 
 # ---------------------------------------------------------------- soco em combo
 func _punch(fwd: Vector3) -> void:
@@ -495,10 +499,10 @@ func _target(fwd: Vector3, rng_max: float, cone: float):
 			best = c
 	return best
 
-func _damage(t, dmg: float, dir: Vector3) -> void:
+func _damage(t, dmg: float, dir: Vector3, zone := "torso") -> void:
 	var was_cop: bool = t in cops
 	var hostile: bool = t in main.missions.hostiles()
-	if t.damage(dmg, dir, main.gore):
+	if t.damage(dmg, dir, main.gore, null, zone):
 		if not hostile:
 			main._add_wanted(2 if was_cop else 1)
 		main.audio.play("scream", t.global_position, -4.0)
@@ -572,6 +576,7 @@ func knockdown(impulse: Vector3, dur := 2.4) -> void:
 		main.eject_player(impulse)
 	p.collision_layer = 0
 	p.collision_mask = 0
+	p.body.rag_alive = true
 	p.body.ragdoll(impulse, null, false)
 	down_t = dur
 
@@ -606,7 +611,7 @@ func _die() -> void:
 	if not p.body.ragdolled:
 		p.body.ragdoll(Vector3(rng.randf_range(-2, 2), 2.0, rng.randf_range(-2, 2)), null, false)
 	FX.blood_burst(main, p.global_position + Vector3(0, 1.2, 0), Vector3.UP, 20)
-	main.hud.wasted = "WASTED"
+	main.hud.wasted = "CPF CANCELADO"
 	main.audio.play("scream", p.global_position)
 	main.missions.fail("Você morreu")
 
@@ -633,7 +638,7 @@ func _busted_end() -> void:
 	ammo = {}
 	weapon = "fist"
 	main.money += 100 - lost      # _respawn tira mais 100
-	_respawn(main.city.police_pos + Vector3(0, 0, 3.0), "PRESO! Perdeu as armas e $%d" % lost)
+	_respawn(main.city.station.cell, "PRESO! Você está na cela da delegacia (perdeu as armas e $%d). Saia pela porta da frente." % lost)
 	main.hud.wasted = ""
 
 ## mordida do tubarão etc.: morre mesmo com vida infinita
@@ -708,7 +713,7 @@ func _respawn(pos: Vector3, text: String) -> void:
 	var p = main.player
 	dead = false
 	down_t = 0.0
-	if main.hud.wasted == "WASTED":
+	if main.hud.wasted == "CPF CANCELADO":
 		main.hud.wasted = ""
 	if p.vehicle != null:
 		main.eject_player(Vector3.ZERO)

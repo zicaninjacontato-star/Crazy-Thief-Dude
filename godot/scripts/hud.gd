@@ -101,7 +101,7 @@ func _ready() -> void:
 	money.add_theme_color_override("font_color", Color(0.35, 0.95, 0.35))
 	info.position = Vector2(230, 10)
 	big = _label(Vector2.ZERO, 84)
-	big.size = Vector2(600, 110)
+	big.size = Vector2(1000, 110)
 	big.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	big.add_theme_color_override("font_color", Color(0.85, 0.1, 0.1))
 	hint = _label(Vector2(0, 0), 22)
@@ -151,7 +151,7 @@ func _layout() -> void:
 	if driving and siren_avail:
 		buttons["siren"] = Rect2(s.x - b * 2 - 44, s.y * 0.38, b, b)
 	buttons["weapon"] = Rect2(s.x - 170, 122, 150, 78)
-	if shop_label != "" and not driving:
+	if shop_label != "" and (not driving or action_kind == "tune"):
 		buttons["shop"] = Rect2(s.x - b - 24, s.y * 0.38 - b - 16, b, b)
 
 func banner(text: String, col: Color, secs := 3.5) -> void:
@@ -348,6 +348,23 @@ func _icon(kind: String, c: Vector2, r: float, col: Color) -> void:
 			_poly(c + Vector2(0.55, -0.2) * r, r * 0.55, [[-0.8, -0.35], [0.8, -0.35], [0.8, 0.0], [-0.1, 0.0], [-0.25, 0.75], [-0.65, 0.75], [-0.5, 0.0], [-0.8, 0.0]], col)
 			if kind == "release":
 				root.draw_line(c + Vector2(-0.85, -0.85) * r, c + Vector2(0.85, 0.85) * r, Color(1, 0.35, 0.3), w * 1.2)
+		"a_eat":
+			root.draw_arc(c + Vector2(0, -0.1) * r, r * 0.75, PI, TAU, 16, Color(0.95, 0.7, 0.3), w * 2.0)
+			root.draw_rect(Rect2(c + Vector2(-0.8, 0.0) * r, Vector2(1.6, 0.25) * r), Color(0.45, 0.25, 0.1))
+			root.draw_rect(Rect2(c + Vector2(-0.8, 0.3) * r, Vector2(1.6, 0.2) * r), Color(0.95, 0.7, 0.3))
+		"a_snack":
+			root.draw_rect(Rect2(c + Vector2(-0.45, -0.7) * r, Vector2(0.9, 1.4) * r), Color(0.95, 0.3, 0.2))
+			root.draw_rect(Rect2(c + Vector2(-0.3, -0.25) * r, Vector2(0.6, 0.4) * r), Color(1, 0.9, 0.3))
+		"a_rob":
+			_poly(c + Vector2(-0.25, 0.1) * r, r * 0.7, [[-0.8, -0.35], [0.8, -0.35], [0.8, 0.0], [-0.1, 0.0], [-0.25, 0.75], [-0.65, 0.75], [-0.5, 0.0], [-0.8, 0.0]], col)
+			root.draw_string(ThemeDB.fallback_font, c + Vector2(0.3, 0.1) * r, "$", HORIZONTAL_ALIGNMENT_LEFT, -1, int(r * 1.0), Color(0.4, 1, 0.4))
+		"a_sleep":
+			root.draw_rect(Rect2(c + Vector2(-0.9, 0.0) * r, Vector2(1.8, 0.45) * r), col)
+			root.draw_rect(Rect2(c + Vector2(-0.9, -0.3) * r, Vector2(0.45, 0.3) * r), col)
+			root.draw_string(ThemeDB.fallback_font, c + Vector2(0.1, -0.25) * r, "z", HORIZONTAL_ALIGNMENT_LEFT, -1, int(r * 0.8), Color(0.7, 0.85, 1.0))
+		"a_tune":
+			root.draw_line(c + Vector2(-0.7, 0.7) * r, c + Vector2(0.35, -0.35) * r, col, w * 1.8)
+			root.draw_arc(c + Vector2(0.45, -0.45) * r, r * 0.35, -0.8, 3.9, 12, col, w * 1.4)
 		"w_fist":
 			root.draw_circle(c + Vector2(0, 0.1) * r, r * 0.55, col)
 			for i in 4:
@@ -414,7 +431,7 @@ func _process(_dt: float) -> void:
 		return
 	flash = maxf(0.0, flash - _dt)
 	big.text = wasted
-	big.position = Vector2(s.x * 0.5 - 300, s.y * 0.38)
+	big.position = Vector2(s.x * 0.5 - 500, s.y * 0.38)
 	money.position = Vector2(s.x - 300, 46)
 	stars.position = Vector2(s.x - 232, 88)
 	hint.position = Vector2(s.x * 0.5 - 350, 70)
@@ -513,8 +530,7 @@ func _draw_minimap() -> void:
 		var bp: Vector2 = tr.call(bl.pos)
 		if bp.distance_to(C) > R - 7:
 			bp = C + (bp - C).normalized() * (R - 7)
-		root.draw_circle(bp, 6, Color(0, 0, 0, 0.7))
-		root.draw_circle(bp, 4.5, bl.col)
+		_blip(bp, bl, 1.0)
 	if map_police != Vector3.INF:
 		var pp: Vector2 = tr.call(map_police)
 		if pp.distance_to(C) < R - 6:
@@ -644,8 +660,7 @@ func _draw_full_map() -> void:
 	var font := ThemeDB.fallback_font
 	for bl in map_blips:
 		var bp := _mf_to_screen(bl.pos)
-		root.draw_circle(bp, 9, Color(0, 0, 0, 0.7))
-		root.draw_circle(bp, 7, bl.col)
+		_blip(bp, bl, 1.5)
 	if map_waypoint != Vector3.INF:
 		_pin(_mf_to_screen(map_waypoint), 1.6)
 	var pp := _mf_to_screen(map_player)
@@ -668,3 +683,69 @@ func _draw_full_map() -> void:
 		root.draw_circle(Vector2(36, ly), 8, lg[0])
 		root.draw_string(font, Vector2(54, ly + 7), lg[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 1, 1))
 		ly += 26.0
+
+## símbolo no minimapa/mapa: fundo colorido + desenho do tipo (viaturas, exército, lojas, casa, etc.)
+func _blip(p: Vector2, bl: Dictionary, k: float) -> void:
+	var ic: String = bl.get("icon", "")
+	var col: Color = bl.col
+	if ic == "":
+		root.draw_circle(p, 6.0 * k, Color(0, 0, 0, 0.7))
+		root.draw_circle(p, 4.5 * k, col)
+		return
+	var r := 8.0 * k
+	root.draw_circle(p, r + 1.5, Color(0, 0, 0, 0.75))
+	root.draw_circle(p, r, col)
+	var w := Color(1, 1, 1)
+	var lw := maxf(1.2, 1.4 * k)
+	match ic:
+		"pcar", "armored":
+			root.draw_rect(Rect2(p + Vector2(-0.7, -0.25) * r, Vector2(1.4, 0.55) * r), w)
+			root.draw_rect(Rect2(p + Vector2(-0.35, -0.55) * r, Vector2(0.7, 0.32) * r), w)
+			if ic == "armored":
+				root.draw_rect(Rect2(p + Vector2(-0.7, -0.25) * r, Vector2(1.4, 0.55) * r), Color(0.1, 0.1, 0.1), false, lw)
+		"pmoto":
+			root.draw_circle(p + Vector2(-0.45, 0.25) * r, r * 0.25, w)
+			root.draw_circle(p + Vector2(0.45, 0.25) * r, r * 0.25, w)
+			root.draw_line(p + Vector2(-0.45, 0.2) * r, p + Vector2(0.3, -0.35) * r, w, lw)
+		"pvan":
+			root.draw_rect(Rect2(p + Vector2(-0.75, -0.5) * r, Vector2(1.5, 0.85) * r), w)
+		"pheli":
+			root.draw_circle(p, r * 0.32, w)
+			root.draw_line(p + Vector2(-0.8, -0.45) * r, p + Vector2(0.8, -0.45) * r, w, lw)
+			root.draw_line(p, p + Vector2(0.75, 0.2) * r, w, lw)
+		"tank":
+			root.draw_rect(Rect2(p + Vector2(-0.7, -0.1) * r, Vector2(1.4, 0.5) * r), w)
+			root.draw_rect(Rect2(p + Vector2(-0.3, -0.4) * r, Vector2(0.6, 0.32) * r), w)
+			root.draw_line(p + Vector2(0.2, -0.28) * r, p + Vector2(0.85, -0.45) * r, w, lw)
+		"jet":
+			root.draw_colored_polygon(PackedVector2Array([p + Vector2(0, -0.85) * r, p + Vector2(0.75, 0.55) * r, p + Vector2(0, 0.25) * r, p + Vector2(-0.75, 0.55) * r]), w)
+		"cop":
+			root.draw_circle(p + Vector2(0, -0.4) * r, r * 0.22, w)
+			root.draw_rect(Rect2(p + Vector2(-0.25, -0.15) * r, Vector2(0.5, 0.7) * r), w)
+		"guns":
+			_poly(p, r * 0.55, [[-0.8, -0.35], [0.8, -0.35], [0.8, 0.0], [-0.1, 0.0], [-0.25, 0.75], [-0.65, 0.75], [-0.5, 0.0], [-0.8, 0.0]], w)
+		"cars":
+			_car_icon(p, r * 0.62, w, false)
+		"clothes":
+			root.draw_colored_polygon(PackedVector2Array([p + Vector2(-0.35, -0.6) * r, p + Vector2(0.35, -0.6) * r, p + Vector2(0.8, -0.25) * r, p + Vector2(0.45, 0.0) * r, p + Vector2(0.4, 0.65) * r, p + Vector2(-0.4, 0.65) * r, p + Vector2(-0.45, 0.0) * r, p + Vector2(-0.8, -0.25) * r]), w)
+		"food":
+			root.draw_arc(p + Vector2(0, 0.05) * r, r * 0.55, PI, TAU, 10, w, lw * 1.6)
+			root.draw_rect(Rect2(p + Vector2(-0.6, 0.15) * r, Vector2(1.2, 0.22) * r), w)
+			root.draw_rect(Rect2(p + Vector2(-0.6, 0.45) * r, Vector2(1.2, 0.18) * r), w)
+		"shop24":
+			root.draw_string(ThemeDB.fallback_font, p + Vector2(-0.75, 0.38) * r, "24", HORIZONTAL_ALIGNMENT_LEFT, -1, int(r * 1.1), w)
+		"tuning":
+			root.draw_line(p + Vector2(-0.6, 0.6) * r, p + Vector2(0.3, -0.3) * r, w, lw * 1.5)
+			root.draw_arc(p + Vector2(0.4, -0.4) * r, r * 0.3, -0.8, 3.9, 10, w, lw)
+		"safe":
+			root.draw_colored_polygon(PackedVector2Array([p + Vector2(0, -0.75) * r, p + Vector2(0.75, -0.05) * r, p + Vector2(-0.75, -0.05) * r]), w)
+			root.draw_rect(Rect2(p + Vector2(-0.5, -0.05) * r, Vector2(1.0, 0.65) * r), w)
+		"police":
+			root.draw_string(ThemeDB.fallback_font, p + Vector2(-0.45, 0.42) * r, "P", HORIZONTAL_ALIGNMENT_LEFT, -1, int(r * 1.3), w)
+		"hospital":
+			root.draw_rect(Rect2(p + Vector2(-0.2, -0.65) * r, Vector2(0.4, 1.3) * r), w)
+			root.draw_rect(Rect2(p + Vector2(-0.65, -0.2) * r, Vector2(1.3, 0.4) * r), w)
+		"base":
+			root.draw_colored_polygon(PackedVector2Array([p + Vector2(0, -0.8) * r, p + Vector2(0.22, -0.2) * r, p + Vector2(0.8, -0.2) * r, p + Vector2(0.32, 0.15) * r, p + Vector2(0.5, 0.75) * r, p + Vector2(0, 0.4) * r, p + Vector2(-0.5, 0.75) * r, p + Vector2(-0.32, 0.15) * r, p + Vector2(-0.8, -0.2) * r, p + Vector2(-0.22, -0.2) * r]), w)
+		"mission":
+			root.draw_string(ThemeDB.fallback_font, p + Vector2(-0.5, 0.42) * r, "M", HORIZONTAL_ALIGNMENT_LEFT, -1, int(r * 1.3), Color(0.1, 0.1, 0.1))

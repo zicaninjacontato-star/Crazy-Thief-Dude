@@ -23,6 +23,9 @@ var guard := false       # guarda alta (modo luta)
 var arm_pose := ""       # só os braços: "handsup" (rendido), "phone" (ligando para a polícia)
 var hurt_t := 0.0        # reação a um soco (cabeça e tronco jogados para trás)
 var hurt_side := 1.0
+var rag_alive := false   # o próximo ragdoll é só uma derrubada (vai levantar): músculos mais firmes
+var limp := 0.0          # 0..1: mancando (tiro na perna)
+var arm_hurt := 0.0      # >0: segurando o braço ferido
 var throw_t := 0.0
 var dive := false
 var crouching := false
@@ -265,6 +268,13 @@ func animate(speed: float, dt: float) -> void:
 	bones.hips.position.y = 0.98 - run * 0.05 - crouch * 0.42 + absf(c) * lerpf(0.025, 0.075, run) * w + sin(_t * 1.7) * 0.005 * (1.0 - w)
 	bones.head.rotation.x = -bones.chest.rotation.x * 0.6
 	bones.head.rotation.y = -bones.chest.rotation.y * 0.6
+	if limp > 0.01 and w > 0.1:
+		# mancando: a perna direita (ferida) quase não dobra e o quadril cai para ela; passo curto
+		th[1].rotation.x *= 1.0 - 0.55 * limp
+		sh[1].rotation.x *= 1.0 - 0.7 * limp
+		bones.hips.rotation.z += sin(phase) * 0.14 * limp
+		bones.chest.rotation.z = -sin(phase) * 0.1 * limp
+		bones.hips.position.y -= maxf(0.0, sin(phase)) * 0.06 * limp
 	if w < 0.2:
 		# parado: peso apoiado, braços relaxados
 		bones.hips.rotation.z = sin(_t * 0.5) * 0.02
@@ -285,6 +295,15 @@ func _upper(dt: float, up: Array, fo: Array) -> void:
 		bones.head.rotation.y = 0.5 * hk * hurt_side
 		for k3 in 2:
 			up[k3].rotation = Vector3(-0.4 * hk, 0, (0.6 if k3 == 0 else -0.6) * hk)
+		return
+	if arm_hurt > 0.0 and not aiming and arm_pose == "":
+		# segurando o braço ferido com a outra mão
+		arm_hurt -= dt
+		up[1].rotation = Vector3(-0.25, 0, -0.05)
+		fo[1].rotation.x = -0.9
+		up[0].rotation = Vector3(-0.7, 0, -0.55)
+		fo[0].rotation.x = -1.7
+		bones.chest.rotation.z = 0.08
 		return
 	if arm_pose == "handsup":
 		for k3 in 2:
@@ -541,7 +560,7 @@ func ragdoll(impulse: Vector3, ignore: PhysicsBody3D = null, gore := false) -> A
 		var rb := RigidBody3D.new()
 		rb.mass = sp.mass
 		rb.linear_damp = 0.1
-		rb.angular_damp = 3.0
+		rb.angular_damp = 1.5
 		rb.collision_layer = 4
 		rb.collision_mask = 1
 		world.add_child(rb)
@@ -589,4 +608,20 @@ func ragdoll(impulse: Vector3, ignore: PhysicsBody3D = null, gore := false) -> A
 		rb.angular_velocity = Vector3(randf_range(-4, 4), randf_range(-2, 2), randf_range(-4, 4))
 	parts = rbs.values()
 	visible = false
+	# músculos (ragdoll ativo) + boiar na água
+	var mu = preload("res://scripts/ragmuscle.gd").new()
+	mu.alive = rag_alive
+	mu.world2 = world.get("world2")
+	for n in rbs:
+		mu.parts[n] = rbs[n]
+		var sp: Dictionary = spec[n]
+		mu.inertia[n] = rbs[n].mass * (sp.len * sp.len / 12.0 + sp.rad * sp.rad * 0.25) + 0.01
+	for n in parent_of:
+		if n == torn:
+			continue
+		mu.parent_of[n] = parent_of[n]
+		mu.rel0[n] = (bones[parent_of[n]].global_basis.inverse() * bones[n].global_basis).orthonormalized()
+	world.add_child(mu)
+	mu.add_to_group("tmp")
+	rag_alive = false
 	return [rbs, torn]

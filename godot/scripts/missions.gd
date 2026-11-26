@@ -68,7 +68,7 @@ func blips() -> Array:
 	var b := []
 	if active == "":
 		for g in givers:
-			b.append({"pos": g.pos, "col": Color(1, 0.8, 0.1)})
+			b.append({"pos": g.pos, "col": Color(1, 0.8, 0.1), "icon": "mission"})
 	if obj_pos != Vector3.INF:
 		b.append({"pos": obj_pos, "col": Color(1, 0.95, 0.2)})
 	for t in hostiles():

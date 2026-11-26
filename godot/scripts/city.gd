@@ -166,6 +166,12 @@ func _block(cx: float, cz: float) -> void:
 	# quadra com loja: prédios ao redor e a loja (com vitrine e interior visível) de frente para a rua sul
 	var bi := roundi(cx / CELL + (N - 1) * 0.5)
 	var bj := roundi(cz / CELL + (N - 1) * 0.5)
+	if Vector2i(bi, bj) == POLICE_BLOCK:
+		_police_station(cx, cz)
+		return
+	if Vector2i(bi, bj) == SAFE_BLOCK:
+		_safehouse(cx, cz, inner, downtown)
+		return
 	var stype: String = STORE_BLOCKS.get(Vector2i(bi, bj), "")
 	if stype != "":
 		var hh := inner * 0.5
@@ -220,7 +226,12 @@ func _building(lot: Rect2, downtown: float) -> void:
 		var p := Vector3(c.x + rng.randf_range(-w * 0.3, w * 0.3), top + 1.6, c.y + rng.randf_range(-d * 0.3, d * 0.3))
 		_box(Vector3(rng.randf_range(1.5, 3.0), 1.2, rng.randf_range(1.5, 2.5)), p, M.plain(Color(0.6, 0.62, 0.63), 0.4, 0.6), true)
 
-const STORE_BLOCKS := {Vector2i(3, 3): "guns", Vector2i(1, 1): "cars", Vector2i(2, 3): "clothes"}
+const STORE_BLOCKS := {Vector2i(3, 3): "guns", Vector2i(1, 1): "cars", Vector2i(2, 3): "clothes", Vector2i(0, 2): "food", Vector2i(2, 1): "shop24", Vector2i(4, 3): "tuning"}
+const POLICE_BLOCK := Vector2i(3, 1)
+const SAFE_BLOCK := Vector2i(1, 2)
+var station_cars: Array = []     # vagas da garagem da polícia [pos, yaw]
+var station := {}                # pontos da delegacia: cela, saída da garagem, heliponto, porta
+var safehouse := {}              # casa segura: spawn, cama, porta
 
 ## loja de um andar: paredes, vitrine de vidro na frente (sul) e um interior de verdade visto de fora
 func _store(r: Rect2, type: String) -> void:
@@ -232,7 +243,7 @@ func _store(r: Rect2, type: String) -> void:
 	var cx := (x0 + x1) * 0.5
 	var w := x1 - x0
 	var d := z1 - z0
-	var wall_c: Color = {"guns": Color(0.3, 0.28, 0.26), "clothes": Color(0.9, 0.87, 0.85), "cars": Color(0.88, 0.9, 0.93)}[type]
+	var wall_c: Color = {"guns": Color(0.3, 0.28, 0.26), "clothes": Color(0.9, 0.87, 0.85), "cars": Color(0.88, 0.9, 0.93), "food": Color(0.95, 0.82, 0.55), "shop24": Color(0.9, 0.93, 0.9), "tuning": Color(0.35, 0.36, 0.4)}[type]
 	var wall := M.plain(wall_c, 0.8)
 	var ext := M.facade(4)
 	# casca externa
@@ -279,6 +290,31 @@ func _store(r: Rect2, type: String) -> void:
 			for xx in [x0 + 2.0, x1 - 2.0]:
 				_box(Vector3(0.5, 1.75, 0.35), Vector3(xx, 1.05, z0 + 1.5), M.plain(Color(0.92, 0.85, 0.78), 0.6), false)   # manequins
 				_box(Vector3(0.62, 0.7, 0.42), Vector3(xx, 1.5, z0 + 1.5), M.plain(Color(0.8, 0.2, 0.4), 0.8), false)
+		"food":
+			# lanchonete: balcão, chapa, mesas e banquetas
+			_box(Vector3(w - 3.0, 1.05, 0.9), Vector3(cx, 0.65, z1 - 2.4), M.plain(Color(0.75, 0.15, 0.1), 0.5), false)
+			_box(Vector3(4.0, 0.9, 0.7), Vector3(cx, 0.6, z1 - 0.9), M.plain(Color(0.6, 0.62, 0.64), 0.3, 0.8), false)
+			_box(Vector3(w - 3.0, 0.9, 0.08), Vector3(cx, 4.0, z1 - 0.25), M.emissive(Color(1.0, 0.75, 0.2), 1.2), false)
+			for k in 3:
+				var tx := cx - 5.0 + k * 5.0
+				_box(Vector3(1.4, 0.06, 1.4), Vector3(tx, 0.95, z0 + 3.0), M.plain(Color(0.9, 0.9, 0.88), 0.4), false)
+				_box(Vector3(0.12, 0.8, 0.12), Vector3(tx, 0.55, z0 + 3.0), M.plain(Color(0.3, 0.3, 0.3), 0.4, 0.8), false)
+		"shop24":
+			# loja de conveniência: prateleiras, geladeiras iluminadas e caixa perto da porta
+			for k in 3:
+				_box(Vector3(0.6, 1.7, d - 5.0), Vector3(cx - 4.0 + k * 4.0, 1.0, (z0 + z1) * 0.5 + 1.0), M.plain(Color(0.85, 0.85, 0.82), 0.5), false)
+				for yy in [0.6, 1.1, 1.6]:
+					_box(Vector3(0.7, 0.25, d - 5.4), Vector3(cx - 4.0 + k * 4.0, yy + 0.15, (z0 + z1) * 0.5 + 1.0), M.plain(Color.from_hsv(fmod(k * 0.3 + yy, 1.0), 0.6, 0.85), 0.8), false)
+			_box(Vector3(w - 1.0, 2.2, 0.6), Vector3(cx, 1.25, z1 - 0.6), M.emissive(Color(0.75, 0.9, 1.0), 0.8), false)
+			_box(Vector3(2.4, 1.0, 0.8), Vector3(x1 - 2.5, 0.65, z0 + 2.0), M.plain(Color(0.2, 0.5, 0.25), 0.5), false)
+		"tuning":
+			# oficina: elevador, pneus, painel de ferramentas
+			_box(Vector3(3.0, 0.2, 5.0), Vector3(cx, 0.3, (z0 + z1) * 0.5), M.plain(Color(0.85, 0.7, 0.1), 0.5, 0.4), false)
+			for sx in [-1.6, 1.6]:
+				_box(Vector3(0.3, 2.2, 0.3), Vector3(cx + sx, 1.2, (z0 + z1) * 0.5 + 2.6), M.plain(Color(0.85, 0.7, 0.1), 0.5, 0.4), false)
+			for k in 4:
+				_box(Vector3(0.7, 0.7, 0.3), Vector3(x0 + 1.0, 0.5 + k * 0.32, z1 - 2.0), M.plain(Color(0.06, 0.06, 0.06), 0.9), false)
+			_box(Vector3(5.0, 2.0, 0.08), Vector3(cx, 2.6, z1 - 0.25), M.plain(Color(0.6, 0.12, 0.12), 0.6), false)
 		"cars":
 			_store_cars.append([Vector3(cx - 4.0, 0.25, (z0 + z1) * 0.5), 0.7, "sport", Color(0.85, 0.08, 0.05)])
 			_store_cars.append([Vector3(cx + 4.0, 0.25, (z0 + z1) * 0.5), -0.7, "suv", Color(0.08, 0.2, 0.5)])
@@ -536,7 +572,10 @@ func _landmarks() -> void:
 	var gs := Vector3(_center(3), 0.3, _center(3) - BLOCK * 0.5 + 1.6)
 	var cs := Vector3(_center(1), 0.3, _center(1) - BLOCK * 0.5 + 1.6)
 	var rs := Vector3(_center(2), 0.3, _center(3) - BLOCK * 0.5 + 1.6)
-	shops = [{"type": "guns", "pos": gs, "name": "AMMU★NATION", "col": Color(0.95, 0.15, 0.1)}, {"type": "cars", "pos": cs, "name": "CONCESSIONÁRIA", "col": Color(0.2, 0.75, 1.0)}, {"type": "clothes", "pos": rs, "name": "ROUPAS", "col": Color(0.95, 0.45, 0.85)}]
+	shops = [{"type": "guns", "pos": gs, "name": "AMMU★NATION", "col": Color(0.95, 0.15, 0.1)}, {"type": "cars", "pos": cs, "name": "CONCESSIONÁRIA", "col": Color(0.2, 0.75, 1.0)}, {"type": "clothes", "pos": rs, "name": "ROUPAS", "col": Color(0.95, 0.45, 0.85)},
+		{"type": "food", "pos": Vector3(_center(0), 0.3, _center(2) - BLOCK * 0.5 + 1.6), "name": "LANCHONETE", "col": Color(1.0, 0.7, 0.15)},
+		{"type": "shop24", "pos": Vector3(_center(2), 0.3, _center(1) - BLOCK * 0.5 + 1.6), "name": "LOJA 24H", "col": Color(0.3, 0.9, 0.4)},
+		{"type": "tuning", "pos": Vector3(_center(4), 0.3, _center(3) - BLOCK * 0.5 + 1.6), "name": "OFICINA TUNING", "col": Color(1.0, 0.55, 0.1)}]
 	for sh in shops:
 		var sp: Vector3 = sh.pos
 		var em := M.emissive(sh.col, 1.6)
@@ -565,3 +604,243 @@ func _landmarks() -> void:
 		else:
 			_box(Vector3(1.7, 1.7, 0.25), p + Vector3(0, 5.0, 0), blue, false)
 			_box(Vector3(0.9, 0.9, 0.3), p + Vector3(0, 5.0, 0), white, false)
+
+# ---------------------------------------------------------------- delegacia completa
+## Quarteirão inteiro: prédio de 2 andares na frente (sul) com recepção, sala dos policiais, sala de
+## armas, corredor, 3 celas com grades, sala de interrogatório e vestiário; heliponto no telhado;
+## garagem da polícia atrás (norte, aberta para a rua) com as viaturas; pátio entre os dois.
+func _police_station(cx: float, cz: float) -> void:
+	var h := (BLOCK - SIDE * 2.0) * 0.5            # 21 m
+	var wallm := M.concrete(Color(0.82, 0.83, 0.85))
+	var inner_w := M.plain(Color(0.78, 0.8, 0.84), 0.8)
+	var floor_m := M.plain(Color(0.55, 0.56, 0.6), 0.4, 0.1)
+	var blue := M.plain(Color(0.1, 0.22, 0.55), 0.5)
+	var dark := M.plain(Color(0.12, 0.12, 0.14), 0.4, 0.6)
+	var bars := M.plain(Color(0.25, 0.26, 0.28), 0.3, 0.9)
+	var glass := M.plain(Color(0.15, 0.22, 0.3), 0.05, 0.6)
+	var fz := cz - h            # frente (rua sul)
+	var bz := cz - 3.0          # fundo do prédio
+	var H := 4.2                # pé-direito do térreo
+	var x0 := cx - h
+	var x1 := cx + h
+	# piso interno, laje entre andares (= teto do térreo), 2º andar (casca) e telhado
+	_box(Vector3(2.0 * h, 0.06, bz - fz), Vector3(cx, 0.18, (fz + bz) * 0.5), floor_m, false)
+	_box(Vector3(2.0 * h, 0.3, bz - fz), Vector3(cx, H + 0.3, (fz + bz) * 0.5), wallm, true)
+	_box(Vector3(2.0 * h, H, 0.3), Vector3(cx, H * 1.5 + 0.45, fz), M.facade(1), true)
+	_box(Vector3(2.0 * h, H, 0.3), Vector3(cx, H * 1.5 + 0.45, bz), M.facade(1), true)
+	_box(Vector3(0.3, H, bz - fz), Vector3(x0, H * 1.5 + 0.45, (fz + bz) * 0.5), M.facade(1), true)
+	_box(Vector3(0.3, H, bz - fz), Vector3(x1, H * 1.5 + 0.45, (fz + bz) * 0.5), M.facade(1), true)
+	var roof_y := 2.0 * H + 0.6
+	_box(Vector3(2.0 * h + 0.6, 0.4, bz - fz + 0.6), Vector3(cx, roof_y, (fz + bz) * 0.5), M.concrete(Color(0.4, 0.41, 0.42)), true)
+	_box(Vector3(2.0 * h + 0.8, 0.9, 0.3), Vector3(cx, roof_y + 0.6, fz - 0.2), blue, false)
+	# heliponto no telhado
+	var hp := Vector3(cx + 8.0, roof_y + 0.25, (fz + bz) * 0.5)
+	_box(Vector3(13.0, 0.06, 13.0), hp, M.concrete(Color(0.25, 0.26, 0.28)), false)
+	_box(Vector3(1.0, 0.03, 6.0), hp + Vector3(-2.0, 0.04, 0), M.plain(Color(0.95, 0.85, 0.1), 0.6), false)
+	_box(Vector3(1.0, 0.03, 6.0), hp + Vector3(2.0, 0.04, 0), M.plain(Color(0.95, 0.85, 0.1), 0.6), false)
+	_box(Vector3(3.0, 0.03, 1.0), hp + Vector3(0, 0.04, 0), M.plain(Color(0.95, 0.85, 0.1), 0.6), false)
+	# paredes externas do térreo: frente com porta (x −1,6..1,6) e janelas, fundo com porta para o pátio
+	for seg in [[x0, cx - 1.6], [cx + 1.6, x1]]:
+		var w: float = seg[1] - seg[0]
+		_box(Vector3(w, H, 0.3), Vector3((seg[0] + seg[1]) * 0.5, H * 0.5 + 0.15, fz), wallm, true)
+		_box(Vector3(w - 2.0, 1.4, 0.06), Vector3((seg[0] + seg[1]) * 0.5, 2.3, fz - 0.17), glass, false)
+		_box(Vector3(w, H, 0.3), Vector3((seg[0] + seg[1]) * 0.5, H * 0.5 + 0.15, bz), wallm, true)
+	_box(Vector3(3.2, H - 3.0, 0.3), Vector3(cx, H - 0.45, fz), wallm, true)
+	_box(Vector3(3.2, H - 3.0, 0.3), Vector3(cx, H - 0.45, bz), wallm, true)
+	_box(Vector3(0.3, H, bz - fz), Vector3(x0, H * 0.5 + 0.15, (fz + bz) * 0.5), wallm, true)
+	_box(Vector3(0.3, H, bz - fz), Vector3(x1, H * 0.5 + 0.15, (fz + bz) * 0.5), wallm, true)
+	# marquise, escada e placa
+	_box(Vector3(14.0, 0.35, 3.0), Vector3(cx, H + 0.1, fz - 1.6), blue, false)
+	_box(Vector3(6.0, 0.15, 1.6), Vector3(cx, 0.22, fz - 1.0), M.concrete(Color(0.85, 0.85, 0.86)), false)
+	var lb := Label3D.new()
+	lb.text = "DELEGACIA DE POLÍCIA"
+	lb.font_size = 120
+	lb.pixel_size = 0.01
+	lb.modulate = Color(0.85, 0.92, 1.0)
+	lb.outline_size = 12
+	lb.shaded = false
+	lb.rotation.y = PI
+	lb.position = Vector3(cx, roof_y + 0.6, fz - 0.4)
+	add_child(lb)
+	for s in [-1.0, 1.0]:
+		_box(Vector3(0.4, 0.4, 0.4), Vector3(cx + 6.0 * s, H + 0.45, fz - 2.9), M.emissive(Color(0.15, 0.35, 1.0), 3.0), false)
+	# divisões internas: fileira da frente (z fz..fz+8,5), corredor (2 m), fileira do fundo (até bz)
+	var c0 := fz + 8.5
+	var c1 := c0 + 2.2
+	for seg in [[x0, cx - 7.0 - 0.8], [cx - 7.0 + 0.8, cx - 0.9], [cx + 0.9, cx + 7.0 - 0.8], [cx + 7.0 + 0.8, x1]]:
+		_box(Vector3(seg[1] - seg[0], H, 0.2), Vector3((seg[0] + seg[1]) * 0.5, H * 0.5 + 0.15, c0), inner_w, true)
+	for xx in [cx - 7.0, cx + 7.0]:
+		_box(Vector3(0.2, H, c0 - fz), Vector3(xx, H * 0.5 + 0.15, (fz + c0) * 0.5), inner_w, true)
+	# recepção (centro, frente): balcão
+	_box(Vector3(6.0, 1.1, 0.8), Vector3(cx, 0.7, fz + 5.0), M.wood(), true)
+	_box(Vector3(6.0, 0.1, 1.0), Vector3(cx, 1.3, fz + 5.0), M.plain(Color(0.2, 0.2, 0.22), 0.4), false)
+	# sala dos policiais (oeste, frente): mesas com computadores
+	for k in 3:
+		var dx := x0 + 3.0 + k * 4.2
+		_box(Vector3(2.4, 0.08, 1.2), Vector3(dx, 0.95, fz + 4.0), M.wood(), true)
+		_box(Vector3(0.7, 0.45, 0.06), Vector3(dx, 1.25, fz + 4.3), M.emissive(Color(0.4, 0.7, 1.0), 0.8), false)
+		_box(Vector3(0.5, 0.9, 0.5), Vector3(dx, 0.6, fz + 5.2), dark, false)
+	# sala de armas (leste, frente): estantes com fuzis, coletes e grade na porta
+	for k in 3:
+		var ax := x1 - 1.0
+		_box(Vector3(0.6, 2.2, 2.0), Vector3(ax, 1.25, fz + 1.8 + k * 2.4), M.plain(Color(0.25, 0.27, 0.3), 0.4, 0.7), true)
+		for g in 4:
+			_box(Vector3(0.08, 1.0, 0.12), Vector3(ax - 0.35, 1.4, fz + 1.2 + k * 2.4 + g * 0.4), M.plain(Color(0.06, 0.06, 0.07), 0.4, 0.8), false)
+	_box(Vector3(2.0, 1.0, 0.9), Vector3(cx + 10.0, 0.65, fz + 4.0), M.plain(Color(0.2, 0.22, 0.18), 0.6), true)
+	for k in 3:
+		_box(Vector3(0.5, 0.65, 0.25), Vector3(cx + 9.4 + k * 0.6, 1.5, fz + 4.0), M.plain(Color(0.1, 0.12, 0.15), 0.7), false)
+	var lb2 := Label3D.new()
+	lb2.text = "SALA DE ARMAS"
+	lb2.font_size = 48
+	lb2.pixel_size = 0.006
+	lb2.shaded = false
+	lb2.position = Vector3(cx + 10.5, 3.2, c0 - 0.15)
+	lb2.rotation.y = PI
+	add_child(lb2)
+	# celas (oeste, fundo): 3 celas com grades viradas para o corredor e porta de grade aberta
+	var cw := (cx - 2.0 - x0) / 3.0
+	for k in 3:
+		var ex := x0 + k * cw
+		if k > 0:
+			_box(Vector3(0.25, H, bz - c1), Vector3(ex, H * 0.5 + 0.15, (c1 + bz) * 0.5), inner_w, true)
+		for b in int(cw / 0.25):
+			var bx := ex + 0.2 + b * 0.25
+			if bx > ex + cw * 0.5 - 0.6 and bx < ex + cw * 0.5 + 0.6:
+				continue        # porta da cela (aberta)
+			_box(Vector3(0.05, H - 0.2, 0.05), Vector3(bx, H * 0.5 + 0.15, c1), bars, true)
+		_box(Vector3(cw, 0.12, 0.12), Vector3(ex + cw * 0.5, H - 0.1, c1), bars, false)
+		_box(Vector3(cw - 1.0, 0.45, 0.9), Vector3(ex + cw * 0.5, 0.4, bz - 0.7), M.plain(Color(0.4, 0.42, 0.45), 0.6), true)
+		_box(Vector3(0.6, 0.45, 0.6), Vector3(ex + cw - 0.6, 0.4, c1 + 1.0), M.plain(Color(0.92, 0.92, 0.94), 0.2), false)
+	_box(Vector3(0.25, H, bz - c1), Vector3(cx - 2.0, H * 0.5 + 0.15, (c1 + bz) * 0.5), inner_w, true)
+	var lb3 := Label3D.new()
+	lb3.text = "CARCERAGEM"
+	lb3.font_size = 48
+	lb3.pixel_size = 0.006
+	lb3.shaded = false
+	lb3.position = Vector3(x0 + 4.0, 3.5, c1 - 0.1)
+	lb3.rotation.y = PI
+	add_child(lb3)
+	# sala de interrogatório (centro, fundo): mesa, 2 cadeiras, luz pendente e espelho falso
+	_box(Vector3(0.2, H, bz - c1), Vector3(cx + 7.0, H * 0.5 + 0.15, (c1 + bz) * 0.5), inner_w, true)
+	for seg in [[cx - 2.0, cx + 1.6], [cx + 3.4, cx + 7.0]]:
+		_box(Vector3(seg[1] - seg[0], H, 0.2), Vector3((seg[0] + seg[1]) * 0.5, H * 0.5 + 0.15, c1), inner_w, true)
+	_box(Vector3(2.0, 0.08, 1.0), Vector3(cx + 2.5, 0.95, (c1 + bz) * 0.5), M.plain(Color(0.6, 0.6, 0.62), 0.3, 0.8), true)
+	for sz in [-0.9, 0.9]:
+		_box(Vector3(0.5, 0.9, 0.5), Vector3(cx + 2.5, 0.6, (c1 + bz) * 0.5 + sz), dark, false)
+	_box(Vector3(0.6, 0.08, 0.6), Vector3(cx + 2.5, H - 0.6, (c1 + bz) * 0.5), M.emissive(Color(1, 0.95, 0.8), 3.0), false)
+	_box(Vector3(3.0, 1.4, 0.05), Vector3(cx + 2.5, 2.2, c1 + 0.12), M.plain(Color(0.12, 0.13, 0.15), 0.02, 1.0), false)
+	var lb4 := Label3D.new()
+	lb4.text = "INTERROGATÓRIO"
+	lb4.font_size = 48
+	lb4.pixel_size = 0.006
+	lb4.shaded = false
+	lb4.position = Vector3(cx + 2.5, 3.5, c1 - 0.15)
+	lb4.rotation.y = PI
+	add_child(lb4)
+	# vestiário (leste, fundo): armários
+	_box(Vector3(cx + 8.6 - (cx + 7.0), H, 0.2), Vector3(cx + 7.8, H * 0.5 + 0.15, c1), inner_w, true)
+	_box(Vector3(x1 - (cx + 10.4), H, 0.2), Vector3((cx + 10.4 + x1) * 0.5, H * 0.5 + 0.15, c1), inner_w, true)
+	for k in 6:
+		_box(Vector3(0.9, 2.0, 0.6), Vector3(cx + 9.0 + k * 1.0, 1.15, bz - 0.5), M.plain(Color(0.3, 0.4, 0.55), 0.4, 0.6), true)
+	# luzes de teto (painéis)
+	for xx in [cx - 14.0, cx - 7.0, cx, cx + 7.0, cx + 14.0]:
+		for zz in [fz + 4.0, (c0 + c1) * 0.5, (c1 + bz) * 0.5]:
+			_box(Vector3(1.4, 0.05, 0.5), Vector3(xx, H + 0.13, zz), M.emissive(Color(1, 0.98, 0.92), 2.0), false)
+	var li := OmniLight3D.new()
+	li.omni_range = 16.0
+	li.light_energy = 1.2
+	li.position = Vector3(cx, H - 0.5, (fz + bz) * 0.5)
+	add_child(li)
+	# pátio (asfalto) entre o prédio e a garagem
+	_box(Vector3(2.0 * h, 0.05, 5.0), Vector3(cx, 0.18, cz), M.asphalt(), false)
+	# garagem da polícia (norte): 4 vagas cobertas, aberta para a rua norte
+	var gz0 := cz + 2.5
+	var gz1 := cz + h
+	_box(Vector3(2.0 * h, 0.05, gz1 - gz0), Vector3(cx, 0.18, (gz0 + gz1) * 0.5), M.concrete(Color(0.45, 0.45, 0.47)), false)
+	_box(Vector3(2.0 * h, 5.0, 0.3), Vector3(cx, 2.65, gz0), wallm, true)
+	_box(Vector3(0.3, 5.0, gz1 - gz0), Vector3(x0, 2.65, (gz0 + gz1) * 0.5), wallm, true)
+	_box(Vector3(0.3, 5.0, gz1 - gz0), Vector3(x1, 2.65, (gz0 + gz1) * 0.5), wallm, true)
+	_box(Vector3(2.0 * h + 0.6, 0.4, gz1 - gz0 + 0.6), Vector3(cx, 5.3, (gz0 + gz1) * 0.5), M.concrete(Color(0.4, 0.41, 0.42)), true)
+	_box(Vector3(2.0 * h, 0.8, 0.3), Vector3(cx, 4.7, gz1), blue, false)
+	for k in 5:
+		_box(Vector3(0.15, 0.02, gz1 - gz0 - 4.0), Vector3(x0 + 4.0 + k * 8.5, 0.22, (gz0 + gz1) * 0.5 + 1.0), M.plain(Color(0.95, 0.95, 0.9), 0.6), false)
+	var lb5 := Label3D.new()
+	lb5.text = "GARAGEM · POLÍCIA"
+	lb5.font_size = 80
+	lb5.pixel_size = 0.008
+	lb5.shaded = false
+	lb5.position = Vector3(cx, 4.7, gz1 + 0.2)
+	add_child(lb5)
+	station_cars = []
+	for k in 4:
+		station_cars.append([Vector3(x0 + 8.25 + k * 8.5, 0.7, (gz0 + gz1) * 0.5), 0.0])
+	station = {"cell": Vector3(x0 + cw * 0.5, 0.3, (c1 + bz) * 0.5 + 0.6), "door": Vector3(cx, 0.3, fz - 2.5),
+		"garage_out": Vector3(cx, 0.7, gz1 + 6.0), "heli": hp + Vector3(0, 0.3, 0), "front": Vector3(cx, 0.3, fz)}
+
+# ---------------------------------------------------------------- casa segura
+## Sobrado com quintal: sala, quarto com cama (dormir = salvar e passar o tempo), garagem lateral.
+func _safehouse(cx: float, cz: float, inner: float, downtown: float) -> void:
+	var hh := inner * 0.5
+	# prédios no fundo da quadra
+	_building(Rect2(cx - hh, cz + 2.0, inner, hh - 2.0), downtown * 0.5)
+	var fz := cz - hh + 3.0
+	var x0 := cx - 9.0
+	var x1 := cx + 5.0
+	var bz := fz + 10.0
+	var H := 3.4
+	var wallm := M.plain(Color(0.86, 0.78, 0.62), 0.8)
+	var trim := M.plain(Color(0.55, 0.3, 0.2), 0.7)
+	# gramado e calçadinha
+	_box(Vector3(inner, 0.05, hh - 2.0), Vector3(cx, 0.17, cz - hh * 0.5 - 0.5), M.grass(), false)
+	_box(Vector3(1.6, 0.06, 3.0), Vector3(cx - 2.0, 0.2, fz - 1.5), M.concrete(Color(0.7, 0.7, 0.68)), false)
+	_box(Vector3(x1 - x0, 0.06, bz - fz), Vector3((x0 + x1) * 0.5, 0.2, (fz + bz) * 0.5), M.wood(), false)
+	# paredes (porta na frente em x −2,8..−1,2)
+	_box(Vector3(-2.8 - (x0 - cx), H, 0.25), Vector3((x0 + cx - 2.8) * 0.5, H * 0.5 + 0.15, fz), wallm, true)
+	_box(Vector3(x1 - (cx - 1.2), H, 0.25), Vector3((cx - 1.2 + x1) * 0.5, H * 0.5 + 0.15, fz), wallm, true)
+	_box(Vector3(1.6, H - 2.4, 0.25), Vector3(cx - 2.0, H - 0.35, fz), wallm, true)
+	_box(Vector3(x1 - x0, H, 0.25), Vector3((x0 + x1) * 0.5, H * 0.5 + 0.15, bz), wallm, true)
+	_box(Vector3(0.25, H, bz - fz), Vector3(x0, H * 0.5 + 0.15, (fz + bz) * 0.5), wallm, true)
+	_box(Vector3(0.25, H, bz - fz), Vector3(x1, H * 0.5 + 0.15, (fz + bz) * 0.5), wallm, true)
+	# parede do quarto (porta em z fz+5..fz+6,4)
+	_box(Vector3(0.15, H, 5.0), Vector3(cx + 0.5, H * 0.5 + 0.15, fz + 2.5), wallm, false)
+	_box(Vector3(0.15, H, bz - fz - 6.4), Vector3(cx + 0.5, H * 0.5 + 0.15, (fz + 6.4 + bz) * 0.5), wallm, false)
+	# telhado de duas águas (caixas inclinadas viram degraus; usamos laje + beiral)
+	_box(Vector3(x1 - x0 + 1.0, 0.3, bz - fz + 1.0), Vector3((x0 + x1) * 0.5, H + 0.3, (fz + bz) * 0.5), trim, true)
+	_box(Vector3(x1 - x0 - 1.0, 1.0, bz - fz - 3.0), Vector3((x0 + x1) * 0.5, H + 0.95, (fz + bz) * 0.5), trim, false)
+	# janelas
+	for xx in [x0 + 2.0, x1 - 2.5]:
+		_box(Vector3(1.6, 1.1, 0.06), Vector3(xx, 1.8, fz - 0.14), M.plain(Color(0.2, 0.3, 0.38), 0.05, 0.6), false)
+	# sala: sofá, TV e mesa
+	_box(Vector3(2.6, 0.8, 0.9), Vector3(x0 + 2.0, 0.55, bz - 1.0), M.plain(Color(0.25, 0.3, 0.5), 0.9), true)
+	_box(Vector3(1.6, 0.9, 0.08), Vector3(x0 + 2.0, 1.5, fz + 0.3), M.plain(Color(0.03, 0.03, 0.04), 0.2, 0.5), false)
+	_box(Vector3(1.0, 0.05, 0.6), Vector3(x0 + 2.0, 0.62, (fz + bz) * 0.5), M.wood(), false)
+	# quarto: cama de casal, criado-mudo, abajur
+	var bed := Vector3(x1 - 2.2, 0.2, bz - 2.0)
+	_box(Vector3(2.0, 0.45, 2.4), bed + Vector3(0, 0.28, 0), M.wood(), true)
+	_box(Vector3(1.9, 0.2, 2.3), bed + Vector3(0, 0.6, 0), M.plain(Color(0.92, 0.92, 0.95), 0.9), false)
+	_box(Vector3(1.9, 0.12, 0.5), bed + Vector3(0, 0.75, 0.9), M.plain(Color(0.95, 0.95, 0.97), 0.9), false)
+	_box(Vector3(1.9, 0.22, 1.3), bed + Vector3(0, 0.68, -0.4), M.plain(Color(0.6, 0.15, 0.2), 0.9), false)
+	_box(Vector3(2.1, 0.9, 0.12), bed + Vector3(0, 0.9, 1.2), M.wood(), false)
+	_box(Vector3(0.5, 0.5, 0.5), bed + Vector3(-1.5, 0.45, 0.9), M.wood(), false)
+	_box(Vector3(0.25, 0.3, 0.25), bed + Vector3(-1.5, 0.9, 0.9), M.emissive(Color(1.0, 0.85, 0.5), 1.5), false)
+	# garagem ao lado (portão aberto para a rua)
+	_box(Vector3(0.25, 3.0, 9.0), Vector3(x1 + 6.0, 1.65, fz + 4.5), wallm, true)
+	_box(Vector3(6.0, 3.0, 0.25), Vector3(x1 + 3.0, 1.65, fz + 9.0), wallm, true)
+	_box(Vector3(6.5, 0.3, 9.5), Vector3(x1 + 3.0, 3.2, fz + 4.5), trim, true)
+	_box(Vector3(6.0, 0.05, 9.0), Vector3(x1 + 3.0, 0.2, fz + 4.5), M.concrete(Color(0.5, 0.5, 0.5)), false)
+	var lb := Label3D.new()
+	lb.text = "CASA SEGURA"
+	lb.font_size = 64
+	lb.pixel_size = 0.006
+	lb.modulate = Color(0.6, 1.0, 0.6)
+	lb.outline_size = 8
+	lb.shaded = false
+	lb.rotation.y = PI
+	lb.position = Vector3(cx - 2.0, H + 0.5, fz - 0.3)
+	add_child(lb)
+	var li := OmniLight3D.new()
+	li.omni_range = 9.0
+	li.light_energy = 0.9
+	li.position = Vector3((x0 + x1) * 0.5, H - 0.4, (fz + bz) * 0.5)
+	add_child(li)
+	safehouse = {"spawn": Vector3(cx - 2.0, 0.3, fz + 2.0), "bed": bed + Vector3(-1.4, 0.1, -0.6), "door": Vector3(cx - 2.0, 0.3, fz - 1.5), "garage": [Vector3(x1 + 3.0, 0.7, fz + 4.5), PI]}

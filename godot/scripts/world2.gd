@@ -20,8 +20,10 @@ var boat_spots: Array = []    # [Vector3, yaw]
 var plane_spots: Array = []
 var heli_spots: Array = []
 var interiors := {}           # tipo -> {origin, exit, counter, door_out}
-var station_cars: Array = []  # vagas da delegacia [pos, yaw]
 var beach_loop: Array = []
+var tank_spots: Array = []    # base do exército: [pos, yaw]
+var jet_spots: Array = []
+var base_gate := Vector3.ZERO
 var _wt := 0.0
 
 func build(m: Node3D) -> void:
@@ -31,7 +33,7 @@ func build(m: Node3D) -> void:
 	add_child(body)
 	_beach()
 	_airfield()
-	_station()
+	_army_base()
 	var types := ["guns", "clothes", "cars"]
 	for i in types.size():
 		_interior(types[i], Vector3(4000 + i * 80, 0, 0))
@@ -49,22 +51,58 @@ const ISL_Z0 := -200.0
 const ISL_Z1 := 200.0
 const PEN_X0 := -520.0       # península estreita a oeste só com o aeroporto (z de −PEN_Z a PEN_Z)
 const PEN_Z := 50.0
+var fish_spots: Array = []   # [pos do pescador, yaw]
+
+const BASE := Rect2(-520.0, 50.0, 150.0, 110.0)   # base do exército: canto isolado ao norte da ponta da península
 
 ## retângulos de terra (o resto é mar)
 static func land_rects() -> Array:
-	return [Rect2(ISL_X0, ISL_Z0, SHORE_X - ISL_X0, ISL_Z1 - ISL_Z0), Rect2(PEN_X0, -PEN_Z, ISL_X0 - PEN_X0 + 2.0, PEN_Z * 2.0)]
+	return [Rect2(ISL_X0, ISL_Z0, SHORE_X - ISL_X0, ISL_Z1 - ISL_Z0), Rect2(PEN_X0, -PEN_Z, ISL_X0 - PEN_X0 + 2.0, PEN_Z * 2.0), BASE]
 
-## bordas de costão: [início, fim, normal para o mar]
+static func _on_land(p: Vector2) -> bool:
+	for r in land_rects():
+		if r.has_point(p):
+			return true
+	return false
+
+## bordas de costão calculadas a partir dos retângulos de terra (trechos de borda que dão para o mar):
+## [início, fim, normal para o mar, estende no início, estende no fim] — a praia (leste) fica de fora
 static func rim_edges() -> Array:
-	return [
-		[Vector3(ISL_X0, 0, ISL_Z1), Vector3(SHORE_X - 6.0, 0, ISL_Z1), Vector3(0, 0, 1)],
-		[Vector3(ISL_X0, 0, ISL_Z0), Vector3(SHORE_X - 6.0, 0, ISL_Z0), Vector3(0, 0, -1)],
-		[Vector3(ISL_X0, 0, PEN_Z), Vector3(ISL_X0, 0, ISL_Z1), Vector3(-1, 0, 0)],
-		[Vector3(ISL_X0, 0, ISL_Z0), Vector3(ISL_X0, 0, -PEN_Z), Vector3(-1, 0, 0)],
-		[Vector3(PEN_X0, 0, PEN_Z), Vector3(ISL_X0, 0, PEN_Z), Vector3(0, 0, 1)],
-		[Vector3(PEN_X0, 0, -PEN_Z), Vector3(ISL_X0, 0, -PEN_Z), Vector3(0, 0, -1)],
-		[Vector3(PEN_X0, 0, -PEN_Z), Vector3(PEN_X0, 0, PEN_Z), Vector3(-1, 0, 0)]]
-var fish_spots: Array = []   # [pos do pescador, yaw]
+	var out := []
+	for r in land_rects():
+		var x0: float = r.position.x
+		var z0: float = r.position.y
+		var x1: float = r.end.x
+		var z1: float = r.end.y
+		var sides := [[Vector2(x0, z1), Vector2(x1, z1), Vector2(0, 1)], [Vector2(x0, z0), Vector2(x1, z0), Vector2(0, -1)], [Vector2(x0, z0), Vector2(x0, z1), Vector2(-1, 0)]]
+		if x1 < SHORE_X - 1.0:
+			sides.append([Vector2(x1, z0), Vector2(x1, z1), Vector2(1, 0)])
+		for sd in sides:
+			var a: Vector2 = sd[0]
+			var b: Vector2 = sd[1]
+			var n: Vector2 = sd[2]
+			if n.y != 0.0 and b.x > SHORE_X - 6.0:
+				b.x = SHORE_X - 6.0
+			var L := a.distance_to(b)
+			var t := (b - a).normalized()
+			var seg_s := -1.0
+			var s := 0.0
+			while s <= L + 0.01:
+				var coast := not _on_land(a + t * s + n * 1.0)
+				if coast and seg_s < 0.0:
+					seg_s = s
+				if (not coast or s + 2.0 > L + 0.01) and seg_s >= 0.0:
+					var e := s if coast else s - 2.0
+					if e - seg_s > 3.0:
+						var pa := a + t * seg_s
+						var pb := a + t * e
+						# extremidade convexa (depois dela é mar): a rampa se estende para fechar o canto
+						var xa := not _on_land(pa - t * 1.5 - n * 1.0)
+						var xb := not _on_land(pb + t * 1.5 - n * 1.0)
+						out.append([Vector3(pa.x, 0, pa.y), Vector3(pb.x, 0, pb.y), Vector3(n.x, 0, n.y), xa, xb])
+					seg_s = -1.0
+				s += 2.0
+	return out
 
 ## distância (m) da água até a ilha (0 = na beira); negativo = em terra
 func sea_dist(x: float, z: float) -> float:
@@ -180,13 +218,15 @@ func _beach() -> void:
 	# costão de pedra nos outros 3 lados (sem praia): rampa de rocha que cai para o fundo
 	var rim := [[0.0, 0.0], [8.0, 0.5], [16.0, 0.9], [22.0, 0.6], [25.0, -0.8], [60.0, SEA_FLOOR], [120.0, SEA_FLOOR]]
 	_strip("x", 1.0, 0.0, east, ISL_Z0 - 120.0, ISL_Z1 + 120.0)
-	_strip("z", 1.0, ISL_Z1, rim, ISL_X0 - 120.0, SHORE_X - 6.0, M.rock(Color(0.32, 0.3, 0.27)))
-	_strip("z", -1.0, ISL_Z0, rim, ISL_X0 - 120.0, SHORE_X - 6.0, M.rock(Color(0.32, 0.3, 0.27)))
-	_strip("x", -1.0, ISL_X0, rim, PEN_Z, ISL_Z1 + 120.0, M.rock(Color(0.32, 0.3, 0.27)))
-	_strip("x", -1.0, ISL_X0, rim, ISL_Z0 - 120.0, -PEN_Z, M.rock(Color(0.32, 0.3, 0.27)))
-	_strip("z", 1.0, PEN_Z, rim, PEN_X0 - 120.0, ISL_X0, M.rock(Color(0.32, 0.3, 0.27)))
-	_strip("z", -1.0, -PEN_Z, rim, PEN_X0 - 120.0, ISL_X0, M.rock(Color(0.32, 0.3, 0.27)))
-	_strip("x", -1.0, PEN_X0, rim, -PEN_Z - 120.0, PEN_Z + 120.0, M.rock(Color(0.32, 0.3, 0.27)))
+	for re in rim_edges():
+		var pa: Vector3 = re[0]
+		var pb: Vector3 = re[1]
+		var n: Vector3 = re[2]
+		var rk := M.rock(Color(0.32, 0.3, 0.27))
+		if n.x != 0.0:
+			_strip("x", n.x, pa.x, rim, minf(pa.z, pb.z) - (120.0 if re[3] else 0.0), maxf(pa.z, pb.z) + (120.0 if re[4] else 0.0), rk)
+		else:
+			_strip("z", n.z, pa.z, rim, minf(pa.x, pb.x) - (120.0 if re[3] else 0.0), maxf(pa.x, pb.x) + (120.0 if re[4] else 0.0), rk)
 	_rocks()
 	# leito do mar em volta de tudo (−12 m) e chão das salas das lojas
 	var fl := CollisionShape3D.new()
@@ -216,7 +256,8 @@ func _beach() -> void:
 		Rect2(-3000.0, -3500.0, 3000.0 + SHORE_X - 4.0, 3500.0 + ISL_Z0 - o),                 # sul
 		Rect2(-3000.0, ISL_Z1 + o, 3000.0 + SHORE_X - 4.0, 3500.0 - ISL_Z1 - o),              # norte
 		Rect2(-3000.0, ISL_Z0 - o, 3000.0 + PEN_X0 - o, ISL_Z1 - ISL_Z0 + 2.0 * o),           # oeste da península
-		Rect2(PEN_X0 - o, PEN_Z + o, ISL_X0 - PEN_X0, ISL_Z1 - PEN_Z),                        # ao norte da península
+		Rect2(BASE.end.x + o, PEN_Z + o, ISL_X0 - BASE.end.x - 2.0 * o, ISL_Z1 - PEN_Z),       # ao norte da península (entre a base e a ilha)
+		Rect2(PEN_X0 - o, BASE.end.y + o, BASE.end.x - PEN_X0 + 2.0 * o, ISL_Z1 - BASE.end.y),  # ao norte da base
 		Rect2(PEN_X0 - o, ISL_Z0 - o, ISL_X0 - PEN_X0, ISL_Z1 - PEN_Z)]                       # ao sul da península
 	for r in rs:
 		var wmi := MeshInstance3D.new()
@@ -302,23 +343,6 @@ func _airfield() -> void:
 	plane_spots = [[Vector3(-195.0, 0.0, 0.0), -PI * 0.5], [Vector3(hx, 0.0, hz), 0.0]]
 	heli_spots = [[Vector3(px, 0.15, pz + 30.0), -PI * 0.5]]
 	_label("AEROPORTO", Vector3(-185.0, 6.0, 20.0), 200, Color(0.9, 0.95, 1.0), PI * 0.5, 0.012)
-
-# ---------------------------------------------------------------- delegacia
-func _station() -> void:
-	var c: Vector3 = main.city.police_pos
-	var blue := M.plain(Color(0.1, 0.22, 0.55), 0.5)
-	var white := M.concrete(Color(0.86, 0.87, 0.88))
-	# fachada com marquise azul, colunas e escada
-	_box("st", Vector3(22.0, 0.5, 4.0), c + Vector3(0, 4.2, 1.0), blue, false)
-	for s in [-1.0, -0.33, 0.33, 1.0]:
-		_box("st", Vector3(0.5, 4.0, 0.5), c + Vector3(10.0 * s, 2.0, -0.6), white, true)
-	_box("st", Vector3(12.0, 0.3, 2.0), c + Vector3(0, 0.15, 1.6), white, false)
-	_label("DELEGACIA", c + Vector3(0, 5.3, 2.25), 180, Color(0.85, 0.92, 1.0), PI, 0.012)
-	for s in [-1.0, 1.0]:
-		_box("st", Vector3(0.4, 0.4, 0.4), c + Vector3(7.5 * s, 4.75, 2.2), M.emissive(Color(0.15, 0.35, 1.0), 3.0), false)
-	var road_z: float = c.z - 2.7     # junto ao meio-fio (fora da faixa de rolamento)
-	for k in 3:
-		station_cars.append([Vector3(c.x - 10.0 + k * 7.0, 0.7, road_z), PI * 0.5])
 
 # ---------------------------------------------------------------- interiores das lojas
 func _interior(type: String, o: Vector3) -> void:
@@ -459,7 +483,7 @@ func _rocks() -> void:
 	# pontos de pesca: deque de madeira saindo do costão, banco, balde e pescador com vara
 	var spots := [[Vector3(-90.0, 0, ISL_Z1), Vector3(0, 0, 1)], [Vector3(70.0, 0, ISL_Z1), Vector3(0, 0, 1)],
 			[Vector3(-60.0, 0, ISL_Z0), Vector3(0, 0, -1)], [Vector3(110.0, 0, ISL_Z0), Vector3(0, 0, -1)], [Vector3(ISL_X0, 0, 130.0), Vector3(-1, 0, 0)],
-			[Vector3(-380.0, 0, PEN_Z), Vector3(0, 0, 1)], [Vector3(-260.0, 0, -PEN_Z), Vector3(0, 0, -1)]]
+			[Vector3(-300.0, 0, PEN_Z), Vector3(0, 0, 1)], [Vector3(-260.0, 0, -PEN_Z), Vector3(0, 0, -1)]]
 	for sp in spots:
 		var o: Vector3 = sp[0]
 		var out: Vector3 = sp[1]
@@ -477,9 +501,83 @@ func _rocks() -> void:
 		_box("rocks", Vector3(0.4, 0.45, 0.4), tip - out * 1.0 + Vector3(0.9, 1.95, 0), M.plain(Color(0.2, 0.45, 0.8), 0.5), false)
 		fish_spots.append([tip - out * 1.2 + Vector3(0, 1.75, 0), yaw])
 	# farol no canto noroeste
-	var lh := Vector3(PEN_X0 + 6.0, 0.0, PEN_Z - 8.0)
+	var lh := Vector3(PEN_X0 + 6.0, 0.0, -PEN_Z + 8.0)
 	for i in 6:
 		var w := 4.2 - i * 0.35
 		_box("rocks", Vector3(w, 3.0, w), lh + Vector3(0, 1.5 + i * 3.0, 0), M.plain(Color(0.92, 0.92, 0.9) if i % 2 == 0 else Color(0.8, 0.12, 0.1), 0.6), true)
 	_box("rocks", Vector3(2.4, 2.0, 2.4), lh + Vector3(0, 19.0, 0), M.emissive(Color(1.0, 0.9, 0.5), 2.5), false)
 	_box("rocks", Vector3(3.0, 0.4, 3.0), lh + Vector3(0, 20.2, 0), M.plain(Color(0.15, 0.15, 0.15), 0.5), false)
+
+# ---------------------------------------------------------------- base do exército (canto isolado)
+## muro com portão, quartéis, hangar dos caças com pista curta, garagem dos tanques, torres de vigia,
+## heliponto e mastro. É de lá que saem os tanques e os caças a 5 estrelas.
+func _army_base() -> void:
+	var r := BASE
+	var x0: float = r.position.x + 4.0
+	var x1: float = r.end.x - 4.0
+	var z0: float = r.position.y + 4.0
+	var z1: float = r.end.y - 4.0
+	var cx := (x0 + x1) * 0.5
+	var olive := M.concrete(Color(0.36, 0.38, 0.28))
+	var sand_c := M.concrete(Color(0.58, 0.54, 0.44))
+	var dark := M.plain(Color(0.16, 0.17, 0.14), 0.6)
+	var asph := M.asphalt()
+	# pátio de asfalto
+	_box("base", Vector3(x1 - x0, 0.06, z1 - z0), Vector3(cx, 0.03, (z0 + z1) * 0.5), asph, false)
+	# muro (portão ao sul, voltado para a pista do aeroporto)
+	var gate_x := x1 - 18.0
+	_box("base", Vector3(x1 - x0, 2.8, 0.5), Vector3(cx, 1.4, z1), sand_c, true)
+	_box("base", Vector3(0.5, 2.8, z1 - z0), Vector3(x0, 1.4, (z0 + z1) * 0.5), sand_c, true)
+	_box("base", Vector3(0.5, 2.8, z1 - z0), Vector3(x1, 1.4, (z0 + z1) * 0.5), sand_c, true)
+	_box("base", Vector3(gate_x - 6.0 - x0, 2.8, 0.5), Vector3((x0 + gate_x - 6.0) * 0.5, 1.4, z0), sand_c, true)
+	_box("base", Vector3(x1 - gate_x - 6.0, 2.8, 0.5), Vector3((gate_x + 6.0 + x1) * 0.5, 1.4, z0), sand_c, true)
+	for sx in [-6.0, 6.0]:
+		_box("base", Vector3(0.8, 3.6, 0.8), Vector3(gate_x + sx, 1.8, z0), dark, true)
+	_box("base", Vector3(12.0, 0.25, 0.25), Vector3(gate_x, 1.1, z0 - 0.6), M.plain(Color(0.9, 0.15, 0.1), 0.6), false)
+	base_gate = Vector3(gate_x, 0.3, z0 - 3.0)
+	# quartéis (2 prédios baixos com janelas)
+	for k in 2:
+		var bz := z1 - 12.0 - k * 22.0
+		_box("base", Vector3(30.0, 5.0, 12.0), Vector3(x0 + 20.0, 2.5, bz), olive, true)
+		_box("base", Vector3(31.0, 0.4, 13.0), Vector3(x0 + 20.0, 5.2, bz), dark, false)
+		for w in 6:
+			_box("base", Vector3(2.0, 1.2, 0.1), Vector3(x0 + 8.0 + w * 4.8, 3.0, bz - 6.05), M.plain(Color(0.15, 0.22, 0.28), 0.1, 0.6), false)
+		_label("QUARTEL %d" % (k + 1), Vector3(x0 + 20.0, 4.3, bz - 6.2), 120, Color(0.95, 0.9, 0.7), PI, 0.01)
+	# hangar dos caças (aberto para o leste) + pista curta
+	var hx := x1 - 26.0
+	var hz := z1 - 16.0
+	_box("base", Vector3(36.0, 11.0, 0.6), Vector3(hx, 5.5, hz + 12.0), olive, true)
+	_box("base", Vector3(0.6, 11.0, 24.0), Vector3(hx - 18.0, 5.5, hz), olive, true)
+	_box("base", Vector3(37.0, 0.8, 25.0), Vector3(hx, 11.4, hz), dark, true)
+	_label("HANGAR MILITAR", Vector3(hx, 9.5, hz - 12.2), 140, Color(1, 0.85, 0.3), PI, 0.012)
+	jet_spots = [[Vector3(hx - 6.0, 2.0, hz), PI * 0.5], [Vector3(hx + 8.0, 2.0, hz), PI * 0.5]]
+	# garagem dos tanques (aberta para o sul)
+	var gx := cx + 10.0
+	var gz := z0 + 22.0
+	_box("base", Vector3(26.0, 6.0, 0.5), Vector3(gx, 3.0, gz + 7.0), olive, true)
+	for sx in [-13.0, 13.0]:
+		_box("base", Vector3(0.5, 6.0, 14.0), Vector3(gx + sx, 3.0, gz), olive, true)
+	_box("base", Vector3(27.0, 0.6, 15.0), Vector3(gx, 6.2, gz), dark, true)
+	tank_spots = [[Vector3(gx - 6.0, 0.6, gz), PI], [Vector3(gx + 6.0, 0.6, gz), PI]]
+	# torres de vigia nos cantos
+	for c in [Vector3(x0 + 2.0, 0, z0 + 2.0), Vector3(x1 - 2.0, 0, z0 + 2.0), Vector3(x0 + 2.0, 0, z1 - 2.0), Vector3(x1 - 2.0, 0, z1 - 2.0)]:
+		for sx in [-1.0, 1.0]:
+			for sz in [-1.0, 1.0]:
+				_box("base", Vector3(0.3, 7.0, 0.3), c + Vector3(sx * 1.4, 3.5, sz * 1.4), dark, true)
+		_box("base", Vector3(3.6, 0.3, 3.6), c + Vector3(0, 7.0, 0), dark, true)
+		_box("base", Vector3(3.6, 1.0, 0.1), c + Vector3(0, 7.6, 1.75), olive, false)
+		_box("base", Vector3(3.6, 0.2, 3.6), c + Vector3(0, 9.3, 0), olive, false)
+	# heliponto e mastro
+	var hp := Vector3(x0 + 18.0, 0.07, z0 + 16.0)
+	_box("base", Vector3(16.0, 0.08, 16.0), hp, M.concrete(Color(0.3, 0.31, 0.3)), false)
+	_box("base", Vector3(1.2, 0.03, 7.0), hp + Vector3(-2.3, 0.06, 0), M.plain(Color(0.95, 0.95, 0.9), 0.6), false)
+	_box("base", Vector3(1.2, 0.03, 7.0), hp + Vector3(2.3, 0.06, 0), M.plain(Color(0.95, 0.95, 0.9), 0.6), false)
+	_box("base", Vector3(3.4, 0.03, 1.2), hp + Vector3(0, 0.06, 0), M.plain(Color(0.95, 0.95, 0.9), 0.6), false)
+	_box("base", Vector3(0.15, 12.0, 0.15), Vector3(cx - 10.0, 6.0, z0 + 6.0), M.plain(Color(0.8, 0.8, 0.82), 0.3, 0.8), true)
+	_box("base", Vector3(0.05, 1.6, 2.6), Vector3(cx - 10.0, 11.0, z0 + 7.4), M.plain(Color(0.1, 0.45, 0.2), 0.8), false)
+	# caixas de munição e sacos de areia
+	for k in 8:
+		_box("base", Vector3(1.4, 1.0, 1.0), Vector3(cx - 30.0 + (k % 4) * 1.6, 0.5 + float(k / 4) * 1.0, z0 + 30.0), M.plain(Color(0.3, 0.33, 0.2), 0.8), true)
+	for k in 6:
+		_box("base", Vector3(2.0, 0.9, 1.0), Vector3(x0 + 6.0 + k * 2.2, 0.45, z0 + 4.0), M.plain(Color(0.6, 0.55, 0.4), 0.9), true)
+	_label("BASE MILITAR · ACESSO RESTRITO", Vector3(gate_x, 4.4, z0 - 0.4), 140, Color(1.0, 0.3, 0.2), PI, 0.012)

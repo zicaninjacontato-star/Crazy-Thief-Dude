@@ -257,7 +257,10 @@ static func bark() -> StandardMaterial3D:
 	return m
 
 static func car_paint(c: Color) -> StandardMaterial3D:
+	var key := "paint" + c.to_html()
+	if _cache.has(key): return _cache[key]      # mesma cor = mesmo material (menos materiais na GPU)
 	var m := StandardMaterial3D.new()
+	_cache[key] = m
 	m.albedo_color = c
 	m.metallic = 0.55
 	m.roughness = 0.28
