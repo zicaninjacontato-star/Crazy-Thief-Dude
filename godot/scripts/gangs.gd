@@ -339,7 +339,7 @@ func take_loot(l: Dictionary) -> void:
 			safes[g].known = true
 			l.node.visible = false
 			l.cd = 1e9
-			main._msg("Bilhete achado! Senha do cofre da %s: %s" % [T[g].name, safes[g].code])
+			main._msg("Bilhete achado! Senha do cofre da %s: %s" % [T[g].name, safes[g].code], true)
 			main.audio.play("click", null, 0.0)
 			return
 		"drugs":
@@ -410,10 +410,13 @@ func tick(dt: float) -> void:
 			if l.cd <= 0.0 and is_instance_valid(l.node):
 				l.node.visible = true
 	_safes_tick(dt)
+	for fg in friendly_t.keys():
+		friendly_t[fg] = maxf(0.0, friendly_t[fg] - dt)
 	_restock_t -= dt
 	if _restock_t <= 0.0:
 		_restock_t = 4.0
 		_restock()
+		_arrivals()
 	if main.combat.dead or main.interior != "":
 		return
 	var pp: Vector3 = main.player.global_position
@@ -436,9 +439,21 @@ func _near_count(g: String, pp: Vector3, r: float) -> int:
 ## entrou no território: "sai daqui!" — se não sair em alguns segundos, vira alvo (1 caveira)
 func _warn_tick(dt: float, pp: Vector3) -> void:
 	var inside := ""
+	_see_t -= dt
+	_seen_t -= dt
+	var check := _see_t <= 0.0
+	if check:
+		_see_t = 0.3
 	for g in T:
 		var d: float = Vector2(pp.x - T[g].c.x, pp.z - T[g].c.z).length()
-		if (d < T[g].r * 0.85 or _near_count(g, pp, 12.0) > 0) and _near_count(g, pp, 60.0) > 0:
+		if d > T[g].r + 10.0 or friendly_t.get(g, 0.0) > 0.0 or main.missions.near_gang_job(g, pp):
+			continue
+		# só é "descoberto" se algum membro realmente te enxergar (perto e sem parede no meio);
+		# depois de visto, continua marcado por 3 s mesmo atrás de uma parede
+		if check and _seen_by(g, pp):
+			_seen_t = 3.0
+			_seen_g = g
+		if _seen_t > 0.0 and _seen_g == g:
 			inside = g
 	if inside == "":
 		if warn_t > 0.0:
@@ -455,10 +470,32 @@ func _warn_tick(dt: float, pp: Vector3) -> void:
 		if is_instance_valid(q) and not q.down and q.global_position.distance_to(pp) < 25.0:
 			var to: Vector3 = pp - q.global_position
 			q.body.rotation.y = lerp_angle(q.body.rotation.y, atan2(to.x, to.z), minf(1.0, dt * 5.0))
-	if prev == 0.0 or (prev < 4.0 and warn_t >= 4.0):
-		main._msg("%s: \"Sai da nossa área, mano! Vaza!\"" % T[inside].name if prev == 0.0 else "%s: \"Último aviso!\"" % T[inside].name)
 	if warn_t > 8.0:
 		_hostile(inside, 1)
+
+var _see_t := 0.0
+var _seen_t := 0.0
+var _seen_by_cached := false
+var _seen_g := ""
+var friendly_t := {}           # gangue -> segundos de trégua (depois de trabalhar para ela)
+## algum membro da gangue enxerga o jogador? (até 30 m, raio sem parede no meio)
+func _seen_by(g: String, pp: Vector3) -> bool:
+	_seen_by_cached = false
+	var ss = main.get_world_3d().direct_space_state
+	for q in members[g]:
+		if not is_instance_valid(q) or q.down:
+			continue
+		var d: float = q.global_position.distance_to(pp)
+		if d > 30.0:
+			continue
+		var qr := PhysicsRayQueryParameters3D.create(q.global_position + Vector3(0, 1.6, 0), pp + Vector3(0, 1.3, 0), 1)
+		qr.exclude = [q.get_rid(), main.player.get_rid()]
+		if main.player.vehicle:
+			qr.exclude.append(main.player.vehicle.get_rid())
+		if ss.intersect_ray(qr).is_empty():
+			_seen_by_cached = true
+			return true
+	return false
 
 func _hostile(g: String, lvl: int) -> void:
 	var changed := hunter != g or lvl > skulls
@@ -509,9 +546,7 @@ func _hunt_tick(dt: float, pp: Vector3) -> void:
 	var want: int = [0, 4, 6, 7, 8][skulls]
 	if _reinf_t <= 0.0 and _near_count(g, pp, 1e9) < want:
 		_reinf_t = 10.0
-		var c: Vector3 = T[g].c
-		var a := atan2(pp.z - c.z, pp.x - c.x)
-		var sp: Vector3 = c + Vector3(cos(a), 0, sin(a)) * T[g].r * 0.8 + Vector3(0, 0.3, 0)
+		var sp: Vector3 = _street_spot(g) + Vector3(0, 0.3, 0)      # chegam pela rua
 		for k in 2:
 			_spawn_member(g, sp + Vector3(k * 1.2, 0, 0), _weapon_for(k), false)
 	_car_t -= dt
@@ -646,6 +681,37 @@ func _wave_tick(dt: float, pp: Vector3) -> void:
 	_arm_all()
 	main._msg("%s: onda %d de reforços chegando para defender o esconderijo!" % [T[g].name, wave_n])
 
+## ponto na rua em frente ao esconderijo (de onde chegam os reforços), longe do jogador e
+## de preferência fora da tela
+func _street_spot(g: String) -> Vector3:
+	var hq: Dictionary = main.city.gang_hq[g]
+	var side: Vector3 = hq.fwd.cross(Vector3.UP)
+	var cam: Camera3D = main.cam
+	var best: Vector3 = hq.gate_out + hq.fwd * 14.0
+	var bs := -1e9
+	for k in 8:
+		var cand: Vector3 = hq.gate_out + hq.fwd * rng.randf_range(10.0, 22.0) + side * rng.randf_range(-40.0, 40.0)
+		var sc: float = cand.distance_to(main.player.global_position)
+		if cam and (cand - cam.global_position).normalized().dot(-cam.global_transform.basis.z) > 0.5:
+			sc -= 60.0          # na frente da câmera: evita surgir à vista
+		if sc > bs:
+			bs = sc
+			best = cand
+	return Vector3(best.x, 0.15, best.z)
+
+## guarda que chegou ao posto: fica rondando ali
+func _arrivals() -> void:
+	for g in members:
+		for q in members[g]:
+			if is_instance_valid(q) and not q.down and q.has_meta("post") and q.target == null:
+				var post: Vector3 = q.get_meta("post")
+				# longe de tudo (ninguém vê) o NPC não processa: completa o caminho até o posto
+				if q.global_position.distance_to(main.player.global_position) > 75.0:
+					q.global_position = post + Vector3(0, 0.3, 0)
+				if Vector2(q.global_position.x - post.x, q.global_position.z - post.z).length() < 1.6:
+					q.remove_meta("post")
+					q.patrol = [post + Vector3(1.2, 0, 0), post + Vector3(0, 0, 1.2), post + Vector3(-1.2, 0, 0), post + Vector3(0, 0, -1.2)] if rng.randf() < 0.4 else []
+
 ## em paz e com o jogador longe: a gangue repõe os guardas mortos (um a cada 4 s)
 var _restock_t := 6.0
 func _restock() -> void:
@@ -673,5 +739,9 @@ func _restock() -> void:
 			if dmin > bd:
 				bd = dmin
 				best = p
-		_spawn_member(g, best + Vector3(0, 0.3, 0), "pistol", true)
+		# o guarda novo chega a pé pela rua, entra pelo portão e vai até o posto
+		var hq: Dictionary = main.city.gang_hq[g]
+		var q = _spawn_member(g, _street_spot(g) + Vector3(0, 0.3, 0), "pistol", true)
+		q.patrol = [hq.gate_out, hq.gate_out - hq.fwd * 13.0, best]
+		q.set_meta("post", best)
 		wave_n = 0

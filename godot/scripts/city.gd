@@ -21,7 +21,13 @@ var shops: Array = []   # {type, pos, name}
 var lamp_mat: StandardMaterial3D
 var bus_route: Array = []   # [{p: Vector3 (faixa), stop: bool}] em volta das quadras 1..3 x 1..3
 
+## manual = true: o main chama build() aos poucos (tela de título com barra de progresso)
+var manual := false
 func _ready() -> void:
+	if not manual:
+		build()
+
+func build(step: Callable = Callable()) -> void:
 	rng.seed = 2026
 	body = StaticBody3D.new()
 	body.name = "Colisao"
@@ -30,11 +36,17 @@ func _ready() -> void:
 	for i in N:
 		for j in N:
 			_block(_center(i), _center(j))
+		if step.is_valid():
+			await step.call(0.05 + 0.45 * float(i + 1) / N, "Construindo a cidade")
 	_markings()
 	_props()
 	_landmarks()
 	_bus_line()
+	if step.is_valid():
+		await step.call(0.55, "Bairros, morros e ponte")
 	_districts()
+	if step.is_valid():
+		await step.call(0.62, "Juntando a cidade")
 	_flush()
 	for sc in _store_cars:
 		var b: Dictionary = preload("res://scripts/carmodel.gd").build(sc[2], sc[3])
@@ -1339,7 +1351,7 @@ func _hill_mesh(c: Vector2, r: float) -> void:
 				var px: float = o.x + v.x * step
 				var pz: float = o.y + v.y * step
 				q.append(Vector3(px, hill_h(px, pz) + 0.01, pz))
-			for k in [0, 2, 1, 0, 3, 2]:
+			for k in [0, 1, 2, 0, 2, 3]:      # sentido horário visto de cima (antes as faces olhavam para baixo: morro invisível no celular)
 				st.set_uv(Vector2(q[k].x, q[k].z) * 0.1)
 				st.add_vertex(q[k])
 	st.generate_normals()

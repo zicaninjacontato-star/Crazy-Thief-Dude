@@ -8,6 +8,9 @@ const Ped := preload("res://scripts/ped.gd")
 const Cop := preload("res://scripts/cop.gd")
 const Hud := preload("res://scripts/hud.gd")
 const Humanoid := preload("res://scripts/humanoid.gd")
+const Title := preload("res://scripts/title.gd")
+const Phone := preload("res://scripts/phone.gd")
+const CarModel := preload("res://scripts/carmodel.gd")
 const M := preload("res://scripts/mats.gd")
 const Audio := preload("res://scripts/audio.gd")
 const FX := preload("res://scripts/fx.gd")
@@ -20,7 +23,7 @@ var gangs: Node = null
 var cam_mode := 1          # 0 perto · 1 média · 2 longe · 3 primeira pessoa
 const CAM_NAMES := ["Câmera perto", "Câmera média", "Câmera longe", "Primeira pessoa"]
 func cycle_cam() -> void:
-	cam_mode = (cam_mode + 1) % 4
+	cam_mode = (cam_mode + 1) % 3      # (1ª pessoa removida a pedido)
 	ui.settings["cam"] = cam_mode
 	ui.apply_now()
 	_msg(CAM_NAMES[cam_mode])
@@ -106,10 +109,21 @@ func _ready() -> void:
 		get_viewport().scaling_3d_scale = 0.75
 		get_viewport().msaa_3d = Viewport.MSAA_DISABLED
 		get_viewport().screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
+	# tela de título aparece na hora; o mundo é montado aos poucos por trás (com a árvore pausada)
+	var async_load := shot == "" or shot_view == "title"
+	if async_load:
+		title = Title.new()
+		add_child(title)
+		get_tree().paused = true
+		await _lstep(0.02, "Preparando")
 	audio = Audio.new()
 	add_child(audio)
 	city = City.new()
+	city.manual = true
 	add_child(city)
+	await city.build(_lstep if async_load else Callable())
+	if async_load:
+		await _lstep(0.66, "Praia, mar e aeroporto")
 	world2 = World2.new()
 	add_child(world2)
 	world2.build(self)
@@ -134,7 +148,7 @@ func _ready() -> void:
 	hud.map_houses = city.map_houses
 	hud.map_runway = Rect2(world2.AIR_X - 170.0, -12.0, 340.0, 24.0)
 	hud.beach = Rect2(world2.BEACH_X0, world2.ISL_Z0 - 24.0, world2.SHORE_X - world2.BEACH_X0, world2.ISL_Z1 - world2.ISL_Z0 + 48.0)
-	hud.jump_pressed.connect(func(): player.jump())
+	hud.jump_pressed.connect(func(): player.vehicle.hop() if player.vehicle and player.vehicle.get("variant") == "bike" else player.jump())
 	police = Police.new()
 	add_child(police)
 	police.setup(self)
@@ -157,14 +171,24 @@ func _ready() -> void:
 			quality = clampi(int(sd.get("quality", 1)), 0, 2)
 	M.lod_k = [0.65, 0.85, 1.0][quality]
 	_pop_peds = [22, 28, 32][quality]
+	if async_load:
+		await _lstep(0.76, "Trânsito, barcos e aeronaves")
 	_spawn_extras()
+	if async_load:
+		await _lstep(0.86, "Pessoas e carros")
 	_spawn_population()
+	if async_load:
+		await _lstep(0.95, "Últimos detalhes")
 	hud.weapon_pressed.connect(func(): ui.show_wheel())
 	hud.shop_pressed.connect(_shop_action)
 	hud.siren_pressed.connect(_toggle_siren)
 	hud.rob_pressed.connect(func(): combat.rob_target())
 	hud.hostage_pressed.connect(func(): combat.toggle_hostage())
 	hud.cam_pressed.connect(cycle_cam)
+	phone = Phone.new()
+	phone.main = self
+	add_child(phone)
+	hud.phone_pressed.connect(func(): phone.open_home())
 	daynight = DayNight.new()
 	add_child(daynight)
 	daynight.setup(self)
@@ -172,16 +196,242 @@ func _ready() -> void:
 	ui.main = self
 	add_child(ui)
 	ui.apply_now()
-	if shot == "" or shot_view in ["menu", "shop", "cars_shop", "settings"]:
+	if async_load:
+		title.done()
+		if shot_view == "title":
+			print("TITLE loaded frames_waited=", Engine.get_process_frames())
+			await get_tree().process_frame
+			await get_tree().process_frame
+			get_viewport().get_texture().get_image().save_png(shot)
+			get_tree().quit()
+		title.start_pressed.connect(func(): title.hide_title(); ui.show_main_menu())
+		title.settings_pressed.connect(func(): title.hide_title(); ui.show_settings(func(): ui._close(); get_tree().paused = true; title.show_title()))
+	elif shot_view in ["menu", "shop", "cars_shop", "settings"]:
 		ui.show_main_menu()
-	if shot_view in ["menu", "shop", "cars_shop", "settings", "clothes", "tuning", "tuning2", "hudedit"]:
+	if shot_view in ["menu", "shop", "cars_shop", "settings", "clothes", "tuning", "tuning2", "hudedit", "phone", "phonecam"]:
 		process_mode = Node.PROCESS_MODE_ALWAYS   # captura de teste com o menu aberto
 
 ## novo jogo: só soco, $600, sem carros comprados
+var title = null
+var phone = null
+
+# ---------------------------------------------------------------- celular: 190 / 192 / 666
+## polícia (190) ou ambulância (192) vem até onde você está; a ambulância cura; depois vão embora
+var visits: Array = []      # {car, kind, path, i, state, t, crew, target}
+func call_service(kind: String) -> void:
+	var pp: Vector3 = player.global_position
+	var path: PackedVector3Array = PackedVector3Array()
+	for k in 14:
+		var a := rng.randf() * TAU
+		var cand := pp + Vector3(cos(a), 0, sin(a)) * rng.randf_range(110.0, 170.0)
+		if not world2.is_water(cand.x, cand.z):
+			path = route_path(road_snap(cand), road_snap(pp))
+			if path.size() > 1 and path[0].distance_to(pp) > 70.0:
+				break
+	if path.size() < 2:
+		path = route_path(road_snap(pp + Vector3(120, 0, 0)), road_snap(pp))
+	if path.size() < 2:
+		return
+	var dir: Vector3 = (path[1] - path[0]).normalized()
+	var car
+	if kind == "police":
+		car = _spawn_car(path[0] + Vector3(0, 0.8, 0), atan2(dir.x, dir.z), Color(0.92, 0.92, 0.93), true, "")
+	else:
+		car = _spawn_car(path[0] + Vector3(0, 0.8, 0), atan2(dir.x, dir.z), Color(0.97, 0.97, 0.97), false, "van")
+		car._light_bar()
+	car.siren_on = true
+	car.set_meta("visit", true)
+	seat_npc(car)
+	visits.append({"car": car, "kind": kind, "path": path, "i": 1, "state": "coming", "t": 0.0, "crew": [], "target": pp})
+
+func _visits_tick(dt: float) -> void:
+	for vs in visits.duplicate():
+		var car = vs.car
+		if not is_instance_valid(car) or car.dead:
+			for cr in vs.crew:
+				if is_instance_valid(cr):
+					cr.queue_free()
+			visits.erase(vs)
+			continue
+		vs.t += dt
+		match vs.state:
+			"coming":
+				var path: PackedVector3Array = vs.path
+				if vs.i < path.size():
+					missions.drive_to(car, path[vs.i], path[mini(vs.i + 1, path.size() - 1)], 15.0)
+					if Vector2(car.global_position.x - path[vs.i].x, car.global_position.z - path[vs.i].z).length() < 7.0:
+						vs.i += 1
+				var dpp: float = car.global_position.distance_to(player.global_position)
+				if (vs.i >= path.size() or dpp < 16.0) or vs.t > 90.0:
+					car.throttle = 0.0
+					car.brake_in = 1.0
+					if car.linear_velocity.length() < 1.0:
+						_visit_arrive(vs)
+			"there":
+				for cr in vs.crew:
+					if not is_instance_valid(cr) or cr.down:
+						continue
+					if vs.kind == "ambulance":
+						var to: Vector3 = player.global_position - cr.global_position
+						to.y = 0
+						if to.length() > 1.6 and player.vehicle == null:
+							cr.global_position += to.normalized() * 2.4 * dt      # paramédico vai até você
+							cr.body.rotation.y = atan2(to.x, to.z)
+							cr.body.animate(2.4, dt)
+						elif player.vehicle == null and hp < 100.0 and not combat.dead:
+							hp = 100.0       # paramédico cuidou de você
+							audio.play("cash", null, -10.0)
+				if vs.t > 28.0:
+					_visit_leave(vs)
+			"leaving":
+				missions.drive_to(car, vs.target, vs.target, 13.0)
+				if vs.t > 25.0 and car.global_position.distance_to(player.global_position) > 70.0:
+					cars.erase(car)
+					car.queue_free()
+					visits.erase(vs)
+
+func _visit_arrive(vs: Dictionary) -> void:
+	vs.state = "there"
+	vs.t = 0.0
+	var car = vs.car
+	if car.has_method("set_door"):
+		car.set_door(1.0)
+	for k in 2:
+		var side: float = 1.0 if k == 0 else -1.0
+		var pos: Vector3 = car.global_position + car.global_transform.basis.x * (car.body_size.x * 0.5 + 0.8) * side + Vector3(0, 0.2, 0)
+		pos.y = ground_at(pos, [car.get_rid()]) + 0.05
+		var cr
+		if vs.kind == "police":
+			cr = Cop.new()
+			add_child(cr)
+			cr.setup(rng.randi(), "cop")
+			cr.global_position = pos
+			var c0: Vector3 = vs.target
+			cr.patrol = [c0 + Vector3(4, 0, 0), c0 + Vector3(0, 0, 4), c0 + Vector3(-4, 0, 0), c0 + Vector3(0, 0, -4)]
+			police.patrol_cops.append(cr)
+		else:
+			cr = Ped.new()
+			add_child(cr)
+			cr.setup([pos, pos + Vector3(0.01, 0, 0), pos, pos], 0, rng)
+			cr._cols = [Color(0.95, 0.95, 0.95), Color(0.95, 0.95, 0.95), Color(0.78, 0.56, 0.38), Color(0.08, 0.06, 0.05)]
+			cr.body.queue_free()
+			cr._make_body()
+			cr.global_position = pos
+			cr.speed = 0.0
+			cr.mode = "clerk"
+		cr.add_to_group("tmp")
+		vs.crew.append(cr)
+
+func _visit_leave(vs: Dictionary) -> void:
+	for cr in vs.crew:
+		if is_instance_valid(cr):
+			police.patrol_cops.erase(cr)
+			cr.queue_free()        # voltaram para o carro
+	vs.crew = []
+	var car = vs.car
+	if car.has_method("set_door"):
+		car.set_door(0.0)
+	var a := rng.randf() * TAU
+	vs.target = car.global_position + Vector3(cos(a), 0, sin(a)) * 200.0
+	vs.state = "leaving"
+	vs.t = 0.0
+	car.siren_on = false
+
+## 666: quase nunca atende. Quando atende: som de terror, a tela escurece, um demônio sobe do
+## chão na sua frente e te mata (mesmo com vida infinita)
+var _horror_t := -1.0
+var _demon: Node3D = null
+func call_666() -> void:
+	if rng.randf() > 0.12 or player.vehicle != null or combat.dead:
+		audio.play("busy", null, -2.0)
+		return
+	_horror_t = 0.0
+	audio.play("horror", null, 4.0)
+	ui.letterbox(true, "")
+	cine_cam = true
+	hud.input_block = true
+	var f := Vector3(sin(player.body.rotation.y), 0, cos(player.body.rotation.y))
+	_demon = Humanoid.new()
+	_demon.build(Color(0.25, 0.02, 0.02), Color(0.08, 0.0, 0.0), Color(0.35, 0.05, 0.04), Color(0.02, 0.0, 0.0))
+	add_child(_demon)
+	_demon.add_to_group("tmp")
+	_demon.scale = Vector3.ONE * 1.7
+	_demon.global_position = player.global_position + f * 3.2 + Vector3(0, -4.2, 0)
+	_demon.rotation.y = atan2(-f.x, -f.z)
+	var head: Node3D = _demon.bones.get("head")
+	if head:
+		var em := M.emissive(Color(1.0, 0.1, 0.05), 6.0)
+		for sx in [-1.0, 1.0]:
+			var horn := MeshInstance3D.new()
+			var cm := CylinderMesh.new()
+			cm.top_radius = 0.0
+			cm.bottom_radius = 0.05
+			cm.height = 0.3
+			horn.mesh = cm
+			horn.material_override = M.plain(Color(0.1, 0.08, 0.06), 0.6)
+			horn.position = Vector3(0.09 * sx, 0.2, 0.0)
+			horn.rotation.z = -0.5 * sx
+			head.add_child(horn)
+			var eye := MeshInstance3D.new()
+			var sm := SphereMesh.new()
+			sm.radius = 0.025
+			sm.height = 0.05
+			eye.mesh = sm
+			eye.material_override = em
+			eye.position = Vector3(0.05 * sx, 0.06, 0.12)
+			head.add_child(eye)
+	var lt := OmniLight3D.new()
+	lt.light_color = Color(1.0, 0.15, 0.05)
+	lt.light_energy = 3.0
+	lt.omni_range = 9.0
+	lt.position = Vector3(0, 1.0, 0.6)
+	_demon.add_child(lt)
+	_demon.arm_pose = "handsup"
+
+func _horror_tick(dt: float) -> void:
+	if _horror_t < 0.0:
+		return
+	_horror_t += dt
+	var t := _horror_t
+	if _demon and is_instance_valid(_demon):
+		var base_y: float = player.global_position.y - 4.2
+		_demon.global_position.y = lerpf(base_y, player.global_position.y, clampf((t - 1.5) / 3.0, 0.0, 1.0))
+		_demon.animate(0.0, dt)
+		# câmera de lado, baixa, vendo o demônio subir na frente do jogador
+		var mid: Vector3 = (player.global_position + _demon.global_position) * 0.5 + Vector3(0, 1.6, 0)
+		var side := Vector3(cos(player.body.rotation.y), 0, -sin(player.body.rotation.y))
+		cam.global_position = mid + side * 6.5 + Vector3(0, 0.6 + sin(t * 0.7) * 0.2, 0)
+		cam.look_at(mid + Vector3(0, 0.3, 0), Vector3.UP)
+		hud.flash = 0.15 if fmod(t, 0.9) < 0.08 else 0.0
+		if t > 5.2 and t - dt <= 5.2:
+			# o ataque: puxa o jogador para baixo
+			_demon.global_position = player.global_position + Vector3(0, 0.2, 0) + (_demon.global_position - player.global_position).normalized() * 0.6
+			audio.play("scream", player.global_position, 6.0)
+			FX.blood_burst(self, player.global_position + Vector3(0, 1.2, 0), Vector3.UP, 40)
+			combat.kill_now()
+	if t > 6.5:
+		_horror_t = -1.0
+		cine_cam = false
+		hud.input_block = false
+		ui.letterbox(false, "")
+		if _demon and is_instance_valid(_demon):
+			var d := _demon
+			var tw := create_tween()
+			tw.tween_property(d, "global_position:y", d.global_position.y - 5.0, 2.0)
+			tw.tween_callback(d.queue_free)
+		_demon = null
+
+## passo do carregamento: atualiza a barra e deixa a tela desenhar (2 quadros)
+func _lstep(p: float, what: String) -> void:
+	if title:
+		title.progress(p, what)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
 func new_game() -> void:
 	end_tuning()
 	cine_cam = false
-	player.global_position = spawn_point()
+	combat.reset_player_state(spawn_point())
 	player.velocity = Vector3.ZERO
 	money = 600
 	hp = 100.0
@@ -202,7 +452,7 @@ func new_game() -> void:
 func load_game() -> void:
 	end_tuning()
 	cine_cam = false
-	player.global_position = spawn_point()
+	combat.reset_player_state(spawn_point())
 	player.velocity = Vector3.ZERO
 	var d: Dictionary = ui.load_save()
 	if d.is_empty():
@@ -263,7 +513,7 @@ func _place_owned(kind: String, col: Color, i: int) -> void:
 
 ## configurações do menu (sangue, gore, qualidade, contador)
 func apply_settings(s: Dictionary) -> void:
-	cam_mode = int(s.get("cam", 1))
+	cam_mode = clampi(int(s.get("cam", 1)), 0, 2)
 	if hud:
 		var lo = s.get("hud_layout", {})
 		hud.layout_ovr = lo if lo is Dictionary else {}
@@ -361,15 +611,60 @@ func _on_crash(c, dv: float) -> void:
 		traffic_sys.eject_rider(c, false)
 	elif dv > 6.0 and player.vehicle and c != player.vehicle and traffic_sys.is_agent(c) and not c.has_meta("crash_react") and c.global_position.distance_to(player.vehicle.global_position) < 10.0:
 		_crash_reaction(c, dv)
+	# batida de frente muito forte: quem está dentro atravessa o para-brisa
+	var thru: bool = dv > 21.0 and c is VehicleBody3D and c.kind in CarModel.KINDS.keys() + ["police", "taxi"] and c.get("_dv_local") != null and c._dv_local.z < -absf(c._dv_local.x)
+	if thru and c != player.vehicle and traffic_sys.is_agent(c):
+		_windshield_npc(c)
 	if c == player.vehicle:
 		hp -= maxf(0.0, dv - 8.0) * (2.4 if c.kind == "moto" else 0.9)
 		hud.flash = 0.2
+		if thru and not god:
+			_windshield_player(c)
+			return
 		# moto: o piloto voa e a moto tomba
 		if c.kind == "moto" and dv > 7.5:
 			var vel: Vector3 = c.linear_velocity + c.global_transform.basis.z * dv * 0.6
 			eject_player(Vector3.ZERO)
 			combat.knockdown(vel + Vector3(0, 3.0, 0), 3.0)
 			c.fall_over()
+
+## pelo para-brisa: o vidro estoura e o corpo sai voando com a velocidade de antes da batida
+func _windshield_point(c) -> Vector3:
+	return c.global_transform * Vector3(c.seat.x * 0.4, c.body_size.y * 0.85, c.body_size.z * 0.25)
+
+func _pre_crash_vel(c) -> Vector3:
+	return c.linear_velocity - c.global_transform.basis * c._dv_local
+
+func _windshield_player(c) -> void:
+	var vel: Vector3 = _pre_crash_vel(c)
+	c.break_glass()
+	c.break_glass()
+	eject_player(Vector3.ZERO)
+	player.global_position = _windshield_point(c) + c.global_transform.basis.z * 0.8
+	combat.knockdown(vel * 0.85 + Vector3(0, 3.5, 0), 3.4)
+	hp -= 22.0
+	audio.play("glass" if audio.sounds.has("glass") else "crash", player.global_position, 4.0)
+
+func _windshield_npc(c) -> void:
+	var info: Dictionary = traffic_sys.release(c)
+	if info.is_empty():
+		return
+	if is_instance_valid(info.get("drv")):
+		info.drv.queue_free()
+	c.break_glass()
+	c.break_glass()
+	var q = Ped.new()
+	add_child(q)
+	q.setup(city.walk_loops[0], 0, rng)
+	q._cols = info.cols.duplicate()
+	q.body.queue_free()
+	q._make_body()
+	q.global_position = _windshield_point(c) + c.global_transform.basis.z * 0.8
+	q.died.connect(_on_ped_died)
+	peds.append(q)
+	var vel: Vector3 = _pre_crash_vel(c)
+	q.hit(c, vel * 0.85 + Vector3(0, 3.0, 0), gore)
+	audio.play("glass" if audio.sounds.has("glass") else "crash", q.global_position, 2.0)
 
 ## você bateu no carro de um NPC: ele pode morrer, sair e brigar/atirar, sair e correr, fugir com o
 ## carro, te perseguir — ou o carro quebra e fica parado
@@ -494,7 +789,7 @@ func _shop_action() -> void:
 				audio.play("cash")
 				_msg("Lanche: +50 de vida")
 			else:
-				_msg("Dinheiro insuficiente")
+				_msg("Dinheiro insuficiente", true)
 		"snack":
 			if money >= 5:
 				money -= 5
@@ -510,6 +805,10 @@ func _shop_action() -> void:
 			ui.show_sleep()
 		"tune":
 			start_tuning()
+		"fare_on":
+			missions.start_fares("taxi")
+		"fare_off":
+			missions._taxi_end()
 		"carry":
 			combat.pick_body(act_target)
 		"drop":
@@ -759,6 +1058,13 @@ func _environment() -> void:
 func _toggle_car() -> void:
 	if vehanim.busy() or combat.dead or combat.down_t > 0.0 or interior != "":
 		return
+	if passenger_ride:
+		missions.end_ride(false)       # desce do Uber no meio do caminho
+		return
+	var uc = missions.ride_car()
+	if player.vehicle == null and uc != null and is_instance_valid(uc) and uc.global_position.distance_to(player.global_position) < 4.5:
+		missions.board_ride()
+		return
 	if player.vehicle != null:
 		var c = player.vehicle
 		var spd: float = c.linear_velocity.length()
@@ -814,6 +1120,30 @@ func _toggle_car() -> void:
 	vehanim.start_enter(best, info)
 
 ## chamado pela animação quando o jogador chega à porta: ele passa a "estar" no veículo
+## Uber: o jogador vai no banco de trás; o motorista NPC dirige (sem controle do jogador)
+var passenger_ride := false
+func enter_as_passenger(car) -> void:
+	player.ride = null
+	player.vehicle = car
+	player.visible = false
+	player.collision_layer = 0
+	player.collision_mask = 0
+	player.velocity = Vector3.ZERO
+	passenger_ride = true
+	seated = player.make_body()
+	seated.sitting = true
+	seated.scale = Vector3.ONE * 0.85
+	var sp := seat_pos(car)
+	seated.position = Vector3(-absf(sp.x), sp.y, sp.z - 0.95)
+	car.add_child(seated)
+	seated.animate(0, 0)
+
+func leave_passenger() -> void:
+	var c = player.vehicle
+	passenger_ride = false
+	if c != null and is_instance_valid(c):
+		finish_exit(c, c.global_transform * Vector3(-c.body_size.x * 0.5 - 0.8, 0.3, 0.0))
+
 func finish_enter(best) -> Node3D:
 	player.ride = null
 	player.vehicle = best
@@ -855,8 +1185,8 @@ func seat_pos(c) -> Vector3:
 	return Vector3(s.x, s.y + 0.07 - 0.98 * 0.85, s.z)
 
 ## altura do chão (rua, calçada, morro) num ponto — para pôr quem sai do carro em pé no chão
-func ground_at(p: Vector3, exclude := []) -> float:
-	var q := PhysicsRayQueryParameters3D.create(p + Vector3(0, 2.5, 0), p + Vector3(0, -4.0, 0), 1)
+func ground_at(p: Vector3, exclude := [], up := 2.5) -> float:
+	var q := PhysicsRayQueryParameters3D.create(p + Vector3(0, up, 0), p + Vector3(0, -60.0, 0), 1)
 	q.exclude = exclude
 	var r := get_world_3d().direct_space_state.intersect_ray(q)
 	if r.is_empty():
@@ -927,7 +1257,7 @@ func eject_player(_impulse: Vector3) -> void:
 
 func _unhandled_input(e: InputEvent) -> void:
 	if e.is_action_pressed("enter"): _toggle_car()
-	if e.is_action_pressed("jump"): player.jump()
+	if e.is_action_pressed("jump"): player.vehicle.hop() if player.vehicle and player.vehicle.get("variant") == "bike" else player.jump()
 	if e.is_action_pressed("camera"):
 		cycle_cam()
 	if e.is_action_pressed("fire"):
@@ -950,7 +1280,9 @@ func _physics_process(dt: float) -> void:
 		player.move_input = Vector2(mv.x, mv.y)
 		player.cam_yaw = cam_yaw + PI
 		player.sprint = hud.sprint or Input.is_action_pressed("sprint")
-	elif not shot_view in ["drive", "motoride", "planefly", "helifly", "jetfly", "attackheli", "wheelie", "crashreact", "bridgedrive", "viaductdrive", "hillwalk", "tuning", "boatride", "busride", "motocrash", "props"]:
+	elif passenger_ride:
+		pass       # passageiro do Uber: quem dirige é o motorista
+	elif not shot_view in ["race", "drive", "motoride", "planefly", "helifly", "jetfly", "attackheli", "wheelie", "crashreact", "bridgedrive", "viaductdrive", "hillwalk", "tuning", "boatride", "busride", "motocrash", "props"]:
 		var c = player.vehicle
 		var g := 1.0 if hud.gas else 0.0
 		var b := 1.0 if hud.brk else 0.0
@@ -1231,11 +1563,11 @@ func _crimes(dt: float) -> void:
 						q.scare()
 	# policiais e capangas também podem ser atropelados
 	if vc != null and vc.linear_velocity.length() > 4.0:
-		for c in police.cops + missions.hostiles():
+		for c in combat.cops + missions.hostiles():
 			if is_instance_valid(c) and not c.down and c.global_position.distance_to(vc.global_position) < vc.body_size.x * 0.5 + 1.0:
 				c.hit(vc, vc.linear_velocity, gore)
 				audio.play("hit", c.global_position, 4.0)
-				_add_wanted(2 if c in police.cops else 0)
+				_add_wanted(2 if c in combat.cops else 0)
 
 ## crime: a polícia só vem se VIR o crime ou se uma testemunha ligar. Com testemunha, a polícia
 ## procura numa zona amarela em volta do local do crime até achar o jogador.
@@ -1332,18 +1664,24 @@ func _raise_wanted(n: int) -> void:
 	wanted = maxi(wanted, mini(5, maxi(lv, 1)))
 	police.on_crime()
 
-func _msg(t: String) -> void:
+## avisos no meio da tela: só os necessários (force). Os informativos ("testemunha chamou a polícia",
+## "cofre arrombado"...) saíram a pedido do jogador — a própria cena já mostra o que aconteceu.
+func _msg(t: String, force := false) -> void:
+	if not force:
+		return
 	hud.hint.text = t
 	msg_t = 3.0
 
 func _process(dt: float) -> void:
 	# trava de segurança: câmera de cena só existe com a oficina ou o tubarão gigante ativos
-	if cine_cam and tune.is_empty() and (sea == null or sea.squid_t < 0.0):
+	if cine_cam and tune.is_empty() and (sea == null or sea.squid_t < 0.0) and _horror_t < 0.0:
 		cine_cam = false
 		hud.input_block = false
 	hud.tuning = not tune.is_empty()
 	_upkeep(dt)
 	frames += 1
+	_visits_tick(dt)
+	_horror_tick(dt)
 	# câmera em 3ª pessoa
 	var drag: Vector2 = hud.take_cam_drag()
 	if drag.length() > 0:
@@ -1475,7 +1813,7 @@ func _process(dt: float) -> void:
 	if player.vehicle:
 		var v = player.vehicle
 		var rpm := clampf(absf(v.forward_speed()) / 30.0, 0.0, 1.0) * 0.8 + absf(v.throttle) * 0.2
-		audio.set_engine(true, rpm, absf(v.throttle))
+		audio.set_engine(v.get("variant") != "bike", rpm, absf(v.throttle))      # bicicleta não tem motor
 	else:
 		audio.set_engine(false, 0.0, 0.0)
 		var hs := Vector2(player.velocity.x, player.velocity.z).length()
@@ -1501,6 +1839,7 @@ func _process(dt: float) -> void:
 		fps_acc = 0
 		fps_n = 0
 	hud.driving = player.vehicle != null
+	hud.bike = player.vehicle != null and player.vehicle.get("variant") == "bike"
 	hud.info.text = "%d FPS · %s · b%s · Fatia de teste Godot" % [round(fps_show), RenderingServer.get_video_adapter_name(), build_id]
 	hud.stars.text = "★".repeat(wanted) + "☆".repeat(5 - wanted)
 	hud.money.text = "$%d,00" % money
@@ -1553,6 +1892,12 @@ func _process(dt: float) -> void:
 							shop_action = "carry"
 							act_target = q
 							break
+	# táxi: o serviço começa no botão (não ao entrar); Uber/táxi em serviço: botão para encerrar
+	if player.vehicle != null and not passenger_ride and not combat.dead:
+		if missions.active == "" and player.vehicle.get("kind") == "taxi":
+			shop_action = "fare_on"
+		elif missions.active in ["taxi", "uber"]:
+			shop_action = "fare_off"
 	# oficina: entrar com o carro na frente da loja
 	if player.vehicle != null and interior == "" and not combat.dead:
 		for sh in city.shops:
@@ -1570,7 +1915,7 @@ func _process(dt: float) -> void:
 				ce = true
 				break
 	hud.can_enter = ce
-	hud.shop_label = {"enter": "ENTRAR", "exit": "SAIR", "buy": "COMPRAR", "carry": "CARREGAR", "drop": "SOLTAR", "trunk": "PORTA-MALAS", "eat": "COMER", "rob": "ASSALTAR", "snack": "COMPRAR", "sleep": "DORMIR", "tune": "OFICINA", "loot": (gangs.loot_label(loot_target) if loot_target != null else "PEGAR")}.get(shop_action, "")
+	hud.shop_label = {"enter": "ENTRAR", "exit": "SAIR", "buy": "COMPRAR", "carry": "CARREGAR", "drop": "SOLTAR", "trunk": "PORTA-MALAS", "eat": "COMER", "rob": "ASSALTAR", "snack": "COMPRAR", "sleep": "DORMIR", "tune": "OFICINA", "fare_on": "SERVIÇO", "fare_off": "ENCERRAR", "loot": (gangs.loot_label(loot_target) if loot_target != null else "PEGAR")}.get(shop_action, "")
 	var pk: String = player.vehicle.kind if player.vehicle else ""
 	hud.gas_name = "SUBIR" if pk == "heli" else "ACEL"
 	hud.brk_name = "DESCER" if pk == "heli" else "FREIO"
@@ -2726,6 +3071,38 @@ func _test_views() -> void:
 				if is_instance_valid(q):
 					pos.append([snappedf(q.global_position.distance_to(gc), 1), snappedf(q.global_position.y, 0.1), q.visible, q.down, q.body.visible if q.body else null])
 			print("GPOP ", frames, " g=", g, " n=", gangs.members[g].size(), " ", pos)
+	if v == "hillclose":
+		var hl: Array = city.hills[0]
+		var c2: Vector2 = hl[0]
+		if frames == 4:
+			player.global_position = Vector3(c2.x + hl[1] * 0.4, city.hill_h(c2.x + hl[1] * 0.4, c2.y - hl[1] * 0.75) + 0.5, c2.y - hl[1] * 0.75)
+		if frames > 5:
+			cam_yaw = PI
+			cam_pitch = -0.1
+	if v == "motogap":
+		# roda visual × chão (moto parada, andando e freando)
+		if frames == 6:
+			player.global_position = Vector3(world2.AIR_X, 0.3, 40.0)
+			for i in 3:
+				var mk: String = ["moto", "sportbike", "bike"][i]
+				var c = _spawn_car(Vector3(world2.AIR_X - 10.0 + i * 8.0, 0.8, 0.0), 0.0, Color(0.2, 0.3, 0.8), false, mk)
+				seat_npc(c)
+				set_meta("mg%d" % i, c)
+		if frames > 6:
+			for i in 3:
+				var c = get_meta("mg%d" % i)
+				c.throttle = 0.6 if frames > 40 and frames < 120 else 0.0
+				c.brake_in = 1.0 if frames >= 120 else 0.0
+				if frames % 10 == 0:
+					var gaps := []
+					for w in c.spin:
+						var wp: Vector3 = w.global_position
+						var gy: float = ground_at(wp, [c.get_rid()], 0.2)
+						gaps.append(snappedf(wp.y - c.wheel_r - gy, 0.005))
+					var ys := []
+					for w in c.wheels:
+						ys.append(snappedf(c.to_local(w.global_position).y, 0.005))
+					print("MGP ", frames, " ", c.variant, " gap=", gaps, " wl=", ys, " ride=", snappedf(c._ride_y, 0.005), " v=", snappedf(c.linear_velocity.length(), 0.1))
 	if v == "crashparts":
 		# dano por peça: 4 carros, cada um batido de um lado (frente, trás, lado do motorista, lado do passageiro)
 		if frames == 6:
@@ -3112,8 +3489,82 @@ func _test_views() -> void:
 			set_meta("tx", tx)
 		if frames == 6:
 			vehanim.start_enter(get_meta("tx"))
+		if frames == 70:
+			print("TAXI action=", shop_action, " label=", hud.shop_label)
+			_shop_action()
 		if frames % 30 == 0:
 			print("TAXI ", frames, " veh=", player.vehicle.kind if player.vehicle else "-", " active=", missions.active, " st=", missions.taxi_state, " obj=", missions.obj_pos, " text=", missions.text)
+	if v in ["phone", "phonecam", "call190", "call192", "call666", "uber"]:
+		if frames == 4:
+			player.global_position = city._center(3) * Vector3(1, 0, 0) + Vector3(0, 0.3, city._center(3) - city.BLOCK * 0.5 + 1.6)
+		if v == "phone" and frames == 10:
+			phone.open_home()
+		if v == "phonecam" and frames == 10:
+			phone.open_camera()
+		if v == "phonecam" and frames == 16:
+			phone._take_photo()
+		if v == "phonecam" and frames == 24:
+			print("PHN photos=", phone._photos().size())
+			phone.close()
+			phone.open_gallery()
+		if v == "call190" and frames == 10:
+			call_service("police")
+		if v == "call192" and frames == 10:
+			hp = 40.0
+			call_service("ambulance")
+		if v == "call666" and frames == 10:
+			rng.seed = 1
+			var tries := 0
+			while _horror_t < 0.0 and tries < 60:
+				tries += 1
+				call_666()
+			print("PHN 666 tries=", tries)
+		if v == "uber" and frames == 10:
+			missions.request_ride(city.hospital_pos, "Hospital")
+		if v == "uber" and frames > 10 and missions.ride_car() != null and player.vehicle == null:
+			var rc2 = missions.ride_car()
+			if rc2.global_position.distance_to(player.global_position) < 20.0 and rc2.linear_velocity.length() < 1.0:
+				player.global_position = rc2.global_position + rc2.global_transform.basis.x * -2.2
+				_toggle_car()
+		if frames % 40 == 0:
+			var vs: Array = visits.map(func(x): return [x.kind, x.state, snappedf(x.car.global_position.distance_to(player.global_position), 1) if is_instance_valid(x.car) else -1, x.crew.size()])
+			print("PHN ", frames, " visits=", vs, " hp=", snappedf(hp, 1), " dead=", combat.dead, " horror=", snappedf(_horror_t, 0.1), " ride=", (missions.ride.state if not missions.ride.is_empty() else "-"), " rc=", ([missions.ride.car.global_position.snapped(Vector3.ONE), snappedf(missions.ride.car.linear_velocity.length(), 0.1), missions.ride.i, missions.ride.path.size(), missions.ride.car.freeze, snappedf(missions.ride.car.throttle, 0.1)] if not missions.ride.is_empty() else []), " pass=", passenger_ride, " pos=", player.global_position.snapped(Vector3.ONE))
+	if v == "jobs":
+		var seq := ["truck", "motojob", "gang_g", "gang_p"]
+		var k: int = (frames - 4) / 40
+		var ph: int = (frames - 4) % 40
+		if frames >= 4 and k < seq.size():
+			if ph == 0:
+				missions._cleanup()
+				player.global_position = missions._giver(seq[k]).pos + Vector3(0, 0.3, 0)
+			if ph == 30:
+				print("JOB ", seq[k], " active=", missions.active, " text=", missions.text, " car=", missions.job_car.kind if missions.job_car and is_instance_valid(missions.job_car) else "-", " drops=", missions.drops.size(), " thugs=", missions.thugs.size(), " near_gang=", missions.near_gang_job(seq[k].substr(5) if seq[k].begins_with("gang") else "g", player.global_position))
+	if v == "race":
+		if frames == 4:
+			money = 5000
+			player.global_position = missions._giver("race").pos
+		if frames > 20 and missions.active == "race" and player.vehicle:
+			# o jogador "pilota" com o mesmo piloto automático dos NPCs
+			var n: int = missions.checkpoints.size()
+			if missions.race_t >= 0.0:
+				missions.drive_to(player.vehicle, missions.checkpoints[missions.cp_i % n], missions.checkpoints[(missions.cp_i + 1) % n], 26.0)
+		if frames % 40 == 0:
+			var rs: Array = missions.racers.map(func(r): return [r.lap, r.cp, snappedf(r.car.linear_velocity.length(), 1)] if is_instance_valid(r.car) else "x")
+			print("RACE ", frames, " active=", missions.active, " text=", missions.text, " money=", money, " racers=", rs, " veh=", player.vehicle != null)
+	if v == "busjack":
+		if frames == 4:
+			var b = null
+			for a in traffic_sys.agents:
+				if a.car.kind == "bus":
+					b = a.car
+			set_meta("bj", b)
+			player.global_position = b.door_world()
+		if frames == 6:
+			_toggle_car()
+		if frames % 20 == 0:
+			var bb = get_meta("bj")
+			var kids: int = bb.get_children().filter(func(n): return n.has_method("set_far")).size()
+			print("BJK ", frames, " veh=", player.vehicle != null, " anim=", vehanim.state, " humanoids_on_bus=", kids)
 	if v == "mission":
 		if frames == 4:
 			player.global_position = missions.givers[1].pos
@@ -3404,6 +3855,20 @@ func _shot_tick() -> void:
 
 ## caminho pelas ruas da grade (para o rastro do minimapa): perna até a rua mais próxima,
 ## segue pelas ruas (no máximo 2 curvas) e sai na rua mais próxima do destino
+## ponto no meio da rua mais próxima (dentro da grade) — onde carros chamados pelo celular nascem
+func road_snap(p: Vector3) -> Vector3:
+	var ext: float = city.N * city.CELL * 0.5 - 8.0
+	var q := Vector3(clampf(p.x, -ext, ext), 0, clampf(p.z, -ext, ext))
+	var roads: Array = hud.map_roads
+	var rx: float = roads[0]
+	var rz: float = roads[0]
+	for r in roads:
+		if absf(r - q.x) < absf(rx - q.x):
+			rx = r
+		if absf(r - q.z) < absf(rz - q.z):
+			rz = r
+	return Vector3(rx, 0, q.z) if absf(q.x - rx) < absf(q.z - rz) else Vector3(q.x, 0, rz)
+
 func route_path(a: Vector3, b: Vector3) -> PackedVector3Array:
 	var out := PackedVector3Array()
 	var ext: float = city.N * city.CELL * 0.5
@@ -3744,14 +4209,14 @@ func _rob_store() -> void:
 ## dormir na casa segura: tela escura, o tempo passa até a hora escolhida, vida cheia e jogo salvo
 func sleep_until(hour: float) -> void:
 	if wanted > 0:
-		_msg("Não dá para dormir sendo procurado!")
+		_msg("Não dá para dormir sendo procurado!", true)
 		return
 	ui.cinematic("BOA NOITE", "dormindo...", func():
 		tod = hour
 		daynight.apply(0.0, true)
 		hp = 100.0
 		ui.save_game()
-		_msg("Jogo salvo · %02d:00" % int(hour)))
+		_msg("Jogo salvo · %02d:00" % int(hour), true))
 
 func repair_vehicle(c) -> void:
 	if c.has_method("repair"):

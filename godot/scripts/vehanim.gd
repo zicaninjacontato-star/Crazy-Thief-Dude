@@ -233,7 +233,12 @@ func _at_door() -> void:
 		_begin_in()
 		return
 	if not _has_door(car):
-		_begin_in()
+		# ônibus/caminhão (sem porta animada): o motorista é puxado para fora do mesmo jeito
+		# (antes ficava sentado no banco para sempre)
+		if not drv_info.is_empty() and is_instance_valid(drv_info.get("drv")):
+			_begin_pull()
+		else:
+			_begin_in()
 		return
 	if drv_info.is_empty() and not car.get("unlocked"):
 		p.body.pose = "break" if rng.randf() < 0.5 else "lockpick"

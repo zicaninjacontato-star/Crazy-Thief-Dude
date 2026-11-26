@@ -32,7 +32,8 @@ var rng := RandomNumberGenerator.new()
 
 var cops: Array:
 	get:
-		return main.police.cops
+		# inclui os policiais que patrulham a pé (antes soco/tiro passavam direto por eles)
+		return main.police.cops + main.police.patrol_cops.filter(func(c): return is_instance_valid(c))
 
 func setup(m: Node3D) -> void:
 	main = m
@@ -136,12 +137,19 @@ func _process(dt: float) -> void:
 		return
 	if down_t > 0.0:
 		down_t -= dt
+		_down_total += dt
 		# caindo (ex.: pulou do avião): continua no chão até parar; dano pelo impacto
 		if p.body.parts.size() > 0 and is_instance_valid(p.body.parts[0]):
 			var hv: Vector3 = p.body.parts[0].linear_velocity
+			var hp0: Vector3 = p.body.parts[0].global_position
+			var in_water: bool = main.world2.is_water(hp0.x, hp0.z) and hp0.y < main.world2.WATER_Y + 0.5
 			if hv.y < fall_peak:
 				fall_peak = hv.y
-			if hv.length() > 3.0:
+			# na água o corpo boia e balança: não espera parar (antes ficava subindo e descendo sem fim)
+			if in_water:
+				fall_peak = 0.0
+				down_t = minf(down_t, 0.6)
+			elif hv.length() > 3.0 and _down_total < 9.0:
 				down_t = maxf(down_t, 0.8)
 			elif fall_peak < -13.0:
 				main.hp -= (-fall_peak - 13.0) * 8.0
@@ -650,6 +658,7 @@ func clear_police() -> void:
 # ---------------------------------------------------------------- derrubada, morte, prisão
 ## joga o jogador no chão (ragdoll) e ele levanta depois de 'dur' segundos
 var fall_peak := 0.0
+var _down_total := 0.0
 var force_dead := false
 var carrying: Node3D = null     # corpo no ombro
 var carry_cols := []
@@ -672,6 +681,7 @@ func knockdown(impulse: Vector3, dur := 2.4) -> void:
 	p.body.rag_alive = true
 	p.body.ragdoll(impulse, null, false)
 	down_t = dur
+	_down_total = 0.0
 
 func _get_up() -> void:
 	var p = main.player
@@ -692,7 +702,14 @@ func _get_up() -> void:
 	_equip()
 	p.body.rotation.y = yaw
 	p.body.start_getup(fd)
-	p.global_position = Vector3(hips.x, maxf(hips.y - 0.9, p.global_position.y if p.global_position.y > 0.5 else 0.05), hips.z)
+	# chão logo abaixo do quadril (antes usava a altura antiga do jogador: quem pulava do prédio era
+	# levado de volta lá para cima, caía de novo e repetia)
+	var gy: float
+	if main.world2.is_water(hips.x, hips.z) and hips.y < main.world2.WATER_Y + 0.6:
+		gy = minf(hips.y - 0.9, main.world2.WATER_Y - 1.2)
+	else:
+		gy = main.ground_at(hips + Vector3(0, 0.4, 0), [p.get_rid()], 0.0)
+	p.global_position = Vector3(hips.x, gy + 0.05, hips.z)
 	p.velocity = Vector3.ZERO
 	p.collision_layer = 2
 	p.collision_mask = 1
@@ -835,21 +852,31 @@ func trunk_action(car) -> void:
 		carry_cols = [Color(0.5, 0.5, 0.5), Color(0.15, 0.16, 0.2), Color(0.78, 0.56, 0.38), Color(0.1, 0.07, 0.05)]
 		_make_carried()
 
-func _respawn(pos: Vector3, text: String) -> void:
-	main.end_tuning()
+## volta o jogador ao normal em pé em "pos": sem ragdoll, vivo, fora do veículo, com colisão.
+## Usado ao renascer, preso, NOVO JOGO e CARREGAR (antes o novo jogo podia começar em ragdoll e
+## sem colisão: o corpo caía para baixo do chão para sempre).
+func reset_player_state(pos: Vector3) -> void:
 	var p = main.player
 	Engine.time_scale = 1.0
 	main.ui.hide_respawn()
 	dead = false
+	force_dead = false
 	down_t = 0.0
+	_down_total = 0.0
+	fall_peak = 0.0
+	_vy = 0.0
 	if main.hud.wasted == "CPF CANCELADO":
 		main.hud.wasted = ""
+	if main.vehanim.busy():
+		main.vehanim.cancel()
 	if p.vehicle != null:
 		main.eject_player(Vector3.ZERO)
+	p.ride = null
+	drop_body()
 	if p.body.ragdolled:
 		for part in p.body.parts:
 			if is_instance_valid(part):
-				part.get_tree().create_timer(20.0).timeout.connect(part.queue_free)
+				part.queue_free()
 	p.rebuild_body(false)      # acorda curado: sem ferimentos
 	_equip()
 	main.leave_interior()
@@ -858,11 +885,18 @@ func _respawn(pos: Vector3, text: String) -> void:
 	p.velocity = Vector3.ZERO
 	p.collision_layer = 2
 	p.collision_mask = 1
+
+func _respawn(pos: Vector3, text: String) -> void:
+	main.end_tuning()
+	var p = main.player
+	reset_player_state(pos)
 	main.hp = 100.0
 	main.cam_yaw = 0.0
 	main.money = maxi(0, main.money - 100)
 	main.wanted = 0
 	clear_police()
+	# acorda em outra hora do dia (pode ser de dia ou de noite)
+	main.tod = rng.randf_range(0.0, 24.0)
 	main.reset_world()
 	main._msg(text)
 
@@ -911,6 +945,15 @@ func _threat_tick(dt: float) -> void:
 		return
 	_thr_t = 0.15
 	var rob := false
+	# policial a pé com arma apontada para ele: saca a arma e a polícia entra em ação
+	if aim and weapon not in ["fist", "grenade"] and p.vehicle == null and not dead and main.wanted == 0:
+		for cp in main.police.patrol_cops:
+			if is_instance_valid(cp) and not cp.down and aiming_at(cp):
+				cp.body.rotation.y = atan2(p.global_position.x - cp.global_position.x, p.global_position.z - cp.global_position.z)
+				main._raise_wanted(1)
+				main.police.knows = true
+				main.police.last_known = p.global_position
+				break
 	if aim and weapon not in ["fist", "grenade"] and p.vehicle == null and not dead:
 		for q in main.peds:
 			if not is_instance_valid(q) or q.down or q == hostage:

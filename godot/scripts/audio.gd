@@ -84,6 +84,11 @@ func _ready() -> void:
 	_pending.append(["tank", _tank_shot])
 	_pending.append(["jet", _jet])
 	_pending.append(["jet_loop", _jet_loop])
+	_pending.append(["horror", _horror])
+	sounds["beep"] = _tone([[0.0, 0.09, 1209.0, 697.0]], 0.12)
+	sounds["ring"] = _tone([[0.0, 1.0, 440.0, 480.0], [3.0, 4.0, 440.0, 480.0]], 4.2)
+	sounds["busy"] = _tone([[0.0, 0.25, 480.0, 620.0], [0.5, 0.75, 480.0, 620.0], [1.0, 1.25, 480.0, 620.0]], 1.3)
+	sounds["shutter"] = _clicks([0.0, 0.06], 0.18)
 
 func _gen_player() -> AudioStreamPlayer:
 	var p := AudioStreamPlayer.new()
@@ -576,6 +581,39 @@ func attach_loop(node: Node3D, name: String, vol_db := 0.0, max_d := 600.0) -> A
 	return p3
 
 ## rugido grave do tubarão gigante
+## tons de telefone: [[início, fim, f1, f2], ...] (duas frequências somadas, como no aparelho)
+func _tone(parts: Array, dur: float) -> AudioStreamWAV:
+	var n := int(dur * RATE)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	for i in n:
+		var t := i / RATE
+		for p in parts:
+			if t >= p[0] and t < p[1]:
+				var e := minf(1.0, minf(t - p[0], p[1] - t) * 60.0)
+				out[i] = (sin(TAU * p[2] * t) + sin(TAU * p[3] * t)) * 0.22 * e
+	return _wav(out)
+
+## 666: zumbido grave dissonante, batidas de coração e um "grito" que cresce
+func _horror() -> AudioStreamWAV:
+	var dur := 7.0
+	var n := int(dur * RATE)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	var y := 0.0
+	for i in n:
+		var t := i / RATE
+		y += 0.02 * ((randf() * 2.0 - 1.0) - y)
+		var drone := sin(TAU * 41.0 * t) * 0.35 + sin(TAU * 43.5 * t) * 0.3 + sin(TAU * 61.7 * t + sin(t * 3.0)) * 0.2
+		var hb := 0.0
+		var bt := fmod(t, 0.9)
+		if bt < 0.08 or (bt > 0.2 and bt < 0.27):
+			hb = sin(TAU * 55.0 * t) * 0.9
+		var sw := clampf((t - 4.2) / 2.0, 0.0, 1.0)
+		var scream := (sin(TAU * (220.0 + t * 60.0) * t) * 0.5 + sin(TAU * (330.0 + t * 90.0) * t) * 0.3) * sw * (0.6 + 0.4 * sin(t * 37.0))
+		out[i] = clampf((drone + hb + y * 3.0) * minf(1.0, t / 1.5) * 0.55 + scream * 0.6, -1.0, 1.0)
+	return _wav(out)
+
 func _monster() -> AudioStreamWAV:
 	var dur := 2.2
 	var n := int(dur * RATE)

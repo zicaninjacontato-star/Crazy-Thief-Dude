@@ -405,7 +405,7 @@ func show_settings(back: Callable) -> void:
 	_btn(box, "Qualidade gráfica: %s" % QUAL[settings.quality], func(): settings.quality = (settings.quality + 1) % 3; _apply(); show_settings(back))
 	_btn(box, "Volume: %d%%" % settings.volume, func(): settings.volume = (settings.volume + 20) % 120; _apply(); show_settings(back))
 	_btn(box, "Contador de FPS: %s" % _on(settings.fps), func(): settings.fps = not settings.fps; _apply(); show_settings(back))
-	_btn(box, "Câmera: %s" % CAMS[int(settings.get("cam", 1))], func(): settings.cam = (int(settings.get("cam", 1)) + 1) % 4; _apply(); show_settings(back))
+	_btn(box, "Câmera: %s" % CAMS[clampi(int(settings.get("cam", 1)), 0, 2)], func(): settings.cam = (clampi(int(settings.get("cam", 1)), 0, 2) + 1) % 3; _apply(); show_settings(back))
 	_btn(box, "EDITAR HUD (posição e tamanho dos botões)", func(): open_hud_editor(back))
 	_btn(box, "VOLTAR", back)
 
@@ -704,7 +704,7 @@ func _buy_car(it: Dictionary) -> void:
 	main.audio.play("cash")
 	save_game()
 	_close()
-	main._msg("%s comprado! Está na rua em frente à loja." % it.name)
+	main._msg("%s comprado! Está na rua em frente à loja." % it.name, true)
 
 # ---------------- configurações e save ----------------
 func _apply() -> void:

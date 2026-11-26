@@ -9,6 +9,7 @@ signal siren_pressed
 signal rob_pressed
 signal hostage_pressed
 signal cam_pressed
+signal phone_pressed
 # ---- editor de HUD: posição/tamanho de cada botão, do minimapa e do joystick (salvo nas configurações)
 var layout_ovr := {}          # nome -> [dx, dy, escala]
 var hud_alpha := 1.0
@@ -92,6 +93,7 @@ var speed: Label
 var hint: Label
 var buttons := {}   # nome -> Rect2 (em pixels de tela)
 var driving := false
+var bike := false             # de bicicleta: aparece o botão PULAR
 var money: Label
 var clock: Label
 var hp := 100.0
@@ -218,6 +220,8 @@ func _layout() -> void:
 	if driving:
 		buttons["gas"] = Rect2(s.x - b - 24, s.y - b - 30, b, b * 1.15)
 		buttons["brake"] = Rect2(s.x - b * 2 - 44, s.y - b - 30, b, b * 1.15)
+		if bike:
+			buttons["jump"] = Rect2(s.x - b * 2 - 44, s.y - b * 2.35 - 50, b, b)
 		if armed:
 			buttons["fire"] = Rect2(s.x - b - 24, s.y - b * 2.35 - 50, b, b)
 			buttons["missile"] = Rect2(s.x - b * 2 - 44, s.y - b * 2.35 - 50, b, b)
@@ -236,12 +240,13 @@ func _layout() -> void:
 	if driving and siren_avail:
 		buttons["siren"] = Rect2(s.x - b * 2 - 44, s.y * 0.38, b, b)
 	buttons["weapon"] = Rect2(s.x - 170, 122, 150, 78)
-	if shop_label != "" and (not driving or action_kind == "tune"):
+	if shop_label != "" and (not driving or action_kind in ["tune", "fare_on", "fare_off"]):
 		buttons["shop"] = Rect2(s.x - b - 24, s.y * 0.38 - b - 16, b, b)
 	buttons["cam"] = Rect2(236, 30, 64, 64)
+	buttons["phone"] = Rect2(310, 30, 64, 64)
 	# na oficina: nada de sair do carro/acelerar (o painel da oficina controla tudo)
 	if tuning:
-		for k in ["enter", "gas", "brake", "fire", "missile", "siren", "shop", "weapon"]:
+		for k in ["enter", "gas", "brake", "fire", "missile", "siren", "shop", "weapon", "phone"]:
 			buttons.erase(k)
 	# editor de HUD: deslocamento e escala de cada botão (em volta do centro)
 	for k in buttons.keys():
@@ -331,6 +336,8 @@ func _press(k: String, on: bool) -> void:
 		"rise": rise_held = on
 		"cam":
 			if on: cam_pressed.emit()
+		"phone":
+			if on: phone_pressed.emit()
 		"siren":
 			if on: siren_pressed.emit()
 		"rob":
@@ -432,6 +439,11 @@ func _icon(kind: String, c: Vector2, r: float, col: Color) -> void:
 			root.draw_line(c + Vector2(-0.3, 0.55) * r, c + Vector2(0.3, 0.55) * r, Color(0.5, 0.35, 0.1), w)
 		"car":
 			_car_icon(c, r, col, false)
+		"phone":
+			# celular: corpo + tela + botão
+			root.draw_rect(Rect2(c + Vector2(-0.42, -0.78) * r, Vector2(0.84, 1.56) * r), col, false, 2.5)
+			root.draw_rect(Rect2(c + Vector2(-0.3, -0.6) * r, Vector2(0.6, 1.0) * r), Color(col.r, col.g, col.b, 0.5))
+			root.draw_circle(c + Vector2(0, 0.6) * r, r * 0.08, col)
 		"cam":
 			# câmera: corpo + lente
 			root.draw_rect(Rect2(c + Vector2(-0.75, -0.45) * r, Vector2(1.5, 1.0) * r), col, false, 2.5)
@@ -729,6 +741,9 @@ func _draw_minimap() -> void:
 			continue          # polícia/exército só aparece quando está perto (dentro do minimapa)
 		if bp.distance_to(C) > R - 7:
 			bp = C + (bp - C).normalized() * (R - 7)
+		if bl.has("next"):
+			bl = bl.duplicate()
+			bl.dir2 = (tr.call(bl.next) - tr.call(bl.pos)).normalized()
 		_blip(bp, bl, 1.0)
 	if map_police != Vector3.INF:
 		var pp: Vector2 = tr.call(map_police)
@@ -873,6 +888,9 @@ func _draw_full_map() -> void:
 		if bl.get("near", false) and Vector2(bl.pos.x - map_player.x, bl.pos.z - map_player.z).length() > 140.0:
 			continue
 		var bp := _mf_to_screen(bl.pos)
+		if bl.has("next"):
+			bl = bl.duplicate()
+			bl.dir2 = (_mf_to_screen(bl.next) - bp).normalized()
 		_blip(bp, bl, 1.5)
 	if map_waypoint != Vector3.INF:
 		_pin(_mf_to_screen(map_waypoint), 1.6)
@@ -916,6 +934,15 @@ func _skull(c: Vector2, r: float, col: Color, filled: bool) -> void:
 func _blip(p: Vector2, bl: Dictionary, k: float) -> void:
 	var ic: String = bl.get("icon", "")
 	var col: Color = bl.col
+	if ic == "cp":
+		# ponto da corrida com seta apontando para o próximo ponto
+		var rr := 9.0 * k
+		root.draw_circle(p, rr + 1.5, Color(0, 0, 0, 0.8))
+		root.draw_circle(p, rr, col)
+		var d: Vector2 = bl.get("dir2", Vector2.UP)
+		var sd := Vector2(-d.y, d.x)
+		root.draw_colored_polygon(PackedVector2Array([p + d * rr * 0.75, p - d * rr * 0.45 + sd * rr * 0.55, p - d * rr * 0.15, p - d * rr * 0.45 - sd * rr * 0.55]), Color(1, 1, 1))
+		return
 	if ic == "loot":
 		root.draw_rect(Rect2(p - Vector2(6, 5) * k, Vector2(12, 10) * k), Color(0, 0, 0, 0.8))
 		root.draw_rect(Rect2(p - Vector2(5, 4) * k, Vector2(10, 8) * k), col)

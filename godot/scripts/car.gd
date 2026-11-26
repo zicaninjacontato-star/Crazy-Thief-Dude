@@ -58,7 +58,7 @@ var parked := false
 var broken_wheels: Array = []
 var lights_broken := false
 const VMAX := {"hatch": 150.0, "sedan": 165.0, "suv": 155.0, "pickup": 150.0, "sport": 230.0, "police": 190.0, "taxi": 160.0, "moto": 175.0, "bus": 90.0,
-	"van": 140.0, "bike": 38.0, "sportbike": 215.0, "offroad": 150.0, "super": 265.0, "truck": 105.0}
+	"van": 140.0, "bike": 30.0, "sportbike": 215.0, "offroad": 150.0, "super": 265.0, "truck": 105.0}
 
 ## kind: sedan, hatch, suv, pickup, sport ou police (modelo gerado por carmodel.gd).
 var stick := Vector2.ZERO    # joystick do jogador (moto: puxar para trás + acelerar = empinar)
@@ -90,7 +90,7 @@ func setup(kind: String, paint: Color) -> void:
 		max_steer = 0.42
 		if variant == "bike":
 			mass = 95.0
-			max_engine = 260.0
+			max_engine = 170.0       # pedalada: arranca devagar (antes 260 = parecia moto)
 			max_brake = 6.0
 		elif variant == "sportbike":
 			max_engine = 1900.0
@@ -797,11 +797,19 @@ func _physics_process(dt: float) -> void:
 	if spin.size() > 0:
 		for n in spin:
 			n.rotate_x(fs * dt / wheel_r)
+		if variant == "bike" and lean:
+			# pedala com a roda (relação ~2:1) e só enquanto acelera ou anda
+			if throttle > 0.05 or absf(fs) > 0.5:
+				pedal_phase += (fs / wheel_r * 0.5 + throttle * 2.5) * dt
+			for h in lean.get_children():
+				if h.get("moto_pose") != null:
+					h.pedal = pedal_phase
 		if fork:
 			fork.rotation.y = steering * 1.1
 		if lean:
 			lean.rotation.z = lerpf(lean.rotation.z, -steering * clampf(absf(fs) / 12.0, 0.0, 1.0) * 0.9, minf(1.0, dt * 5.0))
 			_wheelie_tick(dt, fs)
+	_hop_cd -= dt
 	for w in wheels:
 		if w.use_as_traction and not (w in broken_wheels) and not (w in burst):
 			w.wheel_friction_slip = 1.6 if handbrake else 2.6
@@ -810,19 +818,50 @@ func _physics_process(dt: float) -> void:
 ## moto: as rodas visuais ficam no modelo (presas ao chassi) e a suspensão mole abaixa o chassi —
 ## as rodas atravessavam a rua. O modelo é apoiado no ponto real de contato das rodas físicas.
 var _ride_y := 0.0
+var _ride_t := 0.0
 func _ride_height(dt: float) -> void:
+	_ride_t -= dt
+	if _ride_t > 0.0:
+		return
+	# longe da câmera ninguém vê: mede 4×/s em vez de todo passo
+	var cam := get_viewport().get_camera_3d()
+	var far: bool = cam != null and cam.global_position.distance_squared_to(global_position) > 3600.0
+	_ride_t = 0.25 if far else 0.0
+	# chão medido de verdade (raio de cada roda física até o asfalto), em coordenadas do chassi
+	var ss := get_world_3d().direct_space_state
 	var sum := 0.0
 	var n := 0
-	for w in wheels:
-		if w.is_in_contact():
-			sum += to_local(w.global_position).y - w.wheel_radius      # centro da roda (já com a suspensão) − raio
+	for i in range(0, wheels.size(), 2):
+		var w: VehicleWheel3D = wheels[i]
+		var top: Vector3 = w.global_position + global_transform.basis.y * 0.3
+		var q := PhysicsRayQueryParameters3D.create(top, top - global_transform.basis.y * 1.6, 1)
+		q.exclude = [get_rid()]
+		var r := ss.intersect_ray(q)
+		if not r.is_empty():
+			sum += to_local(r.position).y
 			n += 1
-	var want := -sum / n if n > 0 else 0.0
-	_ride_y = lerpf(_ride_y, clampf(want, -0.1, 0.35), minf(1.0, dt * 12.0))
+	var want := sum / n if n > 0 else 0.0
+	_ride_y = lerpf(_ride_y, clampf(want, -0.1, 0.35), minf(1.0, maxf(dt, _ride_t) * 12.0))
 	if model_root:
 		model_root.position.y = _ride_y
 
 var _lean_z := 0.0
+var pedal_phase := 0.0
+var _hop_cd := 0.0
+## bicicleta: pulo (bunny hop) com o botão PULAR
+func hop() -> void:
+	if _hop_cd > 0.0 or down:
+		return
+	var on_ground := false
+	for w in wheels:
+		if w.is_in_contact():
+			on_ground = true
+	if not on_ground:
+		return
+	_hop_cd = 0.8
+	apply_central_impulse(global_transform.basis.y * mass * 4.6 + global_transform.basis.z * mass * 0.6)
+	apply_torque_impulse(global_transform.basis.x * -mass * 0.25)
+
 func _wheelie_tick(dt: float, fs: float) -> void:
 	var want := driver != null and throttle > 0.5 and fs > 3.0 and (stick.y < -0.35 or wheelie_key) and not down
 	if want:

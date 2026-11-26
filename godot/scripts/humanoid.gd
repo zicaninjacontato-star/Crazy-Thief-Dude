@@ -20,6 +20,7 @@ var punch_t := 0.0
 var punch_kind := 0      # 0 direto direita, 1 direto esquerda, 2 chute
 var swimming := false
 var moto_pose := false
+var pedal := -1.0        # bicicleta: fase do pedal (<0 = não pedala)
 var guard := false       # guarda alta (modo luta)
 var arm_pose := ""       # só os braços: "handsup" (rendido), "phone" (ligando para a polícia)
 var hurt_t := 0.0        # reação a um soco (cabeça e tronco jogados para trás)
@@ -280,6 +281,11 @@ func animate(speed: float, dt: float) -> void:
 			var sg := 1.0 if k == 0 else -1.0
 			th[k].rotation = Vector3(-1.15, 0, sg * 0.18)
 			sh[k].rotation.x = 1.55
+			if pedal >= 0.0:
+				# bicicleta: pernas girando no pedivela (uma meia volta defasada da outra)
+				var pp := pedal + (0.0 if k == 0 else PI)
+				th[k].rotation.x = -1.0 + sin(pp) * 0.42
+				sh[k].rotation.x = 1.45 - cos(pp) * 0.4
 			up[k].rotation = Vector3(-1.05, 0, sg * 0.12)
 			fo[k].rotation.x = -0.35
 		bones.chest.rotation.x = 0.15
