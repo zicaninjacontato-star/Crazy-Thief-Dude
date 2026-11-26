@@ -95,9 +95,10 @@ func _physics_process(dt: float) -> void:
 		_path = main.route_path(global_position, tgt)
 	var goal := tgt
 	# saindo da base/península: primeiro a pista do aeroporto (z≈0), depois a cidade
-	if global_position.x < -175.0:
+	var ix0: float = main.world2.ISL_X0 + 5.0
+	if global_position.x < ix0:
 		_path = PackedVector3Array()
-		goal = Vector3(global_position.x + 30.0, 0, 0) if absf(global_position.z) > 8.0 else Vector3(-150.0, 0, 0)
+		goal = Vector3(global_position.x + 30.0, 0, 0) if absf(global_position.z) > 8.0 else Vector3(ix0 + 30.0, 0, 0)
 		var gate: Vector3 = main.world2.base_gate
 		if global_position.z > 50.0:
 			goal = gate + Vector3(0, 0, 4.0) if Vector2(global_position.x - gate.x, global_position.z - gate.z).length() > 6.0 else gate + Vector3(0, 0, -12.0)

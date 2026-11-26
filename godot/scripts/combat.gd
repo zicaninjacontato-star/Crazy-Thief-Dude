@@ -64,6 +64,14 @@ func _equip() -> void:
 const MAG := {"pistol": 12, "smg": 30, "shotgun": 6, "rifle": 30, "sniper": 5, "rpg": 1}
 const RELOAD := {"pistol": 1.2, "smg": 1.6, "shotgun": 2.2, "rifle": 1.8, "sniper": 2.4, "rpg": 2.6}
 var clip := {}
+## munição máxima que dá para carregar (nada de munição infinita) e recuo de cada arma
+const MAX_AMMO := {"pistol": 120, "smg": 300, "shotgun": 48, "rifle": 270, "sniper": 30, "rpg": 8, "grenade": 10}
+const RECOIL := {"pistol": 0.3, "smg": 0.38, "shotgun": 0.85, "rifle": 0.45, "sniper": 0.95, "rpg": 1.0, "grenade": 0.0}
+
+func add_ammo(w: String, n: int) -> int:
+	var before: int = ammo.get(w, 0)
+	ammo[w] = mini(MAX_AMMO.get(w, 999), before + n)
+	return ammo[w] - before
 var reload_t := 0.0
 
 func _clip(w: String) -> int:
@@ -139,6 +147,7 @@ func _process(dt: float) -> void:
 		return
 	if p.vehicle != null:
 		_vy = 0.0
+		_vehicle_weapons(dt)
 		return
 	# queda: dano ao bater no chão rápido demais
 	if p.is_on_floor():
@@ -183,6 +192,9 @@ func shoot() -> void:
 	ammo[weapon] -= 1
 	if MAG.has(weapon):
 		clip[weapon] = _clip(weapon) - 1
+	# recuo: a câmera sobe um pouco a cada tiro (mais forte nas armas pesadas)
+	if aim:
+		main.cam_pitch = minf(main.cam_pitch + RECOIL.get(weapon, 0.3) * 0.035, 1.0)
 	aim_t = 1.6
 	main.police.armed_t = 5.0
 	if d.get("throw", false):
@@ -414,6 +426,50 @@ func _fire_rocket(from: Vector3, dir: Vector3) -> void:
 	FX.fire_emitter(n, Vector3(0, 0, 0.35))
 	rockets.append({"n": n, "dir": dir, "t": 0.0})
 
+# ---------------------------------------------------------------- veículos armados (caça e helicóptero de ataque)
+var missile_held := false
+var _vg_cool := 0.0
+var _vm_cool := 0.0
+var _vm_side := 1.0
+func _vehicle_weapons(dt: float) -> void:
+	var c = main.player.vehicle
+	_vg_cool -= dt
+	_vm_cool -= dt
+	if c == null or not c.get("armed") or c.dead:
+		return
+	var b: Basis = c.global_transform.basis
+	var nose: Vector3 = c.global_position + b.z * (c.body_size.z * 0.5 + 1.2) + b.y * 1.1
+	# mira: para onde a câmera olha (o helicóptero mira o chão inclinando a câmera)
+	var dir: Vector3 = -main.cam.global_transform.basis.z
+	if c.kind == "plane":
+		dir = (b.z * 0.75 + dir * 0.25).normalized()
+	if fire_held and _vg_cool <= 0.0:
+		_vg_cool = 0.075
+		main.audio.play("shot_smg" if main.audio.sounds.has("shot_smg") else "shot", nose, 3.0)
+		var sd := (dir + Vector3(rng.randf_range(-1, 1), rng.randf_range(-1, 1), rng.randf_range(-1, 1)) * 0.018).normalized()
+		var from: Vector3 = nose + b.x * (0.7 if rng.randf() < 0.5 else -0.7)
+		var h := _ray_hit(from, sd, 320.0)
+		if h.who != null:
+			_damage(h.who, 60.0, sd, "torso")
+		elif h.car != null and h.car != c:
+			h.car.take_damage(22.0)
+			FX.sparks(main, h.pos)
+		elif h.hit:
+			FX.sparks(main, h.pos)
+		W.tracer(main, from, h.pos)
+		main.police.armed_t = 5.0
+		if main.wanted < 2:
+			main._add_wanted(1)
+	if missile_held and _vm_cool <= 0.0:
+		_vm_cool = 0.85
+		_vm_side = -_vm_side
+		_fire_rocket(nose + b.x * 1.6 * _vm_side - b.y * 0.4, dir)
+		rockets[-1]["spd"] = 70.0 + maxf(0.0, c.forward_speed())
+		rockets[-1]["ex"] = [c.get_rid()]
+		main.police.armed_t = 5.0
+		if main.wanted < 3:
+			main._add_wanted(1)
+
 func _throw_grenade(fwd: Vector3) -> void:
 	var p = main.player
 	p.body.throw_t = 0.5
@@ -445,12 +501,12 @@ func _projectiles(dt: float) -> void:
 	for r in rockets.duplicate():
 		var n: Node3D = r.n
 		r.t += dt
-		var step: Vector3 = r.dir * 48.0 * dt
+		var step: Vector3 = r.dir * r.get("spd", 48.0) * dt
 		var from := n.global_position
 		var to := from + step
 		var boom: bool = r.t > 3.0
 		var q := PhysicsRayQueryParameters3D.create(from, to, 1)
-		q.exclude = [main.player.get_rid()]
+		q.exclude = [main.player.get_rid()] + r.get("ex", [])
 		var hit := main.get_world_3d().direct_space_state.intersect_ray(q)
 		if not hit.is_empty():
 			to = hit.position

@@ -490,6 +490,15 @@ func _pose(dt: float, th: Array, sh: Array, up: Array, fo: Array) -> void:
 				fo[i].rotation.x = -0.25
 				th[i].rotation.x = -0.5 - sin(phase + i * PI) * 0.35 * _w
 				sh[i].rotation.x = 0.7
+		"exit":
+			# saindo do carro: começa agachado/encolhido e se levanta
+			var ke := 1.0 - k
+			for i in 2:
+				th[i].rotation.x = -1.2 * ke
+				sh[i].rotation.x = 1.4 * ke
+				up[i].rotation.x = -0.5 * ke
+			bones.hips.position.y = 0.98 - 0.42 * ke
+			bones.chest.rotation.x = 0.45 * ke
 		"tackle":
 			bones.hips.rotation.x = 1.0 * k
 			bones.hips.position.y = lerpf(0.98, 0.5, k)

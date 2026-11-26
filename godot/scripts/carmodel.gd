@@ -15,6 +15,12 @@ const KINDS := {
 		"top": [[-2.38, 0.75], [-2.32, 1.2], [-2.18, 1.74], [-1.6, 1.8], [0.55, 1.8], [1.25, 1.2], [2.0, 1.1], [2.38, 0.82]]},
 	"pickup": {"L": 5.2, "W": 1.95, "wb": 3.2, "wr": 0.38, "belt": 1.12,
 		"top": [[-2.6, 0.78], [-2.55, 1.1], [-0.45, 1.12], [-0.4, 1.78], [0.75, 1.8], [1.4, 1.2], [2.2, 1.1], [2.6, 0.82]]},
+	"van": {"L": 5.0, "W": 1.98, "wb": 3.05, "wr": 0.36, "belt": 1.18,
+		"top": [[-2.5, 0.82], [-2.48, 1.6], [-2.4, 2.08], [-1.4, 2.12], [1.2, 2.1], [1.7, 1.55], [2.15, 1.18], [2.5, 0.86]]},
+	"offroad": {"L": 4.3, "W": 1.98, "wb": 2.55, "wr": 0.46, "belt": 1.3,
+		"top": [[-2.15, 0.98], [-2.12, 1.4], [-2.02, 1.98], [0.4, 2.0], [0.85, 1.4], [1.75, 1.32], [2.15, 1.0]]},
+	"super": {"L": 4.55, "W": 2.02, "wb": 2.7, "wr": 0.35, "belt": 0.74,
+		"top": [[-2.28, 0.55], [-2.12, 0.86], [-1.3, 0.92], [-0.7, 1.1], [0.15, 1.13], [0.95, 0.8], [1.85, 0.6], [2.28, 0.48]]},
 	"sport": {"L": 4.45, "W": 1.95, "wb": 2.65, "wr": 0.34, "belt": 0.82,
 		"top": [[-2.23, 0.6], [-2.15, 0.86], [-1.6, 0.92], [-0.85, 1.18], [0.15, 1.22], [1.0, 0.86], [1.85, 0.74], [2.23, 0.55]]},
 }
@@ -88,7 +94,7 @@ static func build(kind: String, paint: Color) -> Dictionary:
 	var d_zb: float = b_pillar if kind != "pickup" else zc0 + 0.1
 	var d_piv := Vector3(W * 0.5, 0.0, d_zf)
 	var t_piv := Vector3(0.0, _top(top, zc0 - 0.12), zc0 - 0.12)
-	var has_trunk: bool = kind in ["sedan", "sport", "police", "taxi"] or (kind == "hatch")
+	var has_trunk: bool = kind in ["sedan", "sport", "police", "taxi", "super"] or (kind == "hatch")
 	var dst := {}
 	var tst := {}
 	for kst in [st_p, st_d, st_g, st_t]:
@@ -224,8 +230,36 @@ static func build(kind: String, paint: Color) -> Dictionary:
 	for s in [-1.0, 1.0]:
 		_box(det, Vector3(0.48, 0.12, 0.5), Vector3(0.38 * s, 0.5, (zc0 + zc1) * 0.5 + 0.15), seat_c)
 		_box(det, Vector3(0.48, 0.62, 0.12), Vector3(0.38 * s, 0.82, (zc0 + zc1) * 0.5 - 0.12), seat_c)
+	# forro interno da cabine: assoalho, laterais, teto, parede traseira e volante — pelos vidros
+	# agora se vê o interior do carro (antes as faces internas sumiam e aparecia o chão)
+	var cab_mid := (zc0 + zc1) * 0.5
+	var cab_len := zc1 - zc0 + 0.5
+	var roof_in := _top(top, cab_mid) - 0.07
+	var lining := Color(0.16, 0.15, 0.15)
+	_box(det, Vector3(W * 0.88, 0.05, cab_len + 0.4), Vector3(0, 0.36, cab_mid), Color(0.07, 0.07, 0.075))
+	for s in [-1.0, 1.0]:
+		_box(det, Vector3(0.05, belt - 0.32, cab_len), Vector3(s * (W * 0.5 - 0.11), (belt + 0.36) * 0.5, cab_mid), lining)
+	_box(det, Vector3(W * 0.7, 0.03, maxf(0.4, cab_len - 0.5)), Vector3(0, roof_in, cab_mid), Color(0.55, 0.53, 0.5))
+	_box(det, Vector3(W * 0.86, belt - 0.32, 0.05), Vector3(0, (belt + 0.36) * 0.5, zc0 - 0.1), lining)
+	_box(det, Vector3(W * 0.86, belt - 0.3, 0.05), Vector3(0, (belt + 0.36) * 0.5, zc1 + 0.12), Color(0.05, 0.05, 0.055))
+	_ell(det, Vector3(0.38, belt + 0.1, zc1 - 0.62), Vector3(0.34, 0.34, 0.05), Color(0.04, 0.04, 0.045))
 	if kind == "pickup":
 		_box(det, Vector3(W * 0.86, 0.05, 1.9), Vector3(0, 1.06, -1.5), Color(0.1, 0.1, 0.11))
+	if kind == "offroad":
+		# para-choque de impulsão, estepe atrás, rack no teto e faróis auxiliares
+		_box(det, Vector3(W * 0.9, 0.35, 0.12), Vector3(0, 0.75, L * 0.5 + 0.1), Color(0.1, 0.1, 0.11))
+		_prim(det, preload("res://scripts/vehmodel.gd")._cyl(0.42, 0.26, 16), Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, 1.25, -L * 0.5 - 0.14)), Color(0.05, 0.05, 0.05))
+		_box(det, Vector3(W * 0.8, 0.06, 1.6), Vector3(0, 2.08, -0.6), Color(0.15, 0.15, 0.16))
+		for s in [-1.0, 1.0]:
+			_box(det, Vector3(0.05, 0.12, 1.6), Vector3(s * W * 0.38, 2.12, -0.6), Color(0.15, 0.15, 0.16))
+			_ell(litf, Vector3(0.35 * s, 2.15, 0.3), Vector3(0.14, 0.1, 0.05), head_c)
+	if kind == "van":
+		for s in [-1.0, 1.0]:
+			_box(det, Vector3(0.02, 0.06, 2.4), Vector3(s * (W * 0.5 + 0.005), 1.1, -0.3), Color(0.12, 0.12, 0.13))   # trilho da porta corrediça
+	if kind == "super":
+		_box(det, Vector3(W * 0.9, 0.05, 0.4), Vector3(0, 1.0, -L * 0.5 + 0.25), Color(0.05, 0.05, 0.06))     # aerofólio
+		for s in [-1.0, 1.0]:
+			_box(det, Vector3(0.05, 0.3, 0.12), Vector3(s * W * 0.35, 0.85, -L * 0.5 + 0.3), Color(0.05, 0.05, 0.06))
 	if police:
 		_box(det, Vector3(1.2, 0.1, 0.3), Vector3(0, _top(top, 0.0) + 0.07, -0.1), Color(0.1, 0.1, 0.12))
 	if taxi:

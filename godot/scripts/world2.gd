@@ -6,11 +6,11 @@ const M := preload("res://scripts/mats.gd")
 const CM := preload("res://scripts/carmodel.gd")
 const Humanoid := preload("res://scripts/humanoid.gd")
 
-const SHORE_X := 236.0        # a partir daqui é mar
+const SHORE_X := 300.0        # a partir daqui é mar
 const WATER_Y := 0.9
 const SEA_FLOOR := -12.0      # mar fundo (dá para mergulhar)
-const BEACH_X0 := 172.0
-const AIR_X := -330.0         # centro da pista
+const BEACH_X0 := 236.0
+const AIR_X := -394.0         # centro da pista
 
 var main: Node3D
 var body: StaticBody3D
@@ -24,6 +24,7 @@ var beach_loop: Array = []
 var tank_spots: Array = []    # base do exército: [pos, yaw]
 var jet_spots: Array = []
 var base_gate := Vector3.ZERO
+var base_heli := Vector3.ZERO
 var _wt := 0.0
 
 func build(m: Node3D) -> void:
@@ -34,9 +35,6 @@ func build(m: Node3D) -> void:
 	_beach()
 	_airfield()
 	_army_base()
-	var types := ["guns", "clothes", "cars"]
-	for i in types.size():
-		_interior(types[i], Vector3(4000 + i * 80, 0, 0))
 	for z in _batch:
 		_flush(z)
 
@@ -46,18 +44,20 @@ func _process(dt: float) -> void:
 		var wm: StandardMaterial3D = water.material_override
 		wm.uv1_offset = Vector3(_wt * 0.004, _wt * 0.0025, 0)
 
-const ISL_X0 := -180.0       # ilha: cidade + praia (x de ISL_X0 até SHORE_X, z de ISL_Z0 até ISL_Z1)
-const ISL_Z0 := -200.0
-const ISL_Z1 := 200.0
-const PEN_X0 := -520.0       # península estreita a oeste só com o aeroporto (z de −PEN_Z a PEN_Z)
+const ISL_X0 := -244.0       # ilha: cidade + distritos norte/sul + praia (x de ISL_X0 até SHORE_X, z de ISL_Z0 até ISL_Z1)
+const ISL_Z0 := -440.0
+const ISL_Z1 := 440.0
+const PEN_X0 := -584.0       # península estreita a oeste só com o aeroporto (z de −PEN_Z a PEN_Z)
 const PEN_Z := 50.0
 var fish_spots: Array = []   # [pos do pescador, yaw]
 
-const BASE := Rect2(-520.0, 50.0, 150.0, 110.0)   # base do exército: canto isolado ao norte da ponta da península
+const BASE := Rect2(-584.0, 50.0, 150.0, 110.0)   # base do exército: canto isolado ao norte da ponta da península
+const ISLAND := Rect2(110.0, -660.0, 200.0, 170.0) # ilha ao sul, ligada por ponte
+const RIM_W := 7.0                                  # o mar começa logo depois do costão rochoso
 
 ## retângulos de terra (o resto é mar)
 static func land_rects() -> Array:
-	return [Rect2(ISL_X0, ISL_Z0, SHORE_X - ISL_X0, ISL_Z1 - ISL_Z0), Rect2(PEN_X0, -PEN_Z, ISL_X0 - PEN_X0 + 2.0, PEN_Z * 2.0), BASE]
+	return [Rect2(ISL_X0, ISL_Z0, SHORE_X - ISL_X0, ISL_Z1 - ISL_Z0), Rect2(PEN_X0, -PEN_Z, ISL_X0 - PEN_X0 + 2.0, PEN_Z * 2.0), BASE, ISLAND]
 
 static func _on_land(p: Vector2) -> bool:
 	for r in land_rects():
@@ -109,9 +109,9 @@ func sea_dist(x: float, z: float) -> float:
 	# leste: a água começa na linha da praia; nos outros lados, 24 m depois da borda (costão)
 	var best := 1e9
 	for r in land_rects():
-		var x1: float = SHORE_X if r.end.x >= SHORE_X else r.end.x + 24.0
-		var dx := maxf(x - x1, r.position.x - 24.0 - x)
-		var dz := maxf(z - (r.end.y + 24.0), (r.position.y - 24.0) - z)
+		var x1: float = SHORE_X if r.end.x >= SHORE_X else r.end.x + RIM_W
+		var dx := maxf(x - x1, r.position.x - RIM_W - x)
+		var dz := maxf(z - (r.end.y + RIM_W), (r.position.y - RIM_W) - z)
 		var d := Vector2(dx, dz).length() if dx > 0.0 and dz > 0.0 else maxf(dx, dz)
 		best = minf(best, d)
 	return best
@@ -135,7 +135,7 @@ func floor_y(x: float) -> float:
 	return SEA_FLOOR
 
 # ---------------------------------------------------------------- utilidades (fundem caixas por zona/material)
-func _box(zone: String, size: Vector3, pos: Vector3, mat: Material, collide := true, rot_y := 0.0) -> void:
+func _box(zone: String, size: Vector3, pos: Vector3, mat: Material, collide := true, rot_y := 0.0, tilt := Vector3.ZERO) -> void:
 	if not _batch.has(zone):
 		_batch[zone] = {}
 	var zb: Dictionary = _batch[zone]
@@ -145,7 +145,7 @@ func _box(zone: String, size: Vector3, pos: Vector3, mat: Material, collide := t
 		zb[mat] = st
 	var bm := BoxMesh.new()
 	bm.size = size
-	var xf := Transform3D(Basis(Vector3.UP, rot_y), pos)
+	var xf := Transform3D(Basis(Vector3.UP, rot_y) * Basis.from_euler(tilt), pos)
 	var arr: Array = bm.get_mesh_arrays()
 	var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
 	var ns: PackedVector3Array = arr[Mesh.ARRAY_NORMAL]
@@ -215,8 +215,8 @@ static func marker(parent: Node, pos: Vector3, col: Color, r := 1.2) -> MeshInst
 func _beach() -> void:
 	# ilha: praia larga a leste e faixas de areia com rampa até o leito nos outros 3 lados
 	var east := [[BEACH_X0, 0.0], [BEACH_X0 + 22.0, 1.1], [SHORE_X - 6.0, 1.1], [SHORE_X + 8.0, 0.0], [SHORE_X + 70.0, SEA_FLOOR], [SHORE_X + 110.0, SEA_FLOOR]]
-	# costão de pedra nos outros 3 lados (sem praia): rampa de rocha que cai para o fundo
-	var rim := [[0.0, 0.0], [8.0, 0.5], [16.0, 0.9], [22.0, 0.6], [25.0, -0.8], [60.0, SEA_FLOOR], [120.0, SEA_FLOOR]]
+	# costão rochoso nos outros lados: paredão de rocha que cai direto no mar (sem pedrinhas no chão)
+	var rim := [[0.0, 0.0], [1.0, 0.2], [4.0, -4.0], [9.0, SEA_FLOOR], [60.0, SEA_FLOOR]]
 	_strip("x", 1.0, 0.0, east, ISL_Z0 - 120.0, ISL_Z1 + 120.0)
 	for re in rim_edges():
 		var pa: Vector3 = re[0]
@@ -224,73 +224,46 @@ func _beach() -> void:
 		var n: Vector3 = re[2]
 		var rk := M.rock(Color(0.32, 0.3, 0.27))
 		if n.x != 0.0:
-			_strip("x", n.x, pa.x, rim, minf(pa.z, pb.z) - (120.0 if re[3] else 0.0), maxf(pa.z, pb.z) + (120.0 if re[4] else 0.0), rk)
+			_strip("x", n.x, pa.x, rim, minf(pa.z, pb.z) - (60.0 if re[3] else 0.0), maxf(pa.z, pb.z) + (60.0 if re[4] else 0.0), rk)
 		else:
-			_strip("z", n.z, pa.z, rim, minf(pa.x, pb.x) - (120.0 if re[3] else 0.0), maxf(pa.x, pb.x) + (120.0 if re[4] else 0.0), rk)
+			_strip("z", n.z, pa.z, rim, minf(pa.x, pb.x) - (60.0 if re[3] else 0.0), maxf(pa.x, pb.x) + (60.0 if re[4] else 0.0), rk)
 	_rocks()
-	# leito do mar em volta de tudo (−12 m) e chão das salas das lojas
+	# leito do mar em volta de tudo (−12 m)
 	var fl := CollisionShape3D.new()
 	var fb := BoxShape3D.new()
-	fb.size = Vector3(6000.0, 4.0, 7000.0)
+	fb.size = Vector3(7000.0, 4.0, 7000.0)
 	fl.shape = fb
 	fl.position = Vector3(0, SEA_FLOOR - 2.0, 0)
 	body.add_child(fl)
-	var fl2 := CollisionShape3D.new()
-	var fb2 := BoxShape3D.new()
-	fb2.size = Vector3(600.0, 20.0, 600.0)
-	fl2.shape = fb2
-	fl2.position = Vector3(4100.0, -10.0, 0)
-	body.add_child(fl2)
 	var bed := MeshInstance3D.new()
 	var bpm := PlaneMesh.new()
-	bpm.size = Vector2(6000.0, 7000.0)
+	bpm.size = Vector2(7000.0, 7000.0)
 	bed.mesh = bpm
 	bed.material_override = M.sand()
 	bed.position = Vector3(0, SEA_FLOOR, 0)
 	add_child(bed)
-	# mar em volta (planos que não cobrem a terra: faixas acima/abaixo e dos lados da península)
-	var wm := M.water()
-	var o := 25.0
-	var rs := [
-		Rect2(SHORE_X - 4.0, -3500.0, 3000.0 - SHORE_X + 4.0, 7000.0),                       # leste
-		Rect2(-3000.0, -3500.0, 3000.0 + SHORE_X - 4.0, 3500.0 + ISL_Z0 - o),                 # sul
-		Rect2(-3000.0, ISL_Z1 + o, 3000.0 + SHORE_X - 4.0, 3500.0 - ISL_Z1 - o),              # norte
-		Rect2(-3000.0, ISL_Z0 - o, 3000.0 + PEN_X0 - o, ISL_Z1 - ISL_Z0 + 2.0 * o),           # oeste da península
-		Rect2(BASE.end.x + o, PEN_Z + o, ISL_X0 - BASE.end.x - 2.0 * o, ISL_Z1 - PEN_Z),       # ao norte da península (entre a base e a ilha)
-		Rect2(PEN_X0 - o, BASE.end.y + o, BASE.end.x - PEN_X0 + 2.0 * o, ISL_Z1 - BASE.end.y),  # ao norte da base
-		Rect2(PEN_X0 - o, ISL_Z0 - o, ISL_X0 - PEN_X0, ISL_Z1 - PEN_Z)]                       # ao sul da península
-	for r in rs:
-		var wmi := MeshInstance3D.new()
-		var pm := PlaneMesh.new()
-		pm.size = r.size
-		wmi.mesh = pm
-		wmi.material_override = wm
-		wmi.position = Vector3(r.get_center().x, WATER_Y, r.get_center().y)
-		wmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		add_child(wmi)
-		if water == null:
-			water = wmi
+	_water_mesh()
 	# guarda-sóis, toalhas, posto de salva-vidas, coqueiros
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 77
 	var cols := [Color(0.9, 0.2, 0.15), Color(0.15, 0.45, 0.85), Color(0.95, 0.8, 0.1), Color(0.2, 0.7, 0.4)]
-	for k in 22:
+	for k in 40:
 		var x := rng.randf_range(BEACH_X0 + 26.0, SHORE_X - 9.0)
-		var z := rng.randf_range(-170.0, 170.0)
+		var z := rng.randf_range(-400.0, 400.0)
 		var c: Color = cols[k % cols.size()]
 		_box("beach", Vector3(0.06, 2.4, 0.06), Vector3(x, 2.3, z), M.plain(Color(0.9, 0.9, 0.9), 0.5), false)
 		_box("beach", Vector3(2.6, 0.12, 2.6), Vector3(x, 3.45, z), M.plain(c, 0.6), false, rng.randf() * PI)
 		_box("beach", Vector3(1.8, 0.03, 0.9), Vector3(x + 1.2, 1.13, z + 0.6), M.plain(cols[(k + 1) % cols.size()], 0.8), false, rng.randf() * PI)
-	for k in 30:
+	for k in 50:
 		var x := rng.randf_range(BEACH_X0 + 6.0, BEACH_X0 + 24.0)
-		var z := rng.randf_range(-185.0, 185.0)
+		var z := rng.randf_range(-420.0, 420.0)
 		var y := clampf((x - BEACH_X0) / 22.0, 0.0, 1.0) * 1.1
 		var h := rng.randf_range(6.0, 8.5)
 		for q in 6:
 			_box("beach", Vector3(0.32 - q * 0.02, h / 6.0, 0.32 - q * 0.02), Vector3(x + q * 0.12, y + h / 6.0 * (q + 0.5), z), M.bark(), q == 0)
 		for a in 6:
 			_box("beach", Vector3(3.6, 0.08, 0.7), Vector3(x + 0.7 + cos(a * 1.05) * 1.6, y + h + 0.1, z + sin(a * 1.05) * 1.6), M.leaves(), false, -a * 1.05)
-	for z in [-150.0, 60.0, 260.0]:
+	for z in [-330.0, -150.0, 60.0, 260.0, 380.0]:
 		var x := SHORE_X - 14.0
 		for sx in [-1.0, 1.0]:
 			for sz in [-1.0, 1.0]:
@@ -306,7 +279,7 @@ func _beach() -> void:
 			_box("beach", Vector3(0.3, 3.0, 0.3), Vector3(x, 0.3, pz + 1.8 * s), M.wood(), false)
 	_box("beach", Vector3(4.0, 0.25, 16.0), Vector3(SHORE_X + 61.0, 1.6, pz + 8.0), M.wood(), true)
 	boat_spots = [[Vector3(SHORE_X + 52.0, 0.4, pz + 6.5), PI * 0.5], [Vector3(SHORE_X + 52.0, 0.4, pz - 5.0), PI * 0.5], [Vector3(SHORE_X + 70.0, 0.4, pz + 12.0), 0.0]]
-	beach_loop = [Vector3(BEACH_X0 + 30.0, 1.1, -170.0), Vector3(SHORE_X - 8.0, 1.1, -170.0), Vector3(SHORE_X - 8.0, 1.1, 170.0), Vector3(BEACH_X0 + 30.0, 1.1, 170.0)]
+	beach_loop = [Vector3(BEACH_X0 + 30.0, 1.1, -380.0), Vector3(SHORE_X - 8.0, 1.1, -380.0), Vector3(SHORE_X - 8.0, 1.1, 380.0), Vector3(BEACH_X0 + 30.0, 1.1, 380.0)]
 
 # ---------------------------------------------------------------- aeroporto
 func _airfield() -> void:
@@ -317,9 +290,9 @@ func _airfield() -> void:
 	for s in [-1.0, 1.0]:
 		_box("air", Vector3(340.0, 0.02, 0.35), Vector3(AIR_X, 0.07, 11.0 * s), M.plain(Color(0.92, 0.92, 0.9), 0.6), false)
 	# pátio de concreto entre a pista e o hangar
-	_box("air", Vector3(60.0, 0.05, 20.0), Vector3(-300.0, 0.025, -22.0), M.concrete(Color(0.5, 0.5, 0.5)), false)
+	_box("air", Vector3(60.0, 0.05, 20.0), Vector3(-364.0, 0.025, -22.0), M.concrete(Color(0.5, 0.5, 0.5)), false)
 	# hangar (ao sul da pista, porta virada para ela)
-	var hx := -300.0
+	var hx := -364.0
 	var hz := -30.0
 	_box("air", Vector3(40.0, 12.0, 0.6), Vector3(hx, 6.0, hz - 14.0), M.concrete(Color(0.55, 0.57, 0.6)), true)
 	for s in [-1.0, 1.0]:
@@ -328,21 +301,21 @@ func _airfield() -> void:
 	_box("air", Vector3(40.0, 0.06, 28.0), Vector3(hx, 0.03, hz), M.concrete(Color(0.5, 0.5, 0.5)), false)
 	_label("HANGAR", Vector3(hx, 10.5, hz + 14.4), 160, Color(1, 0.85, 0.2), 0.0)
 	# torre de controle
-	var tx := -215.0
+	var tx := -279.0
 	var tz := 32.0
 	_box("air", Vector3(5.0, 18.0, 5.0), Vector3(tx, 9.0, tz), M.concrete(Color(0.82, 0.82, 0.8)), true)
 	_box("air", Vector3(8.0, 3.5, 8.0), Vector3(tx, 19.8, tz), M.plain(Color(0.15, 0.25, 0.3), 0.05, 0.8), true)
 	_box("air", Vector3(8.6, 0.5, 8.6), Vector3(tx, 21.8, tz), M.concrete(Color(0.82, 0.82, 0.8)), false)
 	# heliponto
-	var px := -420.0
+	var px := -484.0
 	var pz := 2.0
 	_box("air", Vector3(18.0, 0.12, 18.0), Vector3(px, 0.06, pz + 30.0), M.concrete(Color(0.35, 0.36, 0.38)), false)
 	_box("air", Vector3(1.2, 0.03, 8.0), Vector3(px - 2.5, 0.13, pz + 30.0), M.plain(Color(0.95, 0.85, 0.1), 0.6), false)
 	_box("air", Vector3(1.2, 0.03, 8.0), Vector3(px + 2.5, 0.13, pz + 30.0), M.plain(Color(0.95, 0.85, 0.1), 0.6), false)
 	_box("air", Vector3(4.0, 0.03, 1.2), Vector3(px, 0.13, pz + 30.0), M.plain(Color(0.95, 0.85, 0.1), 0.6), false)
-	plane_spots = [[Vector3(-195.0, 0.0, 0.0), -PI * 0.5], [Vector3(hx, 0.0, hz), 0.0]]
+	plane_spots = [[Vector3(-259.0, 0.0, 0.0), -PI * 0.5], [Vector3(hx, 0.0, hz), 0.0]]
 	heli_spots = [[Vector3(px, 0.15, pz + 30.0), -PI * 0.5]]
-	_label("AEROPORTO", Vector3(-185.0, 6.0, 20.0), 200, Color(0.9, 0.95, 1.0), PI * 0.5, 0.012)
+	_label("AEROPORTO", Vector3(-249.0, 6.0, 20.0), 200, Color(0.9, 0.95, 1.0), PI * 0.5, 0.012)
 
 # ---------------------------------------------------------------- interiores das lojas
 func _interior(type: String, o: Vector3) -> void:
@@ -457,42 +430,61 @@ func _strip(axis: String, sgn: float, edge: float, prof: Array, a0: float, a1: f
 func _rocks() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 515
-	var rk := M.rock(Color(0.5, 0.48, 0.44))
-	var rk2 := M.rock(Color(0.42, 0.38, 0.33))
-	# pedras ao longo das bordas de costão
-	var edges := []
+	var rk := M.rock(Color(0.34, 0.32, 0.29))
+	var rk2 := M.rock(Color(0.27, 0.25, 0.23))
+	var rk3 := M.rock(Color(0.4, 0.37, 0.32))
+	# pontos de pesca (o paredão de rocha abre espaço para o deque)
+	var spots := fish_defs()
+	# costões rochosos: blocos altos de rocha encostados na borda, do fundo do mar até 1–4 m acima do chão
 	for re in rim_edges():
 		var a0: Vector3 = re[0]
 		var a1: Vector3 = re[1]
+		var n: Vector3 = re[2]
 		var L := a0.distance_to(a1)
-		var t := 0.0
-		while t < L:
-			edges.append([a0.lerp(a1, t / L), re[2]])
-			t += rng.randf_range(5.0, 9.0)
-	for e in edges:
-		var out: Vector3 = e[1]
-		var k := rng.randi_range(1, 3)
-		for q in k:
-			var d := rng.randf_range(6.0, 26.0)
-			var sz := Vector3(rng.randf_range(1.5, 4.5), rng.randf_range(1.0, 3.2), rng.randf_range(1.5, 4.5)) * (1.0 + d / 40.0)
-			var side := Vector3(out.z, 0, -out.x) * rng.randf_range(-3.0, 3.0)
-			var pos: Vector3 = e[0] + out * d + side
-			var gy := 0.6 if d < 22.0 else -1.0
-			pos.y = gy + sz.y * 0.3
-			_box("rocks", sz, pos, rk if rng.randf() < 0.6 else rk2, d < 20.0 and sz.y > 1.6, rng.randf() * PI)
+		var t := (a1 - a0) / maxf(L, 0.01)
+		var s2 := 0.0
+		while s2 < L:
+			var along := rng.randf_range(4.0, 7.5)
+			var p: Vector3 = a0 + t * minf(s2 + along * 0.5, L)
+			var skip := absf(p.x - 210.0) < 9.0 and (absf(p.z - ISL_Z0) < 4.0 or absf(p.z - ISLAND.end.y) < 4.0)   # ponte
+			for sp in spots:
+				if (sp[0] as Vector3).distance_to(p) < 5.5:
+					skip = true
+			if not skip:
+				var top := rng.randf_range(0.8, 4.2)
+				var outw := rng.randf_range(4.0, 7.0)
+				var hgt := top - SEA_FLOOR
+				var sz := Vector3(along, hgt, outw) if absf(n.z) > 0.5 else Vector3(outw, hgt, along)
+				var pos := p + n * (outw * 0.5 - 0.3)
+				pos.y = SEA_FLOOR + hgt * 0.5
+				var tl := Vector3(rng.randf_range(-0.22, 0.22), 0, rng.randf_range(-0.22, 0.22))
+				_box("rocks", sz, pos, [rk, rk2, rk3][rng.randi() % 3], true, rng.randf_range(-0.35, 0.35), tl)
+				# topo quebrado: blocos menores e inclinados por cima do paredão
+				var cap := Vector3(rng.randf_range(2.0, 3.6), rng.randf_range(1.0, 2.2), rng.randf_range(2.0, 3.6))
+				_box("rocks", cap, p + n * rng.randf_range(0.5, outw - 1.0) + t * rng.randf_range(-1.5, 1.5) + Vector3(0, top + cap.y * 0.25, 0), rk2, false, rng.randf() * PI, Vector3(rng.randf_range(-0.5, 0.5), 0, rng.randf_range(-0.5, 0.5)))
+				# lascas mais baixas na frente (o paredão fica irregular)
+				if rng.randf() < 0.6:
+					var sz2 := sz * Vector3(0.6, 1.0, 0.6)
+					var top2 := rng.randf_range(-1.5, 1.2)
+					sz2.y = top2 - SEA_FLOOR
+					var pos2 := p + n * (outw + 1.2) + t * rng.randf_range(-1.5, 1.5)
+					pos2.y = SEA_FLOOR + sz2.y * 0.5
+					_box("rocks", sz2, pos2, rk2, true, rng.randf() * PI, Vector3(rng.randf_range(-0.3, 0.3), 0, rng.randf_range(-0.3, 0.3)))
+			s2 += along * 0.85
 	# pontos de pesca: deque de madeira saindo do costão, banco, balde e pescador com vara
-	var spots := [[Vector3(-90.0, 0, ISL_Z1), Vector3(0, 0, 1)], [Vector3(70.0, 0, ISL_Z1), Vector3(0, 0, 1)],
-			[Vector3(-60.0, 0, ISL_Z0), Vector3(0, 0, -1)], [Vector3(110.0, 0, ISL_Z0), Vector3(0, 0, -1)], [Vector3(ISL_X0, 0, 130.0), Vector3(-1, 0, 0)],
-			[Vector3(-300.0, 0, PEN_Z), Vector3(0, 0, 1)], [Vector3(-260.0, 0, -PEN_Z), Vector3(0, 0, -1)]]
 	for sp in spots:
 		var o: Vector3 = sp[0]
 		var out: Vector3 = sp[1]
 		var yaw := atan2(out.x, out.z)
-		var len_ := 30.0
-		var mid := o + out * (len_ * 0.5 + 6.0)
+		var len_ := 34.0
+		var mid := o + out * (len_ * 0.5 - 2.0)
 		var dims := Vector3(3.0, 0.25, len_) if absf(out.z) > 0.5 else Vector3(len_, 0.25, 3.0)
 		_box("rocks", dims, mid + Vector3(0, 1.6, 0), M.wood(), true)
-		var tip := o + out * (len_ + 5.0)
+		# degraus do chão até o deque
+		for st2 in 3:
+			var sd := Vector3(3.0, 0.5, 1.0) if absf(out.z) > 0.5 else Vector3(1.0, 0.5, 3.0)
+			_box("rocks", sd, o - out * (2.5 + st2 * 1.0) + Vector3(0, 1.25 - st2 * 0.45, 0), M.wood(), true)
+		var tip := o + out * (len_ - 3.0)
 		for t in range(0, int(len_), 5):
 			for s2 in [-1.0, 1.0]:
 				var side: Vector3 = Vector3(out.z, 0, -out.x) * 1.4 * s2
@@ -500,8 +492,8 @@ func _rocks() -> void:
 		_box("rocks", Vector3(1.6, 0.5, 0.5), tip - out * 1.5 + Vector3(0, 2.0, 0), M.wood(), false, yaw + PI * 0.5)
 		_box("rocks", Vector3(0.4, 0.45, 0.4), tip - out * 1.0 + Vector3(0.9, 1.95, 0), M.plain(Color(0.2, 0.45, 0.8), 0.5), false)
 		fish_spots.append([tip - out * 1.2 + Vector3(0, 1.75, 0), yaw])
-	# farol no canto noroeste
-	var lh := Vector3(PEN_X0 + 6.0, 0.0, -PEN_Z + 8.0)
+	# farol na ponta sul da ilha
+	var lh := Vector3(ISLAND.end.x - 14.0, 0.0, ISLAND.position.y + 14.0)
 	for i in 6:
 		var w := 4.2 - i * 0.35
 		_box("rocks", Vector3(w, 3.0, w), lh + Vector3(0, 1.5 + i * 3.0, 0), M.plain(Color(0.92, 0.92, 0.9) if i % 2 == 0 else Color(0.8, 0.12, 0.1), 0.6), true)
@@ -569,6 +561,7 @@ func _army_base() -> void:
 		_box("base", Vector3(3.6, 0.2, 3.6), c + Vector3(0, 9.3, 0), olive, false)
 	# heliponto e mastro
 	var hp := Vector3(x0 + 18.0, 0.07, z0 + 16.0)
+	base_heli = hp
 	_box("base", Vector3(16.0, 0.08, 16.0), hp, M.concrete(Color(0.3, 0.31, 0.3)), false)
 	_box("base", Vector3(1.2, 0.03, 7.0), hp + Vector3(-2.3, 0.06, 0), M.plain(Color(0.95, 0.95, 0.9), 0.6), false)
 	_box("base", Vector3(1.2, 0.03, 7.0), hp + Vector3(2.3, 0.06, 0), M.plain(Color(0.95, 0.95, 0.9), 0.6), false)
@@ -581,3 +574,60 @@ func _army_base() -> void:
 	for k in 6:
 		_box("base", Vector3(2.0, 0.9, 1.0), Vector3(x0 + 6.0 + k * 2.2, 0.45, z0 + 4.0), M.plain(Color(0.6, 0.55, 0.4), 0.9), true)
 	_label("BASE MILITAR · ACESSO RESTRITO", Vector3(gate_x, 4.4, z0 - 0.4), 140, Color(1.0, 0.3, 0.2), PI, 0.012)
+
+static func fish_defs() -> Array:
+	return [[Vector3(-90.0, 0, ISL_Z1), Vector3(0, 0, 1)], [Vector3(120.0, 0, ISL_Z1), Vector3(0, 0, 1)],
+			[Vector3(-120.0, 0, ISL_Z0), Vector3(0, 0, -1)], [Vector3(40.0, 0, ISL_Z0), Vector3(0, 0, -1)], [Vector3(ISL_X0, 0, 200.0), Vector3(-1, 0, 0)],
+			[Vector3(-364.0, 0, PEN_Z), Vector3(0, 0, 1)], [Vector3(-324.0, 0, -PEN_Z), Vector3(0, 0, -1)], [Vector3(ISLAND.position.x, 0, -600.0), Vector3(-1, 0, 0)]]
+
+## mar: uma malha só (1 draw call) cobrindo tudo menos a terra (+ faixa do costão), em faixas de z
+func _water_mesh() -> void:
+	var holes := []
+	for r in land_rects():
+		var x0: float = r.position.x - RIM_W + 1.0
+		var x1: float = SHORE_X - 4.0 if r.end.x >= SHORE_X else r.end.x + RIM_W - 1.0
+		holes.append(Rect2(x0, r.position.y - RIM_W + 1.0, x1 - x0, r.size.y + 2.0 * RIM_W - 2.0))
+	var X0 := -3200.0
+	var X1 := 3200.0
+	var zs := [-3200.0, 3200.0]
+	for h in holes:
+		zs.append(h.position.y)
+		zs.append(h.end.y)
+	zs.sort()
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	st.set_normal(Vector3.UP)
+	for i in zs.size() - 1:
+		var za: float = zs[i]
+		var zb: float = zs[i + 1]
+		if zb - za < 0.01:
+			continue
+		var zm := (za + zb) * 0.5
+		var ivs := [[X0, X1]]
+		for h in holes:
+			if zm < h.position.y or zm > h.end.y:
+				continue
+			var nv := []
+			for iv in ivs:
+				if h.end.x <= iv[0] or h.position.x >= iv[1]:
+					nv.append(iv)
+				else:
+					if h.position.x > iv[0]:
+						nv.append([iv[0], h.position.x])
+					if h.end.x < iv[1]:
+						nv.append([h.end.x, iv[1]])
+			ivs = nv
+		for iv in ivs:
+			var q := [Vector3(iv[0], WATER_Y, za), Vector3(iv[1], WATER_Y, za), Vector3(iv[1], WATER_Y, zb), Vector3(iv[0], WATER_Y, zb)]
+			for k in [0, 2, 1, 0, 3, 2]:
+				st.set_uv(Vector2(q[k].x, q[k].z) / 50.0)
+				st.add_vertex(q[k])
+	var wmi := MeshInstance3D.new()
+	wmi.mesh = st.commit()
+	var wm: StandardMaterial3D = M.water().duplicate()
+	wm.uv1_scale = Vector3(1, 1, 1)
+	wm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	wmi.material_override = wm
+	wmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(wmi)
+	water = wmi

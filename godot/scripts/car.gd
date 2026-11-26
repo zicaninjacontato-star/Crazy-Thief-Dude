@@ -57,13 +57,22 @@ var door_open := 0.0
 var parked := false
 var broken_wheels: Array = []
 var lights_broken := false
-const VMAX := {"hatch": 150.0, "sedan": 165.0, "suv": 155.0, "pickup": 150.0, "sport": 230.0, "police": 190.0, "taxi": 160.0, "moto": 175.0, "bus": 90.0}
+const VMAX := {"hatch": 150.0, "sedan": 165.0, "suv": 155.0, "pickup": 150.0, "sport": 230.0, "police": 190.0, "taxi": 160.0, "moto": 175.0, "bus": 90.0,
+	"van": 140.0, "bike": 38.0, "sportbike": 215.0, "offroad": 150.0, "super": 265.0, "truck": 105.0}
 
 ## kind: sedan, hatch, suv, pickup, sport ou police (modelo gerado por carmodel.gd).
+var mods := {}             # oficina tuning (tuning.gd)
+var eng_mult := 1.0
+var vmax_mult := 1.0
+var dmg_mult := 1.0
+var variant := ""          # modelo real (bike/sportbike usam o comportamento de "moto")
 func setup(kind: String, paint: Color) -> void:
 	police = kind == "police"
+	variant = kind
+	if kind in ["bike", "sportbike"]:
+		kind = "moto"
 	self.kind = kind
-	var built: Dictionary = VehModel.build(kind, paint) if kind in ["moto", "bus"] else CarModel.build(kind, paint)
+	var built: Dictionary = VehModel.build(variant, paint) if variant in ["moto", "bus", "truck", "bike", "sportbike"] else CarModel.build(kind, paint)
 	var size: Vector3 = built.size
 	mass = 1350.0 if size.z < 4.8 else 1700.0
 	spin = built.get("spin", [])
@@ -75,6 +84,21 @@ func setup(kind: String, paint: Color) -> void:
 		max_engine = 1350.0
 		max_brake = 14.0
 		max_steer = 0.42
+		if variant == "bike":
+			mass = 95.0
+			max_engine = 260.0
+			max_brake = 6.0
+		elif variant == "sportbike":
+			max_engine = 1900.0
+	elif kind == "truck":
+		mass = 7200.0
+		max_engine = 17000.0
+		max_brake = 280.0
+		max_steer = 0.48
+	elif kind == "super":
+		max_engine *= 1.45
+	elif kind == "offroad":
+		max_engine *= 1.15
 	elif kind == "bus":
 		mass = 9000.0
 		max_engine = 26000.0
@@ -141,7 +165,7 @@ func setup(kind: String, paint: Color) -> void:
 				n.visibility_range_end = 110.0
 
 ## peças pequenas não projetam sombra e somem de longe (vidro, faróis, detalhes); a carroceria fica
-static func optimize_visuals(root: Node) -> void:
+static func optimize_visuals(root: Node, far := 150.0) -> void:
 	for mi in root.find_children("*", "MeshInstance3D", true, false):
 		if mi.visibility_range_end > 0.0:
 			continue          # motorista/ocupante (já tem distância própria)
@@ -153,6 +177,9 @@ static func optimize_visuals(root: Node) -> void:
 			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		if longest < 1.2:
 			mi.visibility_range_end = 90.0
+		elif far > 0.0:
+			mi.visibility_range_end = far       # carroceria some longe (mapa grande = muitos carros)
+			mi.visibility_range_end_margin = 10.0
 
 func make_police() -> void:
 	police = true
@@ -234,6 +261,7 @@ func take_damage(d: float) -> void:
 	freeze = false
 	if dead or d <= 0.0:
 		return
+	d *= dmg_mult
 	hp -= d
 	if hp < 35.0 and _smoke == null:
 		_smoke = FX.smoke_emitter(model_root, Vector3(0, body_size.y * 0.6, body_size.z * 0.38))
@@ -489,7 +517,8 @@ func _physics_process(dt: float) -> void:
 			eng = throttle * max_engine * 0.45
 	brk = maxf(brk, brake_in * max_brake)
 	# limite de velocidade por modelo (e ré até 30 km/h)
-	var vmax: float = VMAX.get(kind, 160.0) / 3.6
+	var vmax: float = VMAX.get(variant, VMAX.get(kind, 160.0)) / 3.6 * vmax_mult
+	eng *= eng_mult
 	if fs > vmax and eng > 0.0:
 		eng = 0.0
 		brk = maxf(brk, max_brake * 0.05)

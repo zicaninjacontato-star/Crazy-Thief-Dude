@@ -5,7 +5,7 @@ extends Node3D
 const M := preload("res://scripts/mats.gd")
 
 const W2 := preload("res://scripts/world2.gd")
-const N := 5            # quadras por lado
+const N := 7            # quadras por lado
 const CELL := 64.0      # distância entre centros de quadras
 const ROADW := 14.0     # largura do asfalto entre quadras
 const SIDE := 4.0       # largura da calçada
@@ -34,6 +34,7 @@ func _ready() -> void:
 	_props()
 	_landmarks()
 	_bus_line()
+	_districts()
 	_flush()
 	for sc in _store_cars:
 		var b: Dictionary = preload("res://scripts/carmodel.gd").build(sc[2], sc[3])
@@ -172,6 +173,17 @@ func _block(cx: float, cz: float) -> void:
 	if Vector2i(bi, bj) == SAFE_BLOCK:
 		_safehouse(cx, cz, inner, downtown)
 		return
+	# fileira norte: rua só de casas · fileira sul: galpões e obras
+	if bj == N - 1 and STORE_BLOCKS.get(Vector2i(bi, bj), "") == "":
+		_houses_block(cx, cz, inner)
+		return
+	if bj == 0 and STORE_BLOCKS.get(Vector2i(bi, bj), "") == "":
+		if bi == 1 or bi == 5:
+			_construction(cx, cz, inner)
+		else:
+			_warehouses(cx, cz, inner)
+		return
+	_avenue = bj == 3 or bj == 4      # avenida central: térreo cheio de lojas
 	var stype: String = STORE_BLOCKS.get(Vector2i(bi, bj), "")
 	if stype != "":
 		var hh := inner * 0.5
@@ -197,6 +209,7 @@ func _block(cx: float, cz: float) -> void:
 	for lot in lots:
 		_building(lot, downtown)
 
+var _avenue := false
 func _building(lot: Rect2, downtown: float) -> void:
 	var gap := 1.2
 	var w := lot.size.x - gap * 2.0
@@ -215,6 +228,24 @@ func _building(lot: Rect2, downtown: float) -> void:
 	# marquise sobre o térreo
 	var awn := M.plain(Color.from_hsv(rng.randf(), 0.55, 0.55), 0.6)
 	_box(Vector3(w + 1.6, 0.25, d + 1.6), Vector3(c.x, ground_h + 0.25, c.y), awn, false)
+	if _avenue:
+		# avenida: letreiros luminosos coloridos das lojas do térreo nos 4 lados
+		for sd in 4:
+			for k in 2:
+				var col := Color.from_hsv(rng.randf(), 0.75, 1.0)
+				var off := (k - 0.5) * 0.45
+				var pos := Vector3(c.x, ground_h - 0.5, c.y)
+				var sz := Vector3(w * 0.35, 0.6, 0.12)
+				match sd:
+					0: pos += Vector3(off * w, 0, -d * 0.5 - 0.1)
+					1: pos += Vector3(off * w, 0, d * 0.5 + 0.1)
+					2:
+						pos += Vector3(-w * 0.5 - 0.1, 0, off * d)
+						sz = Vector3(0.12, 0.6, d * 0.35)
+					3:
+						pos += Vector3(w * 0.5 + 0.1, 0, off * d)
+						sz = Vector3(0.12, 0.6, d * 0.35)
+				_box(sz, pos, M.emissive(col, 1.4), false)
 	# platibanda e laje de cobertura
 	var top := hgt + 0.15
 	var roof := M.concrete(Color(0.42, 0.41, 0.4))
@@ -226,9 +257,12 @@ func _building(lot: Rect2, downtown: float) -> void:
 		var p := Vector3(c.x + rng.randf_range(-w * 0.3, w * 0.3), top + 1.6, c.y + rng.randf_range(-d * 0.3, d * 0.3))
 		_box(Vector3(rng.randf_range(1.5, 3.0), 1.2, rng.randf_range(1.5, 2.5)), p, M.plain(Color(0.6, 0.62, 0.63), 0.4, 0.6), true)
 
-const STORE_BLOCKS := {Vector2i(3, 3): "guns", Vector2i(1, 1): "cars", Vector2i(2, 3): "clothes", Vector2i(0, 2): "food", Vector2i(2, 1): "shop24", Vector2i(4, 3): "tuning"}
-const POLICE_BLOCK := Vector2i(3, 1)
-const SAFE_BLOCK := Vector2i(1, 2)
+const STORE_BLOCKS := {Vector2i(4, 4): "guns", Vector2i(2, 2): "cars", Vector2i(3, 4): "clothes", Vector2i(1, 3): "food", Vector2i(3, 2): "shop24", Vector2i(5, 4): "tuning", Vector2i(5, 2): "shop24b"}
+const STORE_NAMES := {"guns": "AMMU★NATION", "cars": "CONCESSIONÁRIA", "clothes": "ROUPAS", "food": "LANCHONETE", "shop24": "LOJA 24H", "shop24b": "LOJA 24H", "tuning": "OFICINA TUNING"}
+const STORE_COLS := {"guns": Color(0.95, 0.15, 0.1), "cars": Color(0.2, 0.75, 1.0), "clothes": Color(0.95, 0.45, 0.85), "food": Color(1.0, 0.7, 0.15), "shop24": Color(0.3, 0.9, 0.4), "shop24b": Color(0.3, 0.9, 0.4), "tuning": Color(1.0, 0.55, 0.1)}
+const POLICE_BLOCK := Vector2i(4, 2)
+const SAFE_BLOCK := Vector2i(2, 3)
+var _store_info := {}        # tipo -> {door, counter, clerk, center, x0, x1, z0, z1}
 var station_cars: Array = []     # vagas da garagem da polícia [pos, yaw]
 var station := {}                # pontos da delegacia: cela, saída da garagem, heliponto, porta
 var safehouse := {}              # casa segura: spawn, cama, porta
@@ -243,7 +277,7 @@ func _store(r: Rect2, type: String) -> void:
 	var cx := (x0 + x1) * 0.5
 	var w := x1 - x0
 	var d := z1 - z0
-	var wall_c: Color = {"guns": Color(0.3, 0.28, 0.26), "clothes": Color(0.9, 0.87, 0.85), "cars": Color(0.88, 0.9, 0.93), "food": Color(0.95, 0.82, 0.55), "shop24": Color(0.9, 0.93, 0.9), "tuning": Color(0.35, 0.36, 0.4)}[type]
+	var wall_c: Color = {"guns": Color(0.3, 0.28, 0.26), "clothes": Color(0.9, 0.87, 0.85), "cars": Color(0.88, 0.9, 0.93), "food": Color(0.95, 0.82, 0.55), "shop24": Color(0.9, 0.93, 0.9), "shop24b": Color(0.9, 0.93, 0.9), "tuning": Color(0.35, 0.36, 0.4)}[type]
 	var wall := M.plain(wall_c, 0.8)
 	var ext := M.facade(4)
 	# casca externa
@@ -267,10 +301,41 @@ func _store(r: Rect2, type: String) -> void:
 	var g2: StandardMaterial3D = glass.duplicate()
 	g2.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	g2.albedo_color = Color(0.55, 0.72, 0.82, 0.22)
-	_box(Vector3(cx - 1.4 - x0, H - 0.6, 0.06), Vector3((x0 + cx - 1.4) * 0.5, H * 0.5 - 0.1, z0), g2)
-	_box(Vector3(x1 - cx - 1.4, H - 0.6, 0.06), Vector3((x1 + cx + 1.4) * 0.5, H * 0.5 - 0.1, z0), g2)
-	_box(Vector3(2.6, 3.0, 0.06), Vector3(cx, 1.65, z0), g2)
-	_box(Vector3(2.8, H - 3.2, 0.3), Vector3(cx, 3.2 + (H - 3.2) * 0.5, z0), M.plain(Color(0.1, 0.1, 0.11), 0.4, 0.6))
+	if type != "tuning":
+		_box(Vector3(cx - 1.4 - x0, H - 0.6, 0.06), Vector3((x0 + cx - 1.4) * 0.5, H * 0.5 - 0.1, z0), g2)
+		_box(Vector3(x1 - cx - 1.4, H - 0.6, 0.06), Vector3((x1 + cx + 1.4) * 0.5, H * 0.5 - 0.1, z0), g2)
+		# porta aberta (vão de 2,8 m): dá para entrar andando, sem tela de carregamento
+		_box(Vector3(2.8, H - 3.2, 0.3), Vector3(cx, 3.2 + (H - 3.2) * 0.5, z0), M.plain(Color(0.1, 0.1, 0.11), 0.4, 0.6))
+	else:
+		_box(Vector3(w, 0.8, 0.3), Vector3(cx, H - 0.25, z0), M.plain(Color(0.1, 0.1, 0.11), 0.4, 0.6))
+	var nm := Label3D.new()
+	nm.text = STORE_NAMES.get(type, "")
+	nm.font_size = 96
+	nm.pixel_size = 0.0075
+	nm.modulate = STORE_COLS.get(type, Color.WHITE).lightened(0.3)
+	nm.outline_size = 10
+	nm.shaded = false
+	nm.rotation.y = PI
+	nm.position = Vector3(cx, H + 0.6, z0 - 0.35)
+	add_child(nm)
+	var cnt := Vector3(cx, 0.3, z1 - 2.2)
+	var clerk := Vector3(cx, 0.3, z1 - 1.2)
+	match type:
+		"clothes":
+			_box(Vector3(3.0, 1.05, 0.8), Vector3(cx + 5.0, 0.65, z1 - 2.2), M.wood(), true)
+			cnt = Vector3(cx + 5.0, 0.3, z1 - 2.2)
+			clerk = Vector3(cx + 5.0, 0.3, z1 - 1.2)
+		"cars":
+			_box(Vector3(3.0, 1.0, 1.0), Vector3(cx, 0.6, z1 - 2.0), M.plain(Color(0.2, 0.22, 0.25), 0.4, 0.4), true)
+			cnt = Vector3(cx, 0.3, z1 - 2.0)
+			clerk = Vector3(cx, 0.3, z1 - 1.0)
+		"shop24", "shop24b":
+			cnt = Vector3(x1 - 2.5, 0.3, z0 + 2.0)
+			clerk = Vector3(x1 - 2.5, 0.3, z0 + 3.0)
+		"tuning":
+			cnt = Vector3(cx, 0.3, (z0 + z1) * 0.5)
+			clerk = Vector3(x0 + 2.0, 0.3, z1 - 2.0)
+	_store_info[type] = {"door": Vector3(cx, 0.3, z0 - 1.2), "counter": cnt, "clerk": clerk, "center": Vector3(cx, 0.3, (z0 + z1) * 0.5), "x0": x0, "x1": x1, "z0": z0, "z1": z1}
 	# vitrine por dentro (o que se vê da rua)
 	match type:
 		"guns":
@@ -279,7 +344,7 @@ func _store(r: Rect2, type: String) -> void:
 					_box(Vector3(0.35, 0.05, d - 2.0), Vector3(xx, yy, (z0 + z1) * 0.5), M.wood(), false)
 					for zz in range(int(z0 + 2), int(z1 - 1), 2):
 						_box(Vector3(0.1, 0.08, 0.9), Vector3(xx, yy + 0.1, zz), M.plain(Color(0.08, 0.08, 0.09), 0.4, 0.8), false)
-			_box(Vector3(6.0, 1.05, 0.9), Vector3(cx, 0.65, z1 - 2.2), M.plain(Color(0.25, 0.18, 0.12), 0.5), false)
+			_box(Vector3(6.0, 1.05, 0.9), Vector3(cx, 0.65, z1 - 2.2), M.plain(Color(0.25, 0.18, 0.12), 0.5), true)
 			_box(Vector3(6.0, 2.0, 0.08), Vector3(cx, 3.3, z1 - 0.25), M.plain(Color(0.6, 0.08, 0.05), 0.6), false)
 		"clothes":
 			for xx in [cx - 5.0, cx - 2.5, cx + 2.5, cx + 5.0]:
@@ -292,21 +357,21 @@ func _store(r: Rect2, type: String) -> void:
 				_box(Vector3(0.62, 0.7, 0.42), Vector3(xx, 1.5, z0 + 1.5), M.plain(Color(0.8, 0.2, 0.4), 0.8), false)
 		"food":
 			# lanchonete: balcão, chapa, mesas e banquetas
-			_box(Vector3(w - 3.0, 1.05, 0.9), Vector3(cx, 0.65, z1 - 2.4), M.plain(Color(0.75, 0.15, 0.1), 0.5), false)
+			_box(Vector3(w - 3.0, 1.05, 0.9), Vector3(cx, 0.65, z1 - 2.4), M.plain(Color(0.75, 0.15, 0.1), 0.5), true)
 			_box(Vector3(4.0, 0.9, 0.7), Vector3(cx, 0.6, z1 - 0.9), M.plain(Color(0.6, 0.62, 0.64), 0.3, 0.8), false)
 			_box(Vector3(w - 3.0, 0.9, 0.08), Vector3(cx, 4.0, z1 - 0.25), M.emissive(Color(1.0, 0.75, 0.2), 1.2), false)
 			for k in 3:
 				var tx := cx - 5.0 + k * 5.0
 				_box(Vector3(1.4, 0.06, 1.4), Vector3(tx, 0.95, z0 + 3.0), M.plain(Color(0.9, 0.9, 0.88), 0.4), false)
 				_box(Vector3(0.12, 0.8, 0.12), Vector3(tx, 0.55, z0 + 3.0), M.plain(Color(0.3, 0.3, 0.3), 0.4, 0.8), false)
-		"shop24":
+		"shop24", "shop24b":
 			# loja de conveniência: prateleiras, geladeiras iluminadas e caixa perto da porta
 			for k in 3:
 				_box(Vector3(0.6, 1.7, d - 5.0), Vector3(cx - 4.0 + k * 4.0, 1.0, (z0 + z1) * 0.5 + 1.0), M.plain(Color(0.85, 0.85, 0.82), 0.5), false)
 				for yy in [0.6, 1.1, 1.6]:
 					_box(Vector3(0.7, 0.25, d - 5.4), Vector3(cx - 4.0 + k * 4.0, yy + 0.15, (z0 + z1) * 0.5 + 1.0), M.plain(Color.from_hsv(fmod(k * 0.3 + yy, 1.0), 0.6, 0.85), 0.8), false)
 			_box(Vector3(w - 1.0, 2.2, 0.6), Vector3(cx, 1.25, z1 - 0.6), M.emissive(Color(0.75, 0.9, 1.0), 0.8), false)
-			_box(Vector3(2.4, 1.0, 0.8), Vector3(x1 - 2.5, 0.65, z0 + 2.0), M.plain(Color(0.2, 0.5, 0.25), 0.5), false)
+			_box(Vector3(2.4, 1.0, 0.8), Vector3(x1 - 2.5, 0.65, z0 + 2.0), M.plain(Color(0.2, 0.5, 0.25), 0.5), true)
 		"tuning":
 			# oficina: elevador, pneus, painel de ferramentas
 			_box(Vector3(3.0, 0.2, 5.0), Vector3(cx, 0.3, (z0 + z1) * 0.5), M.plain(Color(0.85, 0.7, 0.1), 0.5, 0.4), false)
@@ -562,38 +627,17 @@ func _multimesh(mesh: Mesh, mat: Material, xf: Array) -> MultiMeshInstance3D:
 
 ## hospital e delegacia: placas grandes na calçada e pontos de reaparecimento
 func _landmarks() -> void:
-	hospital_pos = Vector3(_center(1), 0.3, _center(3) - BLOCK * 0.5 + 1.6)
-	police_pos = Vector3(_center(3), 0.3, _center(1) - BLOCK * 0.5 + 1.6)
+	hospital_pos = Vector3(_center(1), 0.3, _center(4) - BLOCK * 0.5 + 1.6)
+	police_pos = Vector3(_center(POLICE_BLOCK.x), 0.3, _center(POLICE_BLOCK.y) - BLOCK * 0.5 + 1.6)
 	var white := M.emissive(Color(0.95, 0.95, 0.95), 0.6)
 	var red := M.emissive(Color(0.9, 0.08, 0.08), 1.4)
 	var blue := M.emissive(Color(0.12, 0.3, 0.9), 1.4)
 	var pole := M.plain(Color(0.25, 0.25, 0.27), 0.4, 0.7)
-	# lojas: AMMU★NATION e concessionária (porta na calçada, placa luminosa com texto)
-	var gs := Vector3(_center(3), 0.3, _center(3) - BLOCK * 0.5 + 1.6)
-	var cs := Vector3(_center(1), 0.3, _center(1) - BLOCK * 0.5 + 1.6)
-	var rs := Vector3(_center(2), 0.3, _center(3) - BLOCK * 0.5 + 1.6)
-	shops = [{"type": "guns", "pos": gs, "name": "AMMU★NATION", "col": Color(0.95, 0.15, 0.1)}, {"type": "cars", "pos": cs, "name": "CONCESSIONÁRIA", "col": Color(0.2, 0.75, 1.0)}, {"type": "clothes", "pos": rs, "name": "ROUPAS", "col": Color(0.95, 0.45, 0.85)},
-		{"type": "food", "pos": Vector3(_center(0), 0.3, _center(2) - BLOCK * 0.5 + 1.6), "name": "LANCHONETE", "col": Color(1.0, 0.7, 0.15)},
-		{"type": "shop24", "pos": Vector3(_center(2), 0.3, _center(1) - BLOCK * 0.5 + 1.6), "name": "LOJA 24H", "col": Color(0.3, 0.9, 0.4)},
-		{"type": "tuning", "pos": Vector3(_center(4), 0.3, _center(3) - BLOCK * 0.5 + 1.6), "name": "OFICINA TUNING", "col": Color(1.0, 0.55, 0.1)}]
-	for sh in shops:
-		var sp: Vector3 = sh.pos
-		var em := M.emissive(sh.col, 1.6)
-		_box(Vector3(5.2, 0.12, 2.6), sp + Vector3(0, 0.0, 0.2), M.plain(Color(0.12, 0.12, 0.13), 0.5, 0.2), false)
-		_box(Vector3(0.12, 3.2, 0.12), sp + Vector3(-2.4, 1.6, -0.6), pole, true)
-		_box(Vector3(0.12, 3.2, 0.12), sp + Vector3(2.4, 1.6, -0.6), pole, true)
-		_box(Vector3(5.0, 1.0, 0.25), sp + Vector3(0, 3.6, -0.6), M.plain(Color(0.05, 0.05, 0.06), 0.4, 0.2), false)
-		_box(Vector3(5.0, 0.08, 0.3), sp + Vector3(0, 3.06, -0.6), em, false)
-		var lb := Label3D.new()
-		lb.text = sh.name
-		lb.font_size = 96
-		lb.pixel_size = 0.0075
-		lb.modulate = sh.col.lightened(0.3)
-		lb.outline_size = 10
-		lb.position = sp + Vector3(0, 3.6, -0.76)
-		lb.rotation.y = PI
-		lb.shaded = false
-		add_child(lb)
+	# lojas: a entrada é a própria loja (sem placa/fachada na calçada e sem tela de carregamento)
+	shops = []
+	for t in _store_info:
+		var si: Dictionary = _store_info[t]
+		shops.append({"type": t, "pos": si.door, "counter": si.counter, "clerk": si.clerk, "center": si.center, "name": STORE_NAMES[t], "col": STORE_COLS[t], "box": Rect2(si.x0, si.z0, si.x1 - si.x0, si.z1 - si.z0)})
 	for spec in [[hospital_pos, red, "H"], [police_pos, blue, "P"]]:
 		var p: Vector3 = spec[0] + Vector3(2.5, 0, 0)
 		_box(Vector3(0.15, 4.0, 0.15), p + Vector3(0, 2.0, 0), pole, true)
@@ -777,70 +821,464 @@ func _police_station(cx: float, cz: float) -> void:
 	station = {"cell": Vector3(x0 + cw * 0.5, 0.3, (c1 + bz) * 0.5 + 0.6), "door": Vector3(cx, 0.3, fz - 2.5),
 		"garage_out": Vector3(cx, 0.7, gz1 + 6.0), "heli": hp + Vector3(0, 0.3, 0), "front": Vector3(cx, 0.3, fz)}
 
-# ---------------------------------------------------------------- casa segura
-## Sobrado com quintal: sala, quarto com cama (dormir = salvar e passar o tempo), garagem lateral.
+# ---------------------------------------------------------------- utilidades com rotação
+func _boxr(size: Vector3, xf: Transform3D, mat: Material, collide := true) -> void:
+	var bm := BoxMesh.new()
+	bm.size = size
+	if not _batch.has(mat):
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		_batch[mat] = st
+	_batch[mat].append_from(bm, 0, xf)
+	if collide:
+		var cs := CollisionShape3D.new()
+		var sh := BoxShape3D.new()
+		sh.size = size
+		cs.shape = sh
+		cs.transform = xf
+		body.add_child(cs)
+
+## caixa em coordenadas locais de uma "base" (origem + giro em y)
+func _lb(base: Transform3D, size: Vector3, lp: Vector3, mat: Material, collide := true) -> void:
+	_boxr(size, base * Transform3D(Basis(), lp), mat, collide)
+
+## telhado de duas águas (duas placas inclinadas) em coordenadas locais
+func _roof(base: Transform3D, w: float, d: float, y: float, mat: Material, pitch := 0.5) -> void:
+	var half := d * 0.5 / cos(pitch) + 0.4
+	for sg in [-1.0, 1.0]:
+		var b := Basis(Vector3.RIGHT, sg * pitch)
+		var lp := Vector3(0, y + sin(pitch) * d * 0.25, sg * d * 0.25)
+		_boxr(Vector3(w + 0.8, 0.18, half), base * Transform3D(b, lp), mat, true)
+	# oitões (triângulos aproximados por 3 degraus)
+	for sx in [-1.0, 1.0]:
+		for k in 3:
+			var hh := sin(pitch) * d * 0.5 * (1.0 - k / 3.0)
+			_lb(base, Vector3(0.2, hh / 3.0 + 0.05, d * (1.0 - k / 3.0)), Vector3(sx * w * 0.5, y + hh / 3.0 * (k + 0.5) - 0.02, 0), mat, false)
+
+# ---------------------------------------------------------------- casas (rua só de casas)
+const HOUSE_COLS := [Color(0.92, 0.86, 0.72), Color(0.75, 0.82, 0.88), Color(0.9, 0.75, 0.7), Color(0.8, 0.88, 0.75), Color(0.95, 0.93, 0.88), Color(0.85, 0.7, 0.5)]
+func _houses_block(cx: float, cz: float, inner: float) -> void:
+	var h := inner * 0.5
+	_box(Vector3(inner, 0.05, inner), Vector3(cx, 0.17, cz), M.grass(), false)
+	for a in 2:
+		for b in 2:
+			var lc := Vector3(cx + (a - 0.5) * h, 0.15, cz + (b - 0.5) * h)
+			var yaw := 0.0 if b == 1 else PI          # frente para a rua mais próxima (norte/sul)
+			_house(Transform3D(Basis(Vector3.UP, yaw), lc), h, rng.randf() < 0.3)
+
+## casa decorativa num lote quadrado de lado 'L' (frente = +z local)
+func _house(base: Transform3D, L: float, pool: bool) -> void:
+	var wallm := M.plain(HOUSE_COLS[rng.randi() % HOUSE_COLS.size()], 0.85)
+	var roofm := M.plain([Color(0.55, 0.22, 0.15), Color(0.3, 0.3, 0.33), Color(0.45, 0.3, 0.2)][rng.randi() % 3], 0.7)
+	var w := rng.randf_range(8.0, 11.0)
+	var d := rng.randf_range(7.0, 8.5)
+	var H := 3.0
+	var hz := -1.5
+	_lb(base, Vector3(w, H, d), Vector3(0, H * 0.5 + 0.02, hz), wallm, true)
+	_roof(base, w, d, H + 0.05, roofm)
+	# porta, janelas, degrau e chaminé
+	_lb(base, Vector3(1.1, 2.1, 0.08), Vector3(-w * 0.2, 1.07, hz + d * 0.5 + 0.03), M.wood(), false)
+	for x in [w * 0.15, w * 0.35, -w * 0.4]:
+		_lb(base, Vector3(1.2, 1.0, 0.07), Vector3(x, 1.6, hz + d * 0.5 + 0.03), M.plain(Color(0.2, 0.3, 0.38), 0.05, 0.6), false)
+		_lb(base, Vector3(1.4, 0.12, 0.15), Vector3(x, 1.03, hz + d * 0.5 + 0.07), M.plain(Color(0.95, 0.95, 0.95), 0.6), false)
+	_lb(base, Vector3(1.6, 0.18, 1.0), Vector3(-w * 0.2, 0.09, hz + d * 0.5 + 0.5), M.concrete(Color(0.7, 0.7, 0.7)), false)
+	_lb(base, Vector3(0.7, 1.6, 0.7), Vector3(w * 0.3, H + 1.9, hz - d * 0.15), M.plain(Color(0.45, 0.25, 0.18), 0.8), false)
+	# cerca baixa com portão na frente
+	var half := L * 0.5 - 0.6
+	var fence := M.plain(Color(0.95, 0.95, 0.95), 0.6)
+	_lb(base, Vector3(0.12, 0.9, 2.0 * half), Vector3(-half, 0.45, 0), fence, true)
+	_lb(base, Vector3(0.12, 0.9, 2.0 * half), Vector3(half, 0.45, 0), fence, true)
+	_lb(base, Vector3(2.0 * half, 0.9, 0.12), Vector3(0, 0.45, -half), fence, true)
+	_lb(base, Vector3(half - 2.0, 0.9, 0.12), Vector3(-(half + 2.0) * 0.5 - 0.0, 0.45, half), fence, true)
+	_lb(base, Vector3(half - 2.0, 0.9, 0.12), Vector3((half + 2.0) * 0.5, 0.45, half), fence, true)
+	_lb(base, Vector3(2.4, 0.04, half - hz - d * 0.5), Vector3(-w * 0.2, 0.06, (half + hz + d * 0.5) * 0.5), M.concrete(Color(0.65, 0.63, 0.6)), false)
+	if pool:
+		_lb(base, Vector3(4.0, 0.08, 2.4), Vector3(w * 0.25, 0.08, -half + 2.0), M.plain(Color(0.2, 0.6, 0.85), 0.05, 0.2), false)
+		_lb(base, Vector3(4.6, 0.12, 3.0), Vector3(w * 0.25, 0.04, -half + 2.0), M.concrete(Color(0.85, 0.85, 0.82)), false)
+	# carro na garagem aberta ao lado (vaga)
+	_house_spots.append(base * Vector3(w * 0.5 + 2.2, 0.6, hz + 1.0))
+
+var _house_spots: Array = []      # vagas ao lado das casas (o main estaciona carros/bikes ali)
+
+# ---------------------------------------------------------------- obras
+func _construction(cx: float, cz: float, inner: float) -> void:
+	var h := inner * 0.5
+	var dirt := M.plain(Color(0.45, 0.36, 0.26), 0.95)
+	var conc := M.concrete(Color(0.68, 0.68, 0.66))
+	var steel := M.plain(Color(0.85, 0.6, 0.1), 0.5, 0.6)
+	var fence := M.plain(Color(0.9, 0.85, 0.2), 0.7)
+	_box(Vector3(inner, 0.06, inner), Vector3(cx, 0.18, cz), dirt, false)
+	# tapume com portão (sul)
+	_box(Vector3(inner, 2.2, 0.15), Vector3(cx, 1.25, cz + h), fence, true)
+	_box(Vector3(0.15, 2.2, inner), Vector3(cx - h, 1.25, cz), fence, true)
+	_box(Vector3(0.15, 2.2, inner), Vector3(cx + h, 1.25, cz), fence, true)
+	_box(Vector3(h - 4.0, 2.2, 0.15), Vector3(cx - h * 0.5 - 2.0, 1.25, cz - h), fence, true)
+	_box(Vector3(h - 4.0, 2.2, 0.15), Vector3(cx + h * 0.5 + 2.0, 1.25, cz - h), fence, true)
+	# esqueleto de concreto: 5 lajes + pilares (dá para escalar pelos andaimes)
+	var bw := 22.0
+	var bd := 16.0
+	var bc := Vector3(cx - 4.0, 0, cz + 6.0)
+	for f in 5:
+		var y := 0.2 + f * 3.6
+		if f > 0:
+			_box(Vector3(bw, 0.35, bd), bc + Vector3(0, y, 0), conc, true)
+		if f < 4:
+			for ix in 4:
+				for iz in 3:
+					_box(Vector3(0.45, 3.6, 0.45), bc + Vector3(-bw * 0.5 + 0.5 + ix * (bw - 1.0) / 3.0, y + 1.8, -bd * 0.5 + 0.5 + iz * (bd - 1.0) / 2.0), conc, true)
+	# andaime na frente com degraus (subida)
+	for f in 4:
+		_box(Vector3(bw, 0.1, 1.2), bc + Vector3(0, 3.6 + f * 3.6 - 0.1, -bd * 0.5 - 0.8), M.wood(), true)
+		for k in 6:
+			_box(Vector3(0.6, 0.15, 1.0), bc + Vector3(bw * 0.5 - 1.0 - k * 0.6, 0.6 + f * 3.6 + k * 0.6, -bd * 0.5 - 2.2), M.wood(), true)
+		for ix in 6:
+			_box(Vector3(0.06, 3.6, 0.06), bc + Vector3(-bw * 0.5 + ix * bw / 5.0, 1.8 + f * 3.6, -bd * 0.5 - 1.4), steel, false)
+	# guindaste
+	var gc := Vector3(cx + 13.0, 0, cz - 10.0)
+	_box(Vector3(2.0, 1.0, 2.0), gc + Vector3(0, 0.5, 0), conc, true)
+	_box(Vector3(1.3, 34.0, 1.3), gc + Vector3(0, 17.5, 0), steel, true)
+	_box(Vector3(28.0, 1.0, 1.0), gc + Vector3(-8.0, 34.5, 0), steel, false)
+	_box(Vector3(3.0, 2.0, 2.0), gc + Vector3(5.0, 33.5, 0), conc, false)
+	_box(Vector3(2.2, 2.0, 2.0), gc + Vector3(0, 33.0, 0), M.plain(Color(0.25, 0.3, 0.35), 0.4), false)
+	_box(Vector3(0.05, 18.0, 0.05), gc + Vector3(-18.0, 25.0, 0), M.plain(Color(0.1, 0.1, 0.1), 0.5), false)
+	_box(Vector3(2.5, 1.0, 1.2), gc + Vector3(-18.0, 15.5, 0), M.plain(Color(0.55, 0.3, 0.15), 0.8), false)
+	# pilhas de material, tubos e caçamba
+	for k in 4:
+		_box(Vector3(2.4, 0.8, 1.2), Vector3(cx - 15.0, 0.6 + k * 0.8, cz - 14.0), M.plain(Color(0.7, 0.3, 0.2), 0.9), true)
+	for k in 5:
+		_box(Vector3(6.0, 0.4, 0.4), Vector3(cx + 2.0, 0.4 + (k % 3) * 0.4, cz - 15.0 + k * 0.45), M.plain(Color(0.4, 0.42, 0.45), 0.4, 0.8), true)
+	_box(Vector3(5.0, 1.6, 2.4), Vector3(cx + 14.0, 0.95, cz + 14.0), M.plain(Color(0.9, 0.5, 0.1), 0.6), true)
+	_house_spots.append(Vector3(cx - 8.0, 0.6, cz - 13.0))
+
+# ---------------------------------------------------------------- galpões e contêineres
+func _warehouses(cx: float, cz: float, inner: float) -> void:
+	var h := inner * 0.5
+	_box(Vector3(inner, 0.06, inner), Vector3(cx, 0.18, cz), M.concrete(Color(0.45, 0.45, 0.46)), false)
+	var shed := M.plain(Color.from_hsv(rng.randf_range(0.0, 0.7), 0.25, 0.6), 0.7, 0.3)
+	_box(Vector3(inner - 4.0, 8.0, h), Vector3(cx, 4.2, cz + h * 0.5), shed, true)
+	_box(Vector3(inner - 3.0, 0.5, h + 1.0), Vector3(cx, 8.45, cz + h * 0.5), M.plain(Color(0.3, 0.3, 0.32), 0.5, 0.6), true)
+	for k in 3:
+		_box(Vector3(5.0, 5.0, 0.12), Vector3(cx - 12.0 + k * 12.0, 2.7, cz - 0.05), M.plain(Color(0.35, 0.37, 0.4), 0.4, 0.7), false)
+	var ccols := [Color(0.75, 0.15, 0.1), Color(0.1, 0.35, 0.65), Color(0.2, 0.55, 0.25), Color(0.85, 0.6, 0.1), Color(0.5, 0.5, 0.52)]
+	for k in 6:
+		var lvl := k / 3
+		_box(Vector3(6.0, 2.6, 2.45), Vector3(cx - 12.0 + (k % 3) * 7.0, 1.5 + lvl * 2.6, cz - h + 5.0 + lvl * 0.3), M.plain(ccols[rng.randi() % ccols.size()], 0.6, 0.3), true)
+	_house_spots.append(Vector3(cx + 12.0, 0.6, cz - h + 6.0))
+
+# ---------------------------------------------------------------- casa segura (casa de verdade)
+## Casa térrea com porta que abre, sala (sofá, TV, rack), cozinha (geladeira, fogão, pia, mesa),
+## banheiro (vaso, pia, box), quarto (cama, guarda-roupa, criado-mudo) e garagem ao lado.
+var door_pivot: Node3D
 func _safehouse(cx: float, cz: float, inner: float, downtown: float) -> void:
 	var hh := inner * 0.5
-	# prédios no fundo da quadra
 	_building(Rect2(cx - hh, cz + 2.0, inner, hh - 2.0), downtown * 0.5)
-	var fz := cz - hh + 3.0
-	var x0 := cx - 9.0
-	var x1 := cx + 5.0
-	var bz := fz + 10.0
-	var H := 3.4
-	var wallm := M.plain(Color(0.86, 0.78, 0.62), 0.8)
-	var trim := M.plain(Color(0.55, 0.3, 0.2), 0.7)
-	# gramado e calçadinha
+	var fz := cz - hh + 3.0            # frente (sul)
+	var x0 := cx - 10.0
+	var x1 := cx + 4.0
+	var bz := fz + 11.0
+	var H := 3.0
+	var wallm := M.plain(Color(0.92, 0.88, 0.8), 0.85)
+	var inw := M.plain(Color(0.96, 0.95, 0.9), 0.9)
+	var tile := M.plain(Color(0.85, 0.88, 0.9), 0.3)
+	var roofm := M.plain(Color(0.55, 0.22, 0.15), 0.7)
 	_box(Vector3(inner, 0.05, hh - 2.0), Vector3(cx, 0.17, cz - hh * 0.5 - 0.5), M.grass(), false)
-	_box(Vector3(1.6, 0.06, 3.0), Vector3(cx - 2.0, 0.2, fz - 1.5), M.concrete(Color(0.7, 0.7, 0.68)), false)
+	_box(Vector3(1.6, 0.06, 3.0), Vector3(cx - 3.0, 0.2, fz - 1.5), M.concrete(Color(0.7, 0.7, 0.68)), false)
 	_box(Vector3(x1 - x0, 0.06, bz - fz), Vector3((x0 + x1) * 0.5, 0.2, (fz + bz) * 0.5), M.wood(), false)
-	# paredes (porta na frente em x −2,8..−1,2)
-	_box(Vector3(-2.8 - (x0 - cx), H, 0.25), Vector3((x0 + cx - 2.8) * 0.5, H * 0.5 + 0.15, fz), wallm, true)
-	_box(Vector3(x1 - (cx - 1.2), H, 0.25), Vector3((cx - 1.2 + x1) * 0.5, H * 0.5 + 0.15, fz), wallm, true)
-	_box(Vector3(1.6, H - 2.4, 0.25), Vector3(cx - 2.0, H - 0.35, fz), wallm, true)
+	# paredes externas (porta de 1,2 m em x = cx−3,6..cx−2,4)
+	var dx0 := cx - 3.6
+	var dx1 := cx - 2.4
+	_box(Vector3(dx0 - x0, H, 0.25), Vector3((x0 + dx0) * 0.5, H * 0.5 + 0.15, fz), wallm, true)
+	_box(Vector3(x1 - dx1, H, 0.25), Vector3((dx1 + x1) * 0.5, H * 0.5 + 0.15, fz), wallm, true)
+	_box(Vector3(dx1 - dx0, H - 2.2, 0.25), Vector3(cx - 3.0, H - 0.4 + 0.15, fz), wallm, true)
 	_box(Vector3(x1 - x0, H, 0.25), Vector3((x0 + x1) * 0.5, H * 0.5 + 0.15, bz), wallm, true)
 	_box(Vector3(0.25, H, bz - fz), Vector3(x0, H * 0.5 + 0.15, (fz + bz) * 0.5), wallm, true)
 	_box(Vector3(0.25, H, bz - fz), Vector3(x1, H * 0.5 + 0.15, (fz + bz) * 0.5), wallm, true)
-	# parede do quarto (porta em z fz+5..fz+6,4)
-	_box(Vector3(0.15, H, 5.0), Vector3(cx + 0.5, H * 0.5 + 0.15, fz + 2.5), wallm, false)
-	_box(Vector3(0.15, H, bz - fz - 6.4), Vector3(cx + 0.5, H * 0.5 + 0.15, (fz + 6.4 + bz) * 0.5), wallm, false)
-	# telhado de duas águas (caixas inclinadas viram degraus; usamos laje + beiral)
-	_box(Vector3(x1 - x0 + 1.0, 0.3, bz - fz + 1.0), Vector3((x0 + x1) * 0.5, H + 0.3, (fz + bz) * 0.5), trim, true)
-	_box(Vector3(x1 - x0 - 1.0, 1.0, bz - fz - 3.0), Vector3((x0 + x1) * 0.5, H + 0.95, (fz + bz) * 0.5), trim, false)
 	# janelas
-	for xx in [x0 + 2.0, x1 - 2.5]:
-		_box(Vector3(1.6, 1.1, 0.06), Vector3(xx, 1.8, fz - 0.14), M.plain(Color(0.2, 0.3, 0.38), 0.05, 0.6), false)
-	# sala: sofá, TV e mesa
-	_box(Vector3(2.6, 0.8, 0.9), Vector3(x0 + 2.0, 0.55, bz - 1.0), M.plain(Color(0.25, 0.3, 0.5), 0.9), true)
-	_box(Vector3(1.6, 0.9, 0.08), Vector3(x0 + 2.0, 1.5, fz + 0.3), M.plain(Color(0.03, 0.03, 0.04), 0.2, 0.5), false)
-	_box(Vector3(1.0, 0.05, 0.6), Vector3(x0 + 2.0, 0.62, (fz + bz) * 0.5), M.wood(), false)
-	# quarto: cama de casal, criado-mudo, abajur
-	var bed := Vector3(x1 - 2.2, 0.2, bz - 2.0)
+	for wx in [x0 + 2.0, x1 - 2.0]:
+		_box(Vector3(1.4, 1.1, 0.06), Vector3(wx, 1.8, fz - 0.14), M.plain(Color(0.2, 0.3, 0.38), 0.05, 0.6), false)
+		_box(Vector3(1.6, 0.1, 0.2), Vector3(wx, 1.2, fz - 0.16), M.plain(Color(0.95, 0.95, 0.95), 0.6), false)
+	# telhado de duas águas
+	_roof(Transform3D(Basis(), Vector3((x0 + x1) * 0.5, 0.15, (fz + bz) * 0.5)), x1 - x0, bz - fz, H, roofm, 0.45)
+	_box(Vector3(x1 - x0 - 0.4, 0.12, bz - fz - 0.4), Vector3((x0 + x1) * 0.5, H + 0.12, (fz + bz) * 0.5), inw, false)
+	# paredes internas: sala (frente esq.), cozinha (fundo esq.), banheiro (fundo dir.), quarto (frente dir.)
+	var mx := cx - 1.0          # divisória vertical
+	var mz := fz + 5.5          # divisória horizontal
+	_box(Vector3(0.15, H, 3.0), Vector3(mx, H * 0.5 + 0.15, fz + 1.5), inw, true)
+	_box(Vector3(0.15, H, mz - fz - 4.2), Vector3(mx, H * 0.5 + 0.15, mz - (mz - fz - 4.2) * 0.5), inw, true)
+	_box(Vector3(0.15, H, bz - mz), Vector3(mx, H * 0.5 + 0.15, (mz + bz) * 0.5), inw, true)
+	_box(Vector3(mx - x0 - 2.0, H, 0.15), Vector3(x0 + (mx - x0 - 2.0) * 0.5, H * 0.5 + 0.15, mz), inw, true)
+	_box(Vector3(x1 - mx - 1.8, H, 0.15), Vector3(x1 - (x1 - mx - 1.8) * 0.5, H * 0.5 + 0.15, mz), inw, true)
+	_box(Vector3(0.15, H, bz - mz - 1.4), Vector3(x1 - 3.0, H * 0.5 + 0.15, (mz + 1.4 + bz) * 0.5), inw, true)   # porta do banheiro junto ao corredor
+	# ---- sala: sofá em L, mesa de centro, rack com TV, tapete
+	_box(Vector3(3.0, 0.45, 0.9), Vector3(x0 + 2.4, 0.4, mz - 0.7), M.plain(Color(0.25, 0.3, 0.5), 0.9), true)
+	_box(Vector3(3.0, 0.5, 0.25), Vector3(x0 + 2.4, 0.85, mz - 0.25), M.plain(Color(0.25, 0.3, 0.5), 0.9), false)
+	_box(Vector3(0.9, 0.45, 1.8), Vector3(x0 + 0.75, 0.4, mz - 2.0), M.plain(Color(0.25, 0.3, 0.5), 0.9), true)
+	_box(Vector3(1.2, 0.08, 0.7), Vector3(x0 + 2.6, 0.5, mz - 2.3), M.wood(), false)
+	_box(Vector3(2.8, 0.02, 2.0), Vector3(x0 + 2.6, 0.22, mz - 2.3), M.plain(Color(0.6, 0.25, 0.2), 1.0), false)
+	_box(Vector3(2.2, 0.5, 0.45), Vector3(x0 + 2.6, 0.4, fz + 0.45), M.wood(), true)
+	_box(Vector3(1.7, 1.0, 0.08), Vector3(x0 + 2.6, 1.25, fz + 0.4), M.plain(Color(0.02, 0.02, 0.03), 0.15, 0.6), false)
+	_box(Vector3(1.55, 0.86, 0.02), Vector3(x0 + 2.6, 1.25, fz + 0.45), M.emissive(Color(0.25, 0.45, 0.7), 0.8), false)
+	# ---- cozinha: geladeira, fogão com bocas, balcão com pia, armários, mesa e cadeiras
+	_box(Vector3(0.8, 1.9, 0.7), Vector3(x0 + 0.6, 1.1, bz - 0.5), M.plain(Color(0.92, 0.93, 0.95), 0.3, 0.2), true)
+	_box(Vector3(0.03, 0.5, 0.05), Vector3(x0 + 0.95, 1.4, bz - 0.86), M.plain(Color(0.6, 0.6, 0.62), 0.3, 0.8), false)
+	_box(Vector3(0.75, 0.9, 0.65), Vector3(x0 + 1.6, 0.6, bz - 0.5), M.plain(Color(0.85, 0.85, 0.87), 0.3, 0.4), true)
+	for bx in 2:
+		for bz2 in 2:
+			_box(Vector3(0.18, 0.02, 0.18), Vector3(x0 + 1.43 + bx * 0.34, 1.06, bz - 0.66 + bz2 * 0.3), M.plain(Color(0.08, 0.08, 0.08), 0.4), false)
+	_box(Vector3(2.4, 0.9, 0.65), Vector3(x0 + 3.2, 0.6, bz - 0.5), M.plain(Color(0.55, 0.4, 0.28), 0.6), true)
+	_box(Vector3(2.4, 0.05, 0.7), Vector3(x0 + 3.2, 1.07, bz - 0.5), M.plain(Color(0.2, 0.2, 0.22), 0.3), false)
+	_box(Vector3(0.6, 0.04, 0.4), Vector3(x0 + 3.6, 1.08, bz - 0.5), M.plain(Color(0.7, 0.72, 0.75), 0.2, 0.9), false)
+	_box(Vector3(3.4, 0.7, 0.35), Vector3(x0 + 2.5, 2.2, bz - 0.3), M.plain(Color(0.55, 0.4, 0.28), 0.6), false)
+	_box(Vector3(1.4, 0.06, 0.9), Vector3(x0 + 2.6, 0.95, mz + 2.0), M.wood(), true)
+	for k in 4:
+		_box(Vector3(0.42, 0.06, 0.42), Vector3(x0 + 2.0 + (k % 2) * 1.2, 0.6, mz + 1.3 + float(k / 2) * 1.4), M.wood(), false)
+	# ---- banheiro: vaso, pia com espelho, box de vidro com chuveiro, azulejo
+	var bx0 := x1 - 3.0
+	_box(Vector3(2.8, 0.06, bz - mz - 0.2), Vector3(bx0 + 1.5, 0.21, (mz + bz) * 0.5), tile, false)
+	_box(Vector3(0.45, 0.45, 0.6), Vector3(bx0 + 0.5, 0.4, bz - 0.5), M.plain(Color(0.97, 0.97, 0.98), 0.15), true)
+	_box(Vector3(0.45, 0.45, 0.15), Vector3(bx0 + 0.5, 0.85, bz - 0.2), M.plain(Color(0.97, 0.97, 0.98), 0.15), false)
+	_box(Vector3(0.6, 0.15, 0.4), Vector3(bx0 + 1.4, 0.95, bz - 0.3), M.plain(Color(0.97, 0.97, 0.98), 0.15), false)
+	_box(Vector3(0.6, 0.7, 0.03), Vector3(bx0 + 1.4, 1.6, bz - 0.12), M.plain(Color(0.7, 0.8, 0.85), 0.02, 1.0), false)
+	var gl: StandardMaterial3D = M.plain(Color(0.7, 0.85, 0.95), 0.05, 0.3).duplicate()
+	gl.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	gl.albedo_color.a = 0.3
+	_box(Vector3(0.05, 2.0, 1.2), Vector3(x1 - 1.3, 1.15, mz + 0.8), gl, false)
+	_box(Vector3(0.3, 0.06, 0.3), Vector3(x1 - 0.5, 2.3, mz + 0.8), M.plain(Color(0.7, 0.72, 0.75), 0.2, 0.9), false)
+	# ---- quarto: cama de casal, guarda-roupa, criado-mudo com abajur
+	var bed := Vector3(x1 - 2.2, 0.2, fz + 2.3)
 	_box(Vector3(2.0, 0.45, 2.4), bed + Vector3(0, 0.28, 0), M.wood(), true)
 	_box(Vector3(1.9, 0.2, 2.3), bed + Vector3(0, 0.6, 0), M.plain(Color(0.92, 0.92, 0.95), 0.9), false)
-	_box(Vector3(1.9, 0.12, 0.5), bed + Vector3(0, 0.75, 0.9), M.plain(Color(0.95, 0.95, 0.97), 0.9), false)
-	_box(Vector3(1.9, 0.22, 1.3), bed + Vector3(0, 0.68, -0.4), M.plain(Color(0.6, 0.15, 0.2), 0.9), false)
-	_box(Vector3(2.1, 0.9, 0.12), bed + Vector3(0, 0.9, 1.2), M.wood(), false)
-	_box(Vector3(0.5, 0.5, 0.5), bed + Vector3(-1.5, 0.45, 0.9), M.wood(), false)
-	_box(Vector3(0.25, 0.3, 0.25), bed + Vector3(-1.5, 0.9, 0.9), M.emissive(Color(1.0, 0.85, 0.5), 1.5), false)
+	_box(Vector3(1.9, 0.12, 0.5), bed + Vector3(0, 0.75, -0.9), M.plain(Color(0.95, 0.95, 0.97), 0.9), false)
+	_box(Vector3(1.9, 0.22, 1.3), bed + Vector3(0, 0.68, 0.4), M.plain(Color(0.6, 0.15, 0.2), 0.9), false)
+	_box(Vector3(2.1, 0.9, 0.12), bed + Vector3(0, 0.9, -1.2), M.wood(), false)
+	_box(Vector3(0.5, 0.5, 0.5), bed + Vector3(-1.4, 0.45, -0.9), M.wood(), false)
+	_box(Vector3(0.25, 0.3, 0.25), bed + Vector3(-1.4, 0.9, -0.9), M.emissive(Color(1.0, 0.85, 0.5), 1.5), false)
+	_box(Vector3(1.8, 2.2, 0.6), Vector3(mx + 1.2, 1.25, mz - 0.45), M.plain(Color(0.45, 0.3, 0.2), 0.6), true)
+	_box(Vector3(0.02, 2.0, 0.02), Vector3(mx + 1.2, 1.25, mz - 0.76), M.plain(Color(0.2, 0.15, 0.1), 0.6), false)
+	# porta de entrada (abre sozinha quando o jogador chega perto)
+	door_pivot = Node3D.new()
+	door_pivot.position = Vector3(dx0, 0.15, fz)
+	add_child(door_pivot)
+	var dm := MeshInstance3D.new()
+	var dbm := BoxMesh.new()
+	dbm.size = Vector3(1.2, 2.2, 0.08)
+	dm.mesh = dbm
+	dm.position = Vector3(0.6, 1.1, 0)
+	dm.material_override = M.plain(Color(0.4, 0.25, 0.15), 0.6)
+	door_pivot.add_child(dm)
+	var db := StaticBody3D.new()
+	var dcs := CollisionShape3D.new()
+	var dsh := BoxShape3D.new()
+	dsh.size = Vector3(1.2, 2.2, 0.08)
+	dcs.shape = dsh
+	dcs.position = Vector3(0.6, 1.1, 0)
+	db.add_child(dcs)
+	door_pivot.add_child(db)
 	# garagem ao lado (portão aberto para a rua)
 	_box(Vector3(0.25, 3.0, 9.0), Vector3(x1 + 6.0, 1.65, fz + 4.5), wallm, true)
 	_box(Vector3(6.0, 3.0, 0.25), Vector3(x1 + 3.0, 1.65, fz + 9.0), wallm, true)
-	_box(Vector3(6.5, 0.3, 9.5), Vector3(x1 + 3.0, 3.2, fz + 4.5), trim, true)
+	_box(Vector3(6.5, 0.3, 9.5), Vector3(x1 + 3.0, 3.2, fz + 4.5), roofm, true)
 	_box(Vector3(6.0, 0.05, 9.0), Vector3(x1 + 3.0, 0.2, fz + 4.5), M.concrete(Color(0.5, 0.5, 0.5)), false)
-	var lb := Label3D.new()
-	lb.text = "CASA SEGURA"
-	lb.font_size = 64
-	lb.pixel_size = 0.006
-	lb.modulate = Color(0.6, 1.0, 0.6)
-	lb.outline_size = 8
-	lb.shaded = false
-	lb.rotation.y = PI
-	lb.position = Vector3(cx - 2.0, H + 0.5, fz - 0.3)
-	add_child(lb)
 	var li := OmniLight3D.new()
-	li.omni_range = 9.0
+	li.omni_range = 10.0
 	li.light_energy = 0.9
 	li.position = Vector3((x0 + x1) * 0.5, H - 0.4, (fz + bz) * 0.5)
 	add_child(li)
-	safehouse = {"spawn": Vector3(cx - 2.0, 0.3, fz + 2.0), "bed": bed + Vector3(-1.4, 0.1, -0.6), "door": Vector3(cx - 2.0, 0.3, fz - 1.5), "garage": [Vector3(x1 + 3.0, 0.7, fz + 4.5), PI]}
+	safehouse = {"spawn": Vector3(x0 + 2.4, 0.3, mz - 1.6), "bed": bed + Vector3(-1.4, 0.1, 0.6), "door": Vector3(cx - 3.0, 0.3, fz - 1.5), "garage": [Vector3(x1 + 3.0, 0.7, fz + 4.5), PI], "door_hinge": Vector3(dx0, 0.15, fz)}
+
+# ---------------------------------------------------------------- distritos fora da grade
+## Norte: bairro residencial (2 ruas só de casas), morros com estrada de terra até um mirante.
+## Sul: rua sob um viaduto (rua elevada com rampas), obra grande, galpões, casas e a ponte para a ilha.
+## Ilha ao sul: estrada de terra, morro, casas de praia e o farol.
+var extra_roads: Array = []      # [a, b, largura, cor] para o minimapa/mapa
+var hills: Array = []            # [centro (x,z), raio, altura]
+
+func hill_h(x: float, z: float) -> float:
+	var h := 0.0
+	for hl in hills:
+		var d := Vector2(x, z).distance_to(hl[0])
+		if d < hl[1]:
+			h = maxf(h, hl[2] * (cos(PI * d / hl[1]) + 1.0) * 0.5)
+	return h
+
+func _road(a: Vector3, b: Vector3, w: float, dirt := false) -> void:
+	var c := (a + b) * 0.5
+	var L := Vector2(a.x - b.x, a.z - b.z).length()
+	var yaw := atan2(b.x - a.x, b.z - a.z)
+	var mat: Material = M.plain(Color(0.42, 0.33, 0.22), 0.95) if dirt else M.asphalt()
+	_boxr(Vector3(w, 0.06, L), Transform3D(Basis(Vector3.UP, yaw), Vector3(c.x, 0.04 if not dirt else 0.05, c.z)), mat, false)
+	if not dirt:
+		# faixa central tracejada
+		var n := int(L / 6.0)
+		for k in n:
+			var p := a.lerp(b, (k + 0.5) / n)
+			_boxr(Vector3(0.2, 0.02, 2.5), Transform3D(Basis(Vector3.UP, yaw), Vector3(p.x, 0.08, p.z)), M.plain(Color(0.95, 0.8, 0.2), 0.6), false)
+	extra_roads.append([a, b, w, Color(0.42, 0.33, 0.22) if dirt else Color(0.16, 0.16, 0.18)])
+
+## estrada de terra que acompanha o relevo (pedaços inclinados sobre o morro)
+func _dirt_path(pts: Array, w: float) -> void:
+	var mat := M.plain(Color(0.45, 0.35, 0.24), 0.95)
+	for i in pts.size() - 1:
+		var a: Vector3 = pts[i]
+		var b: Vector3 = pts[i + 1]
+		var n := int(a.distance_to(b) / 3.0) + 1
+		for k in n:
+			var p0 := a.lerp(b, float(k) / n)
+			var p1 := a.lerp(b, float(k + 1) / n)
+			p0.y = hill_h(p0.x, p0.z) + 0.08
+			p1.y = hill_h(p1.x, p1.z) + 0.08
+			var dir := p1 - p0
+			var xf := Transform3D(Basis.looking_at(-dir.normalized(), Vector3.UP), (p0 + p1) * 0.5)
+			_boxr(Vector3(w, 0.08, dir.length() + 0.3), xf, mat, false)
+		extra_roads.append([a, b, w, Color(0.45, 0.35, 0.24)])
+
+func _hill_mesh(c: Vector2, r: float) -> void:
+	var step := 3.0
+	var n := int(r * 2.0 / step) + 1
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var o := c - Vector2(r, r)
+	for i in n:
+		for j in n:
+			var q := []
+			for v in [Vector2(i, j), Vector2(i + 1, j), Vector2(i + 1, j + 1), Vector2(i, j + 1)]:
+				var px: float = o.x + v.x * step
+				var pz: float = o.y + v.y * step
+				q.append(Vector3(px, hill_h(px, pz) + 0.01, pz))
+			for k in [0, 2, 1, 0, 3, 2]:
+				st.set_uv(Vector2(q[k].x, q[k].z) * 0.1)
+				st.add_vertex(q[k])
+	st.generate_normals()
+	var mesh := st.commit()
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.material_override = M.grass()
+	add_child(mi)
+	var cs := CollisionShape3D.new()
+	cs.shape = mesh.create_trimesh_shape()
+	body.add_child(cs)
+
+func _districts() -> void:
+	var e := extent()           # 224
+	# ---- NORTE: ruas só de casas
+	_road(Vector3(-236, 0, 300), Vector3(290, 0, 300), 12.0)
+	_road(Vector3(-40, 0, 378), Vector3(290, 0, 378), 12.0)
+	for x in [-96.0, 96.0, 224.0]:
+		_road(Vector3(x, 0, e + 7.0), Vector3(x, 0, 378.0 if x > 0.0 else 300.0), 12.0)
+	for street in [[300.0, -30.0, 285.0, true, true], [378.0, -20.0, 285.0, true, true]]:
+		var zz: float = street[0]
+		var xx: float = street[1]
+		while xx < street[2]:
+			var near_cross := false
+			for cxr in [-96.0, 96.0, 224.0]:
+				if absf(xx - cxr) < 13.0:
+					near_cross = true
+			if not near_cross:
+				for sg in [-1.0, 1.0]:
+					var lc := Vector3(xx, 0.0, zz + sg * 17.0)
+					if lc.z > 432.0 or (lc.z < e + 12.0):
+						continue
+					_box(Vector3(22.0, 0.05, 22.0), lc + Vector3(0, 0.07, 0), M.grass(), false)
+					_house(Transform3D(Basis(Vector3.UP, PI if sg > 0.0 else 0.0), lc), 22.0, rng.randf() < 0.25)
+			xx += 24.0
+	# morros com estrada de terra até o mirante (noroeste)
+	hills = [[Vector2(-165, 385), 62.0, 24.0], [Vector2(-80, 418), 34.0, 11.0], [Vector2(-215, 330), 26.0, 8.0]]
+	for hl in hills:
+		_hill_mesh(hl[0], hl[1])
+	_dirt_path([Vector3(-140, 0, 306), Vector3(-120, 0, 345), Vector3(-150, 0, 372), Vector3(-165, 0, 385)], 5.0)
+	_dirt_path([Vector3(-60, 0, 306), Vector3(-75, 0, 395), Vector3(-80, 0, 418)], 4.0)
+	var top := Vector3(-165, hill_h(-165, 385), 385)
+	_box(Vector3(8.0, 0.3, 8.0), top + Vector3(0, 0.15, 0), M.wood(), true)
+	for sx in [-1.0, 1.0]:
+		_box(Vector3(8.0, 0.9, 0.1), top + Vector3(0, 0.75, 4.0 * sx), M.wood(), true)
+	_box(Vector3(2.0, 0.45, 0.5), top + Vector3(0, 0.5, -2.0), M.wood(), false)
+	# ---- SUL: rua sob o viaduto, viaduto com rampas, obra, galpões, casas
+	_road(Vector3(-236, 0, -330), Vector3(236, 0, -330), 12.0)
+	for x in [-160.0, 32.0, 210.0]:
+		_road(Vector3(x, 0, -e - 7.0), Vector3(x, 0, -436.0 if x == 210.0 else -330.0), 12.0)
+	_road(Vector3(-200, 0, -400), Vector3(170, 0, -400), 11.0)
+	_road(Vector3(-160, 0, -330), Vector3(-160, 0, -400), 11.0)
+	_viaduct(-150.0, 160.0, -330.0, 8.0)
+	_construction(40.0, -282.0, 42.0)
+	_warehouses(-90.0, -282.0, 42.0)
+	_warehouses(150.0, -282.0, 42.0)
+	var xx2 := -190.0
+	while xx2 < 160.0:
+		if absf(xx2 + 160.0) > 13.0:
+			for sg in [-1.0, 1.0]:
+				var lc2 := Vector3(xx2, 0.0, -400.0 + sg * 16.0)
+				if lc2.z < -432.0 or lc2.z > -348.0:
+					continue
+				_box(Vector3(20.0, 0.05, 20.0), lc2 + Vector3(0, 0.07, 0), M.grass(), false)
+				_house(Transform3D(Basis(Vector3.UP, PI if sg > 0.0 else 0.0), lc2), 20.0, rng.randf() < 0.2)
+		xx2 += 24.0
+	# ---- PONTE para a ilha
+	_bridge(Vector3(210, 0, -414), Vector3(210, 0, -516), 3.2)
+	# ---- ILHA: estrada de terra, morro, casas de praia
+	var isl: Rect2 = W2.ISLAND
+	hills.append([Vector2(isl.position.x + 70.0, isl.position.y + 60.0), 45.0, 16.0])
+	_hill_mesh(hills[-1][0], 45.0)
+	_road(Vector3(210, 0, -516), Vector3(210, 0, -560), 7.0, true)
+	_road(Vector3(210, 0, -560), Vector3(isl.end.x - 14.0, 0, isl.position.y + 24.0), 6.0, true)
+	_road(Vector3(210, 0, -560), Vector3(isl.position.x + 20.0, 0, -540.0), 6.0, true)
+	for k in 3:
+		var hc := Vector3(isl.position.x + 30.0 + k * 22.0, 0.0, -512.0)
+		_house(Transform3D(Basis(Vector3.UP, PI), hc), 18.0, k == 1)
+
+## rua elevada: tabuleiro a 'h' m de altura entre x0 e x1 (sobre a rua z), rampas de 60 m nas pontas
+func _viaduct(x0: float, x1: float, z: float, h: float) -> void:
+	var conc := M.concrete(Color(0.62, 0.62, 0.6))
+	var deck := M.asphalt()
+	var w := 12.0
+	_box(Vector3(x1 - x0, 0.6, w), Vector3((x0 + x1) * 0.5, h - 0.3, z), conc, true)
+	_box(Vector3(x1 - x0, 0.06, w - 0.6), Vector3((x0 + x1) * 0.5, h + 0.03, z), deck, false)
+	for sz in [-1.0, 1.0]:
+		_box(Vector3(x1 - x0, 1.0, 0.3), Vector3((x0 + x1) * 0.5, h + 0.5, z + sz * (w * 0.5 - 0.15)), conc, true)
+	var x := x0 + 10.0
+	while x < x1:
+		_box(Vector3(1.6, h - 0.6, 1.6), Vector3(x, (h - 0.6) * 0.5, z - 3.5), conc, true)
+		_box(Vector3(1.6, h - 0.6, 1.6), Vector3(x, (h - 0.6) * 0.5, z + 3.5), conc, true)
+		x += 24.0
+	for side in [-1.0, 1.0]:
+		var xa: float = x0 if side < 0 else x1
+		var xb: float = xa + side * 60.0
+		var a := Vector3(xa, h, z)
+		var b := Vector3(xb, 0.1, z)
+		var dir := b - a
+		var xf := Transform3D(Basis.looking_at(-dir.normalized(), Vector3.UP), (a + b) * 0.5 + Vector3(0, -0.3, 0))
+		_boxr(Vector3(w, 0.6, dir.length()), xf, conc, true)
+		for sz in [-1.0, 1.0]:
+			_boxr(Vector3(0.3, 1.0, dir.length()), xf * Transform3D(Basis(), Vector3(sz * (w * 0.5 - 0.15), 0.7, 0)), conc, true)
+	extra_roads.append([Vector3(x0 - 60.0, 0, z), Vector3(x1 + 60.0, 0, z), 10.0, Color(0.5, 0.5, 0.52)])
+
+## ponte sobre o mar: rampas nas duas pontas, tabuleiro, pilares até o fundo, guarda-corpo e arco
+func _bridge(a: Vector3, b: Vector3, h: float) -> void:
+	var conc := M.concrete(Color(0.7, 0.7, 0.68))
+	var steel := M.plain(Color(0.75, 0.2, 0.15), 0.5, 0.6)
+	var w := 10.0
+	var r0 := a + (b - a).normalized() * 22.0
+	var r1 := b - (b - a).normalized() * 22.0
+	for seg in [[a, r0, 0.1, h], [r0, r1, h, h], [r1, b, h, 0.1]]:
+		var p0: Vector3 = seg[0] + Vector3(0, seg[2], 0)
+		var p1: Vector3 = seg[1] + Vector3(0, seg[3], 0)
+		var dir := p1 - p0
+		var xf := Transform3D(Basis.looking_at(-dir.normalized(), Vector3.UP), (p0 + p1) * 0.5 + Vector3(0, -0.3, 0))
+		_boxr(Vector3(w, 0.6, dir.length()), xf, conc, true)
+		for sx in [-1.0, 1.0]:
+			_boxr(Vector3(0.25, 1.1, dir.length()), xf * Transform3D(Basis(), Vector3(sx * (w * 0.5 - 0.12), 0.8, 0)), steel, true)
+	var L := r0.distance_to(r1)
+	for k in 4:
+		var p := r0.lerp(r1, (k + 0.5) / 4.0)
+		_box(Vector3(2.0, h + 12.0, 2.0), Vector3(p.x, (h - 12.0) * 0.5, p.z), conc, true)
+	# arco metálico decorativo
+	for k in 12:
+		var t0 := float(k) / 12.0
+		var t1 := float(k + 1) / 12.0
+		for sx in [-1.0, 1.0]:
+			var q0 := r0.lerp(r1, t0) + Vector3(sx * (w * 0.5 + 0.3), h + sin(t0 * PI) * 9.0, 0)
+			var q1 := r0.lerp(r1, t1) + Vector3(sx * (w * 0.5 + 0.3), h + sin(t1 * PI) * 9.0, 0)
+			var d := q1 - q0
+			_boxr(Vector3(0.5, 0.5, d.length()), Transform3D(Basis.looking_at(-d.normalized(), Vector3.UP), (q0 + q1) * 0.5), steel, false)
+			if k % 2 == 1:
+				_box(Vector3(0.12, sin(t1 * PI) * 9.0, 0.12), Vector3(q1.x, h + sin(t1 * PI) * 4.5, q1.z), steel, false)
+	extra_roads.append([a, b, w, Color(0.6, 0.6, 0.6)])

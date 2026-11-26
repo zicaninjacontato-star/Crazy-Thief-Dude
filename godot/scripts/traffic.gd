@@ -143,6 +143,11 @@ func _driver(a: Dictionary) -> void:
 	if c.kind == "moto":
 		ex = {"hat": 2, "hat_c": [Color(0.1, 0.1, 0.1), Color(0.8, 0.1, 0.1), Color(0.9, 0.9, 0.9)][rng.randi() % 3]}   # capacete
 	var cols := [shirts[rng.randi() % shirts.size()], Color(0.12, 0.14, 0.2), [Color(0.92, 0.75, 0.6), Color(0.55, 0.36, 0.22), Color(0.78, 0.56, 0.38)][rng.randi() % 3], Color(0.08, 0.06, 0.05)]
+	if c.get("police") == true:
+		cols[0] = Color(0.12, 0.2, 0.42)       # policial (farda azul)
+		cols[1] = Color(0.08, 0.1, 0.2)
+		if c.kind != "moto":
+			ex = {"hat": 1, "hat_c": Color(0.08, 0.1, 0.22)}
 	a.cols = cols
 	h.build(cols[0], cols[1], cols[2], cols[3], ex)
 	h.sitting = true
@@ -156,6 +161,7 @@ func _driver(a: Dictionary) -> void:
 	h.animate(0, 0)
 	h.set_far(45.0)
 	a.drv = h
+	c.set_meta("drv_node", h)
 
 ## jogador vai pegar o carro: o carro para e devolve o motorista (a animação o tira do banco)
 ## {drv: Humanoid ou null, cols, dead}

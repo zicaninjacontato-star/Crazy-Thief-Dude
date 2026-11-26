@@ -53,6 +53,7 @@ var pitch := 0.0
 var roll := 0.0
 var vy := 0.0
 
+var armed := false           # caça / helicóptero de ataque: metralhadora + mísseis
 var subkind := ""           # boat / jetski / ship (todos usam a física de barco)
 var ai_path: Array = []      # patrulha em volta da ilha (barcos com piloto NPC)
 var ai_i := 0
@@ -62,6 +63,12 @@ func setup(k: String, paint: Color) -> void:
 	subkind = k
 	if k in ["jetski", "ship"]:
 		k = "boat"
+	elif k == "jet":
+		k = "plane"
+		armed = true
+	elif k == "attack":
+		k = "heli"
+		armed = true
 	kind = k
 	collision_layer = 1
 	collision_mask = 1
@@ -87,20 +94,29 @@ func setup(k: String, paint: Color) -> void:
 				seat = Vector3(0.35, 0.55, -0.4)
 				hp = 120.0
 		"plane":
-			_plane(paint)
-			body_size = Vector3(10.5, 2.6, 8.4)
-			seat = Vector3(0, 0.95, 0.6)
-			hp = 140.0
+			if armed:
+				_fighter(paint)
+				body_size = Vector3(9.6, 3.0, 13.0)
+				seat = Vector3(0, 1.25, 2.2)
+				hp = 320.0
+			else:
+				_plane(paint)
+				body_size = Vector3(10.5, 2.6, 8.4)
+				seat = Vector3(0, 0.95, 0.6)
+				hp = 140.0
 		"heli":
 			_heli(paint, police)
 			body_size = Vector3(2.4, 2.8, 9.0)
 			seat = Vector3(0.35, 0.65, 0.9)
 			hp = 160.0
+			if armed:
+				_attack_kit()
+				hp = 300.0
 	bx.size = Vector3(minf(body_size.x, 2.4), 1.2, body_size.z * 0.8) if subkind != "ship" else Vector3(8.6, 4.0, 40.0)
 	cs.shape = bx
 	cs.position = Vector3(0, 0.8, 0)
 	add_child(cs)
-	preload("res://scripts/car.gd").optimize_visuals(model_root)
+	preload("res://scripts/car.gd").optimize_visuals(model_root, 0.0)
 
 func door_world() -> Vector3:
 	return global_transform * Vector3(body_size.x * 0.5 + 0.9 if kind != "plane" else 1.6, 0, seat.z)
@@ -248,8 +264,8 @@ func _plane_phys(dt: float) -> void:
 	var on_ground := global_position.y < 0.15
 	engine_on = driver != null and not dead
 	var thr := throttle if engine_on else 0.0
-	v += (thr * (16.0 if thr > 0 else 22.0) - v * 0.12) * dt
-	v = clampf(v, 0.0, 62.0)
+	v += (thr * ((26.0 if armed else 16.0) if thr > 0 else 22.0) - v * (0.1 if armed else 0.12)) * dt
+	v = clampf(v, 0.0, 98.0 if armed else 62.0)
 	if on_ground:
 		yaw += steer_in * 0.8 * clampf(v / 8.0, 0.0, 1.0) * dt
 		roll = lerpf(roll, 0.0, dt * 4.0)
@@ -306,7 +322,7 @@ func _heli_phys(dt: float) -> void:
 	elif engine_on:
 		yaw -= stick.x * 1.4 * dt
 		var fwd := Vector3(sin(yaw), 0, cos(yaw))
-		target_v = fwd * stick.y * 30.0
+		target_v = fwd * stick.y * (38.0 if armed else 30.0)
 		climb = (throttle * 7.0) if absf(throttle) > 0.05 else 0.0
 	var hv := Vector3(velocity.x, 0, velocity.z).lerp(target_v, dt * 1.2)
 	var vyy := lerpf(velocity.y, climb, dt * 2.0)
@@ -479,4 +495,54 @@ func _ship(paint: Color) -> void:
 		for c in 3:
 			for h in 2:
 				CM._box(st, Vector3(2.4, 2.5, 5.8), Vector3(-2.7 + c * 2.7, 6.45 + h * 2.55, -8.0 + r * 4.6 + 2.0), cc[(r + c + h) % 4])
+	_commit(st, model_root)
+
+# ---------------------------------------------------------------- caça (asa delta, cockpit, mísseis sob as asas)
+func _fighter(paint: Color) -> void:
+	var st := _st()
+	var dark := paint.darkened(0.35)
+	CM._ell(st, Vector3(0, 1.5, 0), Vector3(1.5, 1.35, 13.0), paint)                  # fuselagem
+	CM._ell(st, Vector3(0, 1.5, 6.1), Vector3(0.5, 0.5, 1.6), Color(0.2, 0.2, 0.22))    # cone do nariz
+	for s in [-1.0, 1.0]:
+		# asa delta: triângulo grosso (quadriláteros em cima e embaixo)
+		var a := Vector3(0.6 * s, 1.35, 2.0)
+		var bb := Vector3(4.8 * s, 1.3, -3.2)
+		var cc := Vector3(0.6 * s, 1.35, -4.4)
+		# faces dos dois lados (cima e baixo), com cor e normal explícitas
+		for y in [0.0, -0.14]:
+			st.set_color(paint)
+			st.set_normal(Vector3.UP if y == 0.0 else Vector3.DOWN)
+			var p0: Vector3 = a + Vector3(0, y, 0)
+			var p1: Vector3 = bb + Vector3(0, y, 0)
+			var p2: Vector3 = cc + Vector3(0, y, 0)
+			CM._tri(st, p0, p1, p2)
+			CM._tri(st, p0, p2, p1)
+		CM._box(st, Vector3(0.12, 0.2, 1.4), bb + Vector3(0, -0.05, 0.4), dark)
+		CM._prim(st, _cyl(0.13, 2.0, 8), Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(2.6 * s, 1.08, -1.0)), Color(0.85, 0.85, 0.82))
+		CM._ell(st, Vector3(2.6 * s, 1.08, 0.05), Vector3(0.26, 0.26, 0.4), Color(0.75, 0.1, 0.1))
+		CM._box(st, Vector3(1.8, 0.1, 1.2), Vector3(1.3 * s, 1.5, -5.6), paint)             # profundor
+		CM._box(st, Vector3(0.12, 2.2, 1.7), Vector3(0.75 * s, 2.7, -5.2), dark)           # deriva dupla
+		CM._ell(st, Vector3(0.95 * s, 1.15, 1.6), Vector3(0.55, 0.7, 2.4), dark)           # entradas de ar
+		CM._prim(st, _cyl(0.22, 0.16, 10), Transform3D(Basis(Vector3.FORWARD, PI * 0.5), Vector3(1.2 * s, 0.25, -1.0)), Color(0.05, 0.05, 0.05))
+		CM._box(st, Vector3(0.08, 0.9, 0.08), Vector3(1.2 * s, 0.7, -1.0), Color(0.3, 0.3, 0.32))
+	CM._prim(st, _cyl(0.55, 0.6, 14), Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, 1.45, -6.4)), Color(0.12, 0.12, 0.12))
+	CM._prim(st, _cyl(0.2, 0.16, 10), Transform3D(Basis(Vector3.FORWARD, PI * 0.5), Vector3(0, 0.25, 4.0)), Color(0.05, 0.05, 0.05))
+	CM._box(st, Vector3(0.08, 0.9, 0.08), Vector3(0, 0.7, 4.0), Color(0.3, 0.3, 0.32))
+	CM._box(st, Vector3(0.62, 0.1, 0.8), Vector3(0, 1.25, 2.2), Color(0.1, 0.1, 0.1))     # banco
+	CM._box(st, Vector3(0.7, 0.3, 0.2), Vector3(0, 1.75, 3.1), Color(0.08, 0.08, 0.09))    # painel
+	_commit(st, model_root)
+	var g := _st()
+	CM._ell(g, Vector3(0, 2.15, 2.4), Vector3(0.95, 0.75, 2.8), Color(1, 1, 1))
+	_commit(g, model_root, _glass())
+
+## helicóptero de ataque: casulos de foguete e metralhadora no nariz
+func _attack_kit() -> void:
+	var st := _st()
+	var dark := Color(0.12, 0.13, 0.12)
+	for s in [-1.0, 1.0]:
+		CM._box(st, Vector3(1.6, 0.12, 0.5), Vector3(1.4 * s, 1.15, 0.3), dark)
+		CM._prim(st, _cyl(0.22, 1.4, 10), Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(2.1 * s, 0.95, 0.4)), Color(0.25, 0.28, 0.22))
+		CM._ell(st, Vector3(2.1 * s, 0.95, 1.12), Vector3(0.4, 0.4, 0.12), Color(0.06, 0.06, 0.06))
+	CM._prim(st, _cyl(0.06, 1.2, 8), Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, 0.7, 2.6)), dark)
+	CM._ell(st, Vector3(0, 0.75, 2.0), Vector3(0.45, 0.45, 0.45), dark)
 	_commit(st, model_root)

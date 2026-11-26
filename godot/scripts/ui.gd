@@ -23,12 +23,18 @@ const GUNS := [
 	{"id": "armor", "name": "Colete (100%)", "price": 250},
 ]
 const CARS := [
+	{"id": "bike", "name": "Bicicleta", "price": 300},
 	{"id": "moto", "name": "Moto", "price": 1500},
+	{"id": "sportbike", "name": "Moto esportiva", "price": 7000},
 	{"id": "hatch", "name": "Hatch", "price": 3000},
 	{"id": "sedan", "name": "Sedã", "price": 6000},
 	{"id": "pickup", "name": "Picape", "price": 9000},
 	{"id": "suv", "name": "SUV", "price": 12000},
+	{"id": "van", "name": "Van", "price": 8000},
+	{"id": "offroad", "name": "Fora de estrada", "price": 15000},
+	{"id": "truck", "name": "Caminhão", "price": 20000},
 	{"id": "sport", "name": "Esportivo", "price": 45000},
+	{"id": "super", "name": "Supercarro", "price": 90000},
 ]
 const COLORS := [Color(0.6, 0.04, 0.04), Color(0.92, 0.92, 0.93), Color(0.05, 0.05, 0.06), Color(0.06, 0.2, 0.55), Color(0.85, 0.55, 0.05), Color(0.1, 0.35, 0.15), Color(0.45, 0.47, 0.5), Color(0.4, 0.1, 0.45)]
 
@@ -303,6 +309,9 @@ func show_shop(kind: String) -> void:
 		_clothes_begin()
 		return
 	if kind == "guns":
+		show_guns("pistol")
+		return
+	if kind == "guns_old":
 		var box := _open("AMMU★NATION")
 		_info(box, "Dinheiro: $%d" % main.money, Color(0.4, 1, 0.4))
 		for it in GUNS:
@@ -469,7 +478,7 @@ func _buy_gun(it: Dictionary) -> void:
 		var w := id.substr(5)
 		if main.money < it.price: return
 		main.money -= it.price
-		c.ammo[w] = c.ammo.get(w, 0) + int(it.pack)
+		c.add_ammo(w, int(it.pack))
 	elif id == "armor":
 		if main.money < it.price: return
 		main.money -= it.price
@@ -480,7 +489,7 @@ func _buy_gun(it: Dictionary) -> void:
 		if main.money < price: return
 		main.money -= price
 		c.owned[id] = true
-		c.ammo[id] = c.ammo.get(id, 0) + it.ammo
+		c.add_ammo(id, it.ammo)
 		c.weapon = id
 		c._equip()
 	main.audio.play("cash")
@@ -544,43 +553,287 @@ func show_sleep() -> void:
 # ---------------------------------------------------------------- oficina tuning: pintura e conserto
 const TUNE_COLORS := [["Preto", Color(0.03, 0.03, 0.035)], ["Branco", Color(0.92, 0.92, 0.93)], ["Vermelho", Color(0.7, 0.03, 0.03)], ["Azul", Color(0.06, 0.2, 0.6)],
 	["Verde", Color(0.05, 0.4, 0.15)], ["Amarelo", Color(0.95, 0.75, 0.05)], ["Laranja", Color(0.95, 0.4, 0.05)], ["Roxo", Color(0.35, 0.08, 0.5)], ["Prata", Color(0.6, 0.62, 0.65)], ["Rosa", Color(0.95, 0.4, 0.65)]]
+const TN := preload("res://scripts/tuning.gd")
+var _tune_old := {}
+var _tune_new := {}
+var _tune_cat := ""
+var _tune_car = null
+
+## abre a oficina (chamado pelo main quando o carro termina de entrar)
 func show_tuning() -> void:
 	var c = main.player.vehicle
 	if c == null:
 		return
-	var box := _open("OFICINA TUNING")
-	_info(box, "Dinheiro: $%d" % main.money, Color(0.4, 1, 0.4))
+	_tune_car = c
+	_tune_old = c.mods.duplicate()
+	_tune_new = c.mods.duplicate()
+	_tune_cat = ""
+	_tune_panel()
+
+func _tune_panel() -> void:
+	var c = _tune_car
+	var box := _open("OFICINA TUNING", true)
+	var cost: int = TN.cost(_tune_old, _tune_new)
+	_info(box, "Dinheiro: $%d   ·   Alterações: $%d" % [main.money, cost], Color(0.4, 1, 0.4) if main.money >= cost else Color(1, 0.4, 0.3))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	box.add_child(row)
+	for d in [["◀ Girar", -0.6], ["Girar ▶", 0.6]]:
+		var b := Button.new()
+		b.text = d[0]
+		b.custom_minimum_size = Vector2(150, 54)
+		b.add_theme_font_size_override("font_size", 22)
+		var da: float = d[1]
+		b.pressed.connect(func(): main.tune_cam(da))
+		row.add_child(b)
 	var hpv: float = c.get("hp") if c.get("hp") != null else 100.0
-	_btn(box, "Consertar tudo ($150)  · vida %d%%" % int(clampf(hpv, 0.0, 100.0)), func():
+	var rb := Button.new()
+	rb.text = "Consertar $150 (%d%%)" % int(clampf(hpv, 0.0, 100.0))
+	rb.custom_minimum_size = Vector2(180, 54)
+	rb.add_theme_font_size_override("font_size", 18)
+	rb.disabled = main.money < 150 or hpv >= 99.9
+	rb.pressed.connect(func():
 		if main.money >= 150:
 			main.money -= 150
 			main.repair_vehicle(c)
 			main.audio.play("cash")
-		show_tuning(), main.money >= 150)
-	_info(box, "Pintura ($250):", Color(1, 0.85, 0.4))
-	var grid := GridContainer.new()
-	grid.columns = 5
-	grid.add_theme_constant_override("h_separation", 8)
-	grid.add_theme_constant_override("v_separation", 8)
-	box.add_child(grid)
-	for tc in TUNE_COLORS:
+			_tune_panel())
+	row.add_child(rb)
+	for cat in TN.cats_for(c):
+		var info: Dictionary = TN.CATS[cat]
+		var cur = _tune_new.get(cat, 0 if cat != "paint" else "")
+		var label: String = info.name
+		if cat != "paint":
+			label += ":  " + info.opts[int(cur)]
+		var b := _btn(box, ("▼ " if _tune_cat == cat else "▶ ") + label, func():
+			_tune_cat = "" if _tune_cat == cat else cat
+			_tune_panel())
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.custom_minimum_size = Vector2(440, 52)
+		b.add_theme_font_size_override("font_size", 21)
+		if _tune_cat != cat:
+			continue
+		if cat == "paint":
+			var grid := GridContainer.new()
+			grid.columns = 5
+			grid.add_theme_constant_override("h_separation", 8)
+			grid.add_theme_constant_override("v_separation", 8)
+			box.add_child(grid)
+			for tc in TUNE_COLORS:
+				var pb := Button.new()
+				pb.custom_minimum_size = Vector2(80, 54)
+				var sb := StyleBoxFlat.new()
+				sb.bg_color = tc[1]
+				sb.set_corner_radius_all(8)
+				sb.border_color = Color(1, 0.85, 0.3) if str(cur) == tc[1].to_html() else Color(1, 1, 1, 0.5)
+				sb.set_border_width_all(4 if str(cur) == tc[1].to_html() else 2)
+				for st in ["normal", "hover", "pressed"]:
+					pb.add_theme_stylebox_override(st, sb)
+				var col: Color = tc[1]
+				pb.pressed.connect(func(): _tune_set("paint", col.to_html()))
+				grid.add_child(pb)
+			_info(box, "Pintura: $%d" % TN.price("paint", 0), Color(1, 0.85, 0.4))
+			continue
+		for i in info.opts.size():
+			var owned: bool = int(_tune_old.get(cat, 0)) == i
+			var txt: String = ("   ✓ " if int(cur) == i else "      ") + info.opts[i]
+			if i > 0 and not owned:
+				txt += "   $%d" % TN.price(cat, i)
+			elif owned:
+				txt += "   (instalado)"
+			var ob := _btn(box, txt, func(): _tune_set(cat, i))
+			ob.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			ob.custom_minimum_size = Vector2(440, 46)
+			ob.add_theme_font_size_override("font_size", 19)
+	_btn(box, "INSTALAR ($%d)" % cost, func():
+		var cc: int = TN.cost(_tune_old, _tune_new)
+		if main.money >= cc:
+			main.money -= cc
+			_tune_old = _tune_new.duplicate()
+			main.save_mods(_tune_car)
+			if cc > 0:
+				main.audio.play("cash")
+			_tune_panel(), cost > 0 and main.money >= cost)
+	_btn(box, "SAIR DA OFICINA", func():
+		TN.apply(_tune_car, _tune_old)
+		_close()
+		main.end_tuning())
+
+func _tune_set(cat: String, v) -> void:
+	if _tune_car == null or not is_instance_valid(_tune_car):
+		return
+	_tune_new[cat] = v
+	TN.apply(_tune_car, _tune_new)
+	_tune_panel()
+
+# ---------------------------------------------------------------- AMMU★NATION nova: prévia 3D + estatísticas
+const W := preload("res://scripts/weapons.gd")
+const GUN_LIST := ["pistol", "smg", "shotgun", "rifle", "sniper", "rpg", "grenade"]
+var _gun_sel := "pistol"
+
+func _gun_item(id: String) -> Dictionary:
+	for it in GUNS:
+		if it.id == id:
+			return it
+	return {}
+
+func _ammo_item(id: String) -> Dictionary:
+	for it in GUNS:
+		if it.id == "ammo_" + id:
+			return it
+	return {}
+
+func show_guns(sel: String) -> void:
+	_close()
+	_gun_sel = sel
+	get_tree().paused = true
+	overlay = ColorRect.new()
+	overlay.color = Color(0.02, 0.02, 0.03, 0.88)
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(overlay)
+	var mc := MarginContainer.new()
+	mc.set_anchors_preset(Control.PRESET_FULL_RECT)
+	for k in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
+		mc.add_theme_constant_override(k, 24)
+	overlay.add_child(mc)
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 22)
+	mc.add_child(hb)
+	var c = main.combat
+	# ---- lista à esquerda
+	var left := VBoxContainer.new()
+	left.custom_minimum_size = Vector2(380, 0)
+	left.add_theme_constant_override("separation", 8)
+	hb.add_child(left)
+	var t := Label.new()
+	t.text = "AMMU★NATION"
+	t.add_theme_font_size_override("font_size", 40)
+	t.add_theme_color_override("font_color", Color(1, 0.25, 0.2))
+	left.add_child(t)
+	_info(left, "Dinheiro: $%d" % main.money, Color(0.4, 1, 0.4))
+	for id in GUN_LIST:
+		var it := _gun_item(id)
+		var owned: bool = c.owned.get(id, false)
 		var b := Button.new()
-		b.custom_minimum_size = Vector2(92, 64)
-		b.tooltip_text = tc[0]
+		b.text = "%s   %s" % [it.name, "✓ SUA" if owned else "$%d" % it.price]
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.custom_minimum_size = Vector2(380, 54)
+		b.add_theme_font_size_override("font_size", 22)
 		var sb := StyleBoxFlat.new()
-		sb.bg_color = tc[1]
+		sb.bg_color = Color(0.6, 0.12, 0.1, 0.95) if id == sel else Color(0.12, 0.13, 0.16, 0.95)
 		sb.set_corner_radius_all(8)
-		sb.border_color = Color(1, 1, 1, 0.6)
-		sb.set_border_width_all(2)
+		sb.set_content_margin_all(10)
 		b.add_theme_stylebox_override("normal", sb)
 		b.add_theme_stylebox_override("hover", sb)
 		b.add_theme_stylebox_override("pressed", sb)
-		var col: Color = tc[1]
-		b.pressed.connect(func():
-			if main.money >= 250 and c.has_method("repaint"):
-				main.money -= 250
-				c.repaint(col)
+		b.pressed.connect(func(): show_guns(id))
+		left.add_child(b)
+	var arm: Dictionary = _gun_item("armor")
+	_btn(left, "Colete à prova de balas — $%d" % arm.price, func(): _buy_gun(arm); show_guns(_gun_sel), main.money >= arm.price and main.armor < 99.0).custom_minimum_size = Vector2(380, 54)
+	_btn(left, "SAIR", _close).custom_minimum_size = Vector2(380, 54)
+	# ---- detalhe à direita: prévia 3D girando e estatísticas
+	var right := VBoxContainer.new()
+	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right.add_theme_constant_override("separation", 8)
+	hb.add_child(right)
+	var svc := SubViewportContainer.new()
+	svc.custom_minimum_size = Vector2(560, 260)
+	svc.stretch = true
+	right.add_child(svc)
+	var sv := SubViewport.new()
+	sv.own_world_3d = true
+	sv.transparent_bg = false
+	sv.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	svc.add_child(sv)
+	var cam := Camera3D.new()
+	cam.position = Vector3(0, 0.15, 1.6)
+	cam.fov = 40.0
+	sv.add_child(cam)
+	var l1 := DirectionalLight3D.new()
+	l1.rotation_degrees = Vector3(-40, 30, 0)
+	l1.light_energy = 1.6
+	sv.add_child(l1)
+	var l2 := OmniLight3D.new()
+	l2.position = Vector3(-1.2, 0.8, 1.2)
+	l2.light_energy = 1.4
+	l2.omni_range = 6.0
+	sv.add_child(l2)
+	var we := WorldEnvironment.new()
+	var env := Environment.new()
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.55, 0.55, 0.6)
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = Color(0.2, 0.21, 0.25)
+	we.environment = env
+	sv.add_child(we)
+	var pivot := Node3D.new()
+	sv.add_child(pivot)
+	var gun: Node3D = W.gun_mesh(sel)
+	var length: float = {"pistol": 0.3, "smg": 0.5, "shotgun": 0.95, "rifle": 1.05, "sniper": 1.15, "rpg": 1.15, "grenade": 0.15}[sel]
+	gun.scale = Vector3.ONE * (1.25 / length if sel != "grenade" else 4.0)
+	# no modelo o cano é −Y e o cabo é −Z: cano para +X e cabo para baixo, centralizado
+	gun.basis = Basis(Vector3(0, 0, -1), Vector3(-1, 0, 0), Vector3(0, 1, 0)).scaled(gun.scale)
+	var holder := Node3D.new()
+	holder.rotation.x = 0.2
+	holder.add_child(gun)
+	gun.position = Vector3(-length * gun.scale.x * 0.45, 0.05, 0) if sel != "grenade" else Vector3.ZERO
+	pivot.add_child(holder)
+	var tw := pivot.create_tween().set_loops()
+	pivot.rotation.y = -0.5
+	tw.tween_property(pivot, "rotation:y", TAU - 0.5, 8.0).from(-0.5)
+	# nome e estatísticas
+	var d: Dictionary = W.DATA[sel]
+	var nm := Label.new()
+	nm.text = d.name
+	nm.add_theme_font_size_override("font_size", 34)
+	nm.add_theme_color_override("font_color", Color(1, 0.85, 0.3))
+	right.add_child(nm)
+	var pel: int = d.get("pellets", 1)
+	var stats := [["Dano", minf(1.0, d.dmg * pel / 200.0), "%d" % int(d.dmg * pel)],
+		["Cadência", minf(1.0, (1.0 / d.rate) / 12.0), "%.1f tiros/s" % (1.0 / d.rate)],
+		["Recuo", c.RECOIL.get(sel, 0.0), "%d%%" % int(c.RECOIL.get(sel, 0.0) * 100.0)],
+		["Recarga", minf(1.0, c.RELOAD.get(sel, 0.0) / 3.0), "%.1f s" % c.RELOAD.get(sel, 0.0)],
+		["Alcance", minf(1.0, d.range / 140.0), "%d m" % int(d.range)],
+		["Pente", minf(1.0, c.MAG.get(sel, 1) / 30.0), "%d" % c.MAG.get(sel, 1)]]
+	for st in stats:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 12)
+		right.add_child(row)
+		var lb := Label.new()
+		lb.text = st[0]
+		lb.custom_minimum_size = Vector2(130, 0)
+		lb.add_theme_font_size_override("font_size", 22)
+		row.add_child(lb)
+		var bar := Control.new()
+		bar.custom_minimum_size = Vector2(300, 18)
+		row.add_child(bar)
+		var bg := ColorRect.new()
+		bg.color = Color(0.2, 0.2, 0.24)
+		bg.size = Vector2(300, 18)
+		bar.add_child(bg)
+		var fg := ColorRect.new()
+		fg.color = Color(1, 0.35, 0.25).lerp(Color(1, 0.8, 0.2), st[1])
+		fg.size = Vector2(300.0 * clampf(st[1], 0.03, 1.0), 18)
+		bar.add_child(fg)
+		var vl := Label.new()
+		vl.text = st[2]
+		vl.add_theme_font_size_override("font_size", 20)
+		vl.add_theme_color_override("font_color", Color(0.8, 0.8, 0.85))
+		row.add_child(vl)
+	var have: int = c.ammo.get(sel, 0)
+	var mx: int = c.MAX_AMMO.get(sel, 0)
+	_info(right, "Munição: %d / %d (máximo)" % [have, mx], Color(0.75, 0.85, 1.0))
+	var it2 := _gun_item(sel)
+	var owned2: bool = c.owned.get(sel, false)
+	if not owned2:
+		_btn(right, "COMPRAR %s — $%d" % [it2.name.to_upper(), it2.price], func(): _buy_gun(it2); show_guns(sel), main.money >= it2.price)
+	var am := _ammo_item(sel)
+	if not am.is_empty() and owned2:
+		_btn(right, "%s — $%d" % [am.name, am.price], func(): _buy_gun(am); show_guns(sel), main.money >= am.price and have < mx)
+	elif sel == "grenade" and owned2:
+		_btn(right, "Mais granadas (+5) — $%d" % it2.price, func():
+			if main.money >= it2.price and have < mx:
+				main.money -= it2.price
+				c.add_ammo("grenade", 5)
 				main.audio.play("cash")
-				show_tuning())
-		grid.add_child(b)
-	_btn(box, "SAIR", _close)
+			show_guns(sel), main.money >= it2.price and have < mx)

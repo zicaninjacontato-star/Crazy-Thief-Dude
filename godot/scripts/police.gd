@@ -31,6 +31,7 @@ var patrol_cops: Array = []  # policiais a pé patrulhando (viram perseguidores 
 var jet_cd := 0.0
 var tank_cd := 3.0
 var _out_i := 0
+var boat_cd := 0.0
 
 func setup(m: Node3D) -> void:
 	main = m
@@ -128,6 +129,12 @@ func tick(dt: float) -> void:
 		elif units.filter(func(u): return u.kind == "armored").size() < want_arm:
 			_spawn_unit("armored", s, pp)
 			spawn_cd = 4.0
+	# 3★+ e o jogador no mar: lanchas da polícia
+	var in_sea: bool = main.world2.is_water(pp.x, pp.z) and main.world2.sea_dist(pp.x, pp.z) > 8.0
+	if s >= 3 and in_sea and units.filter(func(u): return u.kind == "boat").size() < (1 if s < 4 else 2) and boat_cd <= 0.0:
+		_spawn_boat(pp)
+		boat_cd = 6.0
+	boat_cd -= dt
 	if s >= 4 and (heli == null or not is_instance_valid(heli) or heli.dead):
 		if heli == null or not is_instance_valid(heli):
 			_spawn_heli(pp)
@@ -192,6 +199,7 @@ func _spawn_unit(kind: String, s: int, pp: Vector3) -> void:
 		if s >= 3:
 			c.paint_black()
 	units.append({"car": c, "kind": kind, "out": false, "crew": 4 if kind in ["swat", "armored"] else (1 if kind == "moto" else 2)})
+	main.traffic_sys._driver({"car": c})       # motorista visível (vira policial a pé ao descer)
 
 func _spawn_heli(pp: Vector3) -> void:
 	var h = Arcade.new()
@@ -232,9 +240,24 @@ func _units_tick(dt: float, s: int, p: Node3D, pp: Vector3) -> void:
 			var vmax: float = 30.0 if u.kind == "car" else 26.0
 			if on_foot:
 				vmax = clampf((d - 9.0) * 0.8, 2.0, vmax)
+			if u.kind == "boat":
+				_boat_chase(u, dt, s, pp, d)
+				continue
+			if on_foot:
+				vmax = clampf((d - 8.0) * 0.7, 0.0, vmax)
 			main.traffic_sys.chase(c, pp, lead, u.nav, dt, vmax)
-			if d < (22.0 if on_foot else 17.0) and (on_foot or pv.length() < 4.0):
-				_crew_out(u, s)
+			# só desce quando a viatura já parou perto do jogador
+			var cs: float = c.linear_velocity.length()
+			if d < 16.0 and cs < 1.6 and (on_foot or pv.length() < 4.0):
+				u.stop_t = u.get("stop_t", 0.0) + dt
+				if u.stop_t > 0.35:
+					_crew_out(u, s)
+			elif (d < 30.0 or (main.player.swimming and d < 150.0)) and cs < 2.5 and on_foot:
+				u.stop_t = u.get("stop_t", 0.0) + dt
+				if u.stop_t > 2.5:
+					_crew_out(u, s)          # travou perto (ou na beira do mar): desce mesmo assim
+			else:
+				u.stop_t = maxf(0.0, u.get("stop_t", 0.0) - dt * 0.5)
 		else:
 			c.ai_target = null
 			c.throttle = 0.0
@@ -255,19 +278,35 @@ func _crew_out(u: Dictionary, s: int) -> void:
 	c.ai_target = null
 	c.throttle = 0.0
 	c.brake_in = 1.0
+	# o motorista que estava sentado vira um dos policiais que descem (não fica ninguém "preso" lá dentro)
+	if c.has_meta("drv_node"):
+		var dn = c.get_meta("drv_node")
+		if is_instance_valid(dn):
+			dn.queue_free()
+		c.remove_meta("drv_node")
+	if c.has_method("set_door"):
+		c.set_door(1.0)
+	main.audio.play("door", c.global_position)
 	var n: int = u.crew
 	for i in n:
-		var cp := Cop.new()
-		main.add_child(cp)
-		cp.setup(rng.randi(), {"swat": "swat", "armored": "heavy"}.get(u.kind, "cop"))
 		var side: float = 1.0 if i % 2 == 0 else -1.0
-		cp.global_position = c.global_position + c.global_transform.basis.x * (c.body_size.x * 0.5 + 0.8) * side - c.global_transform.basis.z * (i / 2) * 1.5 + Vector3(0, 0.2, 0)
-		cp.unit = c
-		cp.shot_player.connect(main.combat._on_cop_shot)
-		cp.died.connect(func(_x): u.crew -= 1)
-		cp.died.connect(_on_cop_down)
-		cops.append(cp)
-		main.audio.play("door", c.global_position)
+		var back: float = (i / 2) * 1.6
+		var pos: Vector3 = c.global_position + c.global_transform.basis.x * (c.body_size.x * 0.5 + 0.7) * side - c.global_transform.basis.z * back + Vector3(0, 0.2, 0)
+		main.get_tree().create_timer(0.15 + i * 0.35).timeout.connect(func():
+			if not is_instance_valid(c) or main.wanted == 0:
+				return
+			var cp := Cop.new()
+			main.add_child(cp)
+			cp.setup(rng.randi(), {"swat": "swat", "armored": "heavy"}.get(u.kind, "cop"))
+			cp.global_position = pos
+			cp.body.rotation.y = atan2(c.global_transform.basis.x.x * side, c.global_transform.basis.x.z * side)
+			cp.unit = c
+			cp.shot_player.connect(main.combat._on_cop_shot)
+			cp.died.connect(func(_x): u.crew -= 1)
+			cp.died.connect(_on_cop_down)
+			cops.append(cp)
+			cp.play_anim("exit", 0.55, func(): pass))
+	main.get_tree().create_timer(0.6 + n * 0.35).timeout.connect(func(): if is_instance_valid(c) and c.has_method("set_door"): c.set_door(0.0))
 
 func _cops_tick(dt: float, s: int, p: Node3D) -> void:
 	var armed: bool = main.combat.weapon != "fist" or armed_t > 0.0 or main.player.vehicle != null
@@ -461,3 +500,51 @@ func _activate_patrols(pp: Vector3) -> void:
 			cp.died.connect(_on_cop_down)
 			cops.append(cp)
 	patrol_cops.clear()
+
+# ---------------------------------------------------------------- lanchas da polícia
+func _spawn_boat(pp: Vector3) -> void:
+	var w2 = main.world2
+	var best := pp
+	var bd := -1e9
+	for k in 12:
+		var a := k * TAU / 12.0
+		var q := pp + Vector3(cos(a), 0, sin(a)) * 110.0
+		var sd: float = w2.sea_dist(q.x, q.z)
+		if sd > bd:
+			bd = sd
+			best = q
+	if bd < 10.0:
+		return
+	var b = main._spawn_arcade("boat", Vector3(best.x, w2.WATER_Y - 0.5, best.z), atan2(pp.x - best.x, pp.z - best.z), Color(0.1, 0.2, 0.5))
+	b.police = true
+	b.hp = 220.0
+	for k in 2:
+		var dh := preload("res://scripts/humanoid.gd").new()
+		dh.build(Color(0.12, 0.2, 0.42), Color(0.08, 0.1, 0.2), Color(0.78, 0.56, 0.38), Color(0.06, 0.05, 0.05), {"hat": 1, "hat_c": Color(0.08, 0.1, 0.22)})
+		dh.sitting = k == 0
+		dh.scale = Vector3.ONE * 0.85
+		dh.position = Vector3(b.seat.x - k * 0.8, b.seat.y + (0.07 - 0.98 * 0.85 if k == 0 else -0.6), b.seat.z - k * 1.4)
+		b.model_root.add_child(dh)
+		dh.aiming = k == 1
+		dh.animate(0, 0)
+		dh.set_far(80.0)
+	units.append({"car": b, "kind": "boat", "out": false, "crew": 0, "cool": 1.5})
+	main._msg("Lancha da polícia!")
+
+func _boat_chase(u: Dictionary, dt: float, s: int, pp: Vector3, d: float) -> void:
+	var b = u.car
+	var to: Vector3 = pp - b.global_position
+	var want := atan2(to.x, to.z)
+	b.steer_in = clampf(wrapf(want - b.yaw, -PI, PI) * 1.6, -1.0, 1.0)
+	b.throttle = 1.0 if d > 22.0 else (0.35 if d > 10.0 else 0.0)
+	# atirador na lancha
+	u.cool = u.get("cool", 1.5) - dt
+	if u.cool <= 0.0 and d < 60.0:
+		u.cool = rng.randf_range(0.9, 1.6)
+		var from: Vector3 = b.global_position + Vector3(0, 1.6, 0)
+		var hitp := rng.randf() < 0.3 + s * 0.04
+		var aim: Vector3 = pp + Vector3(0, 1.0, 0)
+		if not hitp:
+			aim += Vector3(rng.randf_range(-3, 3), 0, rng.randf_range(-3, 3))
+		W.tracer(main, from, aim)
+		main.combat._on_cop_shot(8.0 if hitp else 0.0, from)

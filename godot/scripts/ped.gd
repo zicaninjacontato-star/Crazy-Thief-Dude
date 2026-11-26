@@ -155,7 +155,7 @@ func damage(amount: float, dir: Vector3, gore: bool, src: PhysicsBody3D = null, 
 	return false
 
 func scare() -> void:
-	if not down and mode != "hostage" and mode != "handsup":
+	if not down and mode != "hostage" and mode != "handsup" and mode != "clerk":
 		_end_mode()
 		flee = 6.0
 
@@ -207,6 +207,13 @@ func react_aim() -> void:
 func _mode_tick(dt: float) -> void:
 	var main := get_tree().current_scene
 	var pl = main.player
+	if mode == "clerk":
+		# atendente atrás do balcão: olha para o cliente quando ele chega perto
+		var tp: Vector3 = pl.global_position - global_position
+		if tp.length() < 6.0:
+			body.rotation.y = lerp_angle(body.rotation.y, atan2(tp.x, tp.z), minf(1.0, dt * 4.0))
+		body.animate(0.0, dt)
+		return
 	var to: Vector3 = pl.global_position - global_position
 	to.y = 0
 	var d := to.length()

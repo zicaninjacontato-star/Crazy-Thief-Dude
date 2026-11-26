@@ -45,6 +45,8 @@ var can_enter := false       # há veículo perto (mostra o botão do carro)
 var weapon_kind := "fist"
 var action_kind := ""        # enter / exit / buy / carry / drop / trunk
 var heli := false
+var armed := false            # pilotando caça/helicóptero armado
+var missile := false
 var rise_held := false        # SUBIR (debaixo d'água)
 var siren_avail := false      # dirigindo viatura
 var siren_on := false
@@ -76,6 +78,8 @@ var map_yaw := 0.0
 var map_police := Vector3.INF
 var map_roads: Array = []      # posições das ruas da grade (x e z)
 var map_ext := 160.0
+var map_extra: Array = []      # ruas fora da grade [a, b, largura, cor]
+var beach := Rect2(236.0, -464.0, 64.0, 928.0)
 var map_roadw := 14.0
 const R := 70.0
 
@@ -136,6 +140,9 @@ func _layout() -> void:
 	if driving:
 		buttons["gas"] = Rect2(s.x - b - 24, s.y - b - 30, b, b * 1.15)
 		buttons["brake"] = Rect2(s.x - b * 2 - 44, s.y - b - 30, b, b * 1.15)
+		if armed:
+			buttons["fire"] = Rect2(s.x - b - 24, s.y - b * 2.35 - 50, b, b)
+			buttons["missile"] = Rect2(s.x - b * 2 - 44, s.y - b * 2.35 - 50, b, b)
 	else:
 		buttons["fire"] = Rect2(s.x - b * 1.2 - 24, s.y - b * 1.2 - 30, b * 1.2, b * 1.2)
 		buttons["jump"] = Rect2(s.x - b * 2.2 - 44, s.y - b - 30, b, b)
@@ -219,6 +226,7 @@ func _press(k: String, on: bool) -> void:
 		"brake": brk = on
 		"sprint": sprint = on
 		"fire": fire = on
+		"missile": missile = on
 		"aim":
 			if on: aim = not aim
 		"weapon":
@@ -298,6 +306,11 @@ func _icon(kind: String, c: Vector2, r: float, col: Color) -> void:
 			for v in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
 				root.draw_line(c + v * r * 0.35, c + v * r * 1.0, col, w)
 			root.draw_circle(c, w * 0.8, Color(1, 0.3, 0.3))
+		"missile":
+			root.draw_colored_polygon(PackedVector2Array([c + Vector2(0, -0.9) * r, c + Vector2(0.22, -0.5) * r, c + Vector2(0.22, 0.5) * r, c + Vector2(-0.22, 0.5) * r, c + Vector2(-0.22, -0.5) * r]), col)
+			root.draw_colored_polygon(PackedVector2Array([c + Vector2(-0.22, 0.25) * r, c + Vector2(-0.5, 0.75) * r, c + Vector2(-0.22, 0.6) * r]), col)
+			root.draw_colored_polygon(PackedVector2Array([c + Vector2(0.22, 0.25) * r, c + Vector2(0.5, 0.75) * r, c + Vector2(0.22, 0.6) * r]), col)
+			root.draw_circle(c + Vector2(0, 0.85) * r, r * 0.16, Color(1, 0.55, 0.15))
 		"fire":
 			var pts := PackedVector2Array([c + Vector2(-0.25, 0.75) * r, c + Vector2(-0.25, -0.2) * r, c + Vector2(0, -0.8) * r, c + Vector2(0.25, -0.2) * r, c + Vector2(0.25, 0.75) * r])
 			root.draw_colored_polygon(pts, Color(0.95, 0.75, 0.3))
@@ -485,7 +498,7 @@ func _draw_minimap() -> void:
 		lands.append([r.grow(24.0), Color(0.42, 0.4, 0.37)])
 	for r in preload("res://scripts/world2.gd").land_rects():
 		lands.append([r, Color(0.24, 0.33, 0.22)])
-	lands.append([Rect2(172.0, -224.0, 64.0, 448.0), Color(0.78, 0.7, 0.5)])
+	lands.append([beach, Color(0.78, 0.7, 0.5)])
 	for L in lands:
 		var r2: Rect2 = L[0]
 		var poly := PackedVector2Array([tr.call(Vector3(r2.position.x, 0, r2.position.y)), tr.call(Vector3(r2.end.x, 0, r2.position.y)), tr.call(Vector3(r2.end.x, 0, r2.end.y)), tr.call(Vector3(r2.position.x, 0, r2.end.y))])
@@ -508,6 +521,26 @@ func _draw_minimap() -> void:
 				a = Vector3(map_player.x - h, 0, c)
 				b = Vector3(map_player.x + h, 0, c)
 			root.draw_line(tr.call(a), tr.call(b), Color(0.16, 0.16, 0.18), map_roadw * sc)
+	for er in map_extra:
+		var ea: Vector2 = tr.call(er[0])
+		var eb: Vector2 = tr.call(er[1])
+		if Geometry2D.segment_intersects_circle(ea, eb, C, R) >= 0.0 or ea.distance_to(C) < R or eb.distance_to(C) < R:
+			# corta o segmento no círculo
+			var d := eb - ea
+			var t0 := 0.0
+			var t1 := 1.0
+			var cuts := []
+			for t in 21:
+				var tt := t / 20.0
+				cuts.append((ea + d * tt).distance_to(C) < R - 1.0)
+			var a2 := -1
+			for t in 21:
+				if cuts[t] and a2 < 0:
+					a2 = t
+				if (not cuts[t] or t == 20) and a2 >= 0:
+					var b2 := t if cuts[t] else t - 1
+					root.draw_line(ea + d * (a2 / 20.0), ea + d * (b2 / 20.0), er[3], maxf(2.0, er[2] * sc))
+					a2 = -1
 	if map_route.size() > 1:
 		var pts := PackedVector2Array()
 		for q in map_route:
@@ -528,6 +561,8 @@ func _draw_minimap() -> void:
 		_pin(wp, 1.0)
 	for bl in map_blips:
 		var bp: Vector2 = tr.call(bl.pos)
+		if bl.get("near", false) and bp.distance_to(C) > R - 7:
+			continue          # polícia/exército só aparece quando está perto (dentro do minimapa)
 		if bp.distance_to(C) > R - 7:
 			bp = C + (bp - C).normalized() * (R - 7)
 		_blip(bp, bl, 1.0)
@@ -560,7 +595,7 @@ func close_map() -> void:
 
 func _mf_scale() -> float:
 	var s := root.get_viewport_rect().size
-	return minf(s.x / 900.0, s.y / 560.0) * map_zoom
+	return minf(s.x / 1150.0, s.y / 1250.0) * map_zoom
 
 func _mf_to_screen(w: Vector3) -> Vector2:
 	var s := root.get_viewport_rect().size
@@ -641,8 +676,10 @@ func _draw_full_map() -> void:
 		root.draw_rect(Rect2(i0 - Vector2(24, 24) * sc, (r.size + Vector2(48, 48)) * sc), Color(0.45, 0.43, 0.4))
 	for r in rects:
 		root.draw_rect(Rect2(_mf_to_screen(Vector3(r.position.x, 0, r.position.y)), r.size * sc), Color(0.26, 0.4, 0.24))
-	var b0 := _mf_to_screen(Vector3(172.0, 0, -224.0))
-	root.draw_rect(Rect2(b0, Vector2(64.0, 448.0) * sc), Color(0.82, 0.74, 0.52))
+	var b0 := _mf_to_screen(Vector3(beach.position.x, 0, beach.position.y))
+	root.draw_rect(Rect2(b0, beach.size * sc), Color(0.82, 0.74, 0.52))
+	for er in map_extra:
+		root.draw_line(_mf_to_screen(er[0]), _mf_to_screen(er[1]), er[3], maxf(2.0, er[2] * sc))
 	# aeroporto
 	var a0 := _mf_to_screen(Vector3(-500.0, 0, -12.0))
 	root.draw_rect(Rect2(a0, Vector2(340.0, 24.0) * sc), Color(0.2, 0.2, 0.22))
@@ -659,6 +696,8 @@ func _draw_full_map() -> void:
 		root.draw_polyline(pts, Color(0.75, 0.3, 1.0, 0.95), 6.0)
 	var font := ThemeDB.fallback_font
 	for bl in map_blips:
+		if bl.get("near", false) and Vector2(bl.pos.x - map_player.x, bl.pos.z - map_player.z).length() > 140.0:
+			continue
 		var bp := _mf_to_screen(bl.pos)
 		_blip(bp, bl, 1.5)
 	if map_waypoint != Vector3.INF:
@@ -709,6 +748,9 @@ func _blip(p: Vector2, bl: Dictionary, k: float) -> void:
 			root.draw_line(p + Vector2(-0.45, 0.2) * r, p + Vector2(0.3, -0.35) * r, w, lw)
 		"pvan":
 			root.draw_rect(Rect2(p + Vector2(-0.75, -0.5) * r, Vector2(1.5, 0.85) * r), w)
+		"pboat":
+			root.draw_colored_polygon(PackedVector2Array([p + Vector2(-0.8, -0.1) * r, p + Vector2(0.8, -0.1) * r, p + Vector2(0.5, 0.45) * r, p + Vector2(-0.6, 0.45) * r]), w)
+			root.draw_rect(Rect2(p + Vector2(-0.3, -0.55) * r, Vector2(0.5, 0.45) * r), w)
 		"pheli":
 			root.draw_circle(p, r * 0.32, w)
 			root.draw_line(p + Vector2(-0.8, -0.45) * r, p + Vector2(0.8, -0.45) * r, w, lw)

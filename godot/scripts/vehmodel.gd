@@ -34,7 +34,23 @@ static func _wheel_mesh(wr: float, width: float, rim: Color) -> Mesh:
 	return st.commit()
 
 static func build(kind: String, paint: Color) -> Dictionary:
-	return _moto(paint) if kind == "moto" else _bus(paint)
+	match kind:
+		"bike": return _bike(paint)
+		"sportbike":
+			var d := _moto(paint)
+			# carenagem esportiva e bolha (para-brisa) na frente
+			var fs := _st()
+			CM._ell(fs, Vector3(0, 0.82, 0.5), Vector3(0.42, 0.38, 0.62), paint)
+			CM._ell(fs, Vector3(0, 0.62, 0.1), Vector3(0.36, 0.3, 0.7), paint.darkened(0.15))
+			CM._ell(fs, Vector3(0, 1.05, 0.62), Vector3(0.28, 0.2, 0.1), Color(0.15, 0.2, 0.25))
+			var fm := MeshInstance3D.new()
+			fm.mesh = fs.commit()
+			fm.material_override = CM.vc_mat()
+			d.lean.add_child(fm)
+			return d
+		"truck": return _truck(paint)
+		"moto": return _moto(paint)
+	return _bus(paint)
 
 # ---------------------------------------------------------------- moto
 static func _moto(paint: Color) -> Dictionary:
@@ -210,3 +226,127 @@ static func _bus(paint: Color) -> Dictionary:
 				mi.add_child(dual)
 			wheels.append({"node": mi, "pos": Vector3((W * 0.5 - 0.14) * s, wr, wz), "front": wz > 0})
 	return {"root": root, "wheels": wheels, "wr": wr, "seat": Vector3(0.7, 1.05, hz - 1.3), "size": Vector3(W, H, L)}
+
+# ---------------------------------------------------------------- bicicleta
+static func _bike(paint: Color) -> Dictionary:
+	var root := Node3D.new()
+	var lean := Node3D.new()
+	root.add_child(lean)
+	var wr := 0.34
+	var zf := 0.55
+	var zr := -0.5
+	var fr := _st()
+	var dark := Color(0.06, 0.06, 0.07)
+	# quadro em diamante (tubos finos na cor da bike), selim, pedivela
+	CM._prim(fr, _cyl(0.022, 0.75, 6), Transform3D(Basis(Vector3.RIGHT, 1.2), Vector3(0, 0.62, 0.12)), paint)
+	CM._prim(fr, _cyl(0.022, 0.62, 6), Transform3D(Basis(Vector3.RIGHT, -0.35), Vector3(0, 0.62, -0.18)), paint)
+	CM._prim(fr, _cyl(0.02, 0.55, 6), Transform3D(Basis(Vector3.RIGHT, 1.0), Vector3(0, 0.4, -0.26)), paint)
+	CM._prim(fr, _cyl(0.02, 0.45, 6), Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, 0.36, -0.28)), paint)
+	CM._ell(fr, Vector3(0, 0.92, -0.25), Vector3(0.12, 0.05, 0.24), dark)
+	CM._prim(fr, _cyl(0.07, 0.04, 10), Transform3D(Basis(Vector3.FORWARD, PI * 0.5), Vector3(0.05, 0.34, -0.02)), Color(0.6, 0.6, 0.62))
+	for s in [-1.0, 1.0]:
+		CM._box(fr, Vector3(0.1, 0.03, 0.06), Vector3(0.12 * s, 0.34 + 0.12 * s, -0.02 + 0.1 * s), dark)
+	var bm := MeshInstance3D.new()
+	bm.mesh = fr.commit()
+	bm.material_override = CM.vc_mat()
+	lean.add_child(bm)
+	var fork := Node3D.new()
+	fork.position = Vector3(0, 0.9, zf - 0.2)
+	fork.rotation.x = 0.3
+	lean.add_child(fork)
+	var fs := _st()
+	CM._prim(fs, _cyl(0.018, 0.65, 6), Transform3D(Basis(), Vector3(0, -0.3, 0)), Color(0.6, 0.6, 0.62))
+	CM._prim(fs, _cyl(0.015, 0.55, 6), Transform3D(Basis(Vector3.FORWARD, PI * 0.5), Vector3(0, 0.08, -0.05)), dark)
+	var fm := MeshInstance3D.new()
+	fm.mesh = fs.commit()
+	fm.material_override = CM.vc_mat()
+	fork.add_child(fm)
+	var wst := _st()
+	var rz := Basis(Vector3.FORWARD, PI * 0.5)
+	CM._prim(wst, _cyl(wr, 0.045, 22), Transform3D(rz, Vector3.ZERO), Color(0.05, 0.05, 0.05))
+	CM._prim(wst, _cyl(wr * 0.9, 0.05, 22), Transform3D(rz, Vector3.ZERO), Color(0.75, 0.75, 0.78))
+	CM._prim(wst, _cyl(wr * 0.82, 0.055, 22), Transform3D(rz, Vector3.ZERO), Color(0.12, 0.12, 0.12))
+	var wm := wst.commit()
+	var front_w := MeshInstance3D.new()
+	front_w.mesh = wm
+	front_w.material_override = CM.vc_mat()
+	var fp := Node3D.new()
+	fork.add_child(fp)
+	fp.transform = Transform3D(Basis(Vector3.RIGHT, -0.3), fork.transform.affine_inverse() * Vector3(0, wr, zf))
+	fp.add_child(front_w)
+	var rear_w := MeshInstance3D.new()
+	rear_w.mesh = wm
+	rear_w.material_override = CM.vc_mat()
+	rear_w.position = Vector3(0, wr, zr)
+	lean.add_child(rear_w)
+	var wheels := []
+	for wz in [zf, zr]:
+		for s in [-1.0, 1.0]:
+			wheels.append({"node": Node3D.new(), "pos": Vector3(0.22 * s, wr, wz), "front": wz > 0})
+	return {"root": root, "wheels": wheels, "wr": wr, "seat": Vector3(0, 0.62, -0.2), "size": Vector3(0.6, 1.1, 1.7),
+		"spin": [front_w, rear_w], "fork": fork, "lean": lean, "moto": true}
+
+# ---------------------------------------------------------------- caminhão (cabine + baú)
+static func _truck(paint: Color) -> Dictionary:
+	var root := Node3D.new()
+	var L := 8.6
+	var W := 2.45
+	var wr := 0.52
+	var body := _st()
+	var lit := _st()
+	var glass := _st()
+	var dark := Color(0.08, 0.08, 0.09)
+	var hz := L * 0.5
+	# cabine na frente (cor do caminhão), para-brisa, grade, para-choque
+	CM._box(body, Vector3(W, 1.5, 2.2), Vector3(0, 1.35, hz - 1.1), paint)
+	CM._box(body, Vector3(W, 1.05, 1.7), Vector3(0, 2.6, hz - 1.35), paint)
+	CM._box(body, Vector3(W - 0.1, 0.5, 0.06), Vector3(0, 1.25, hz + 0.01), dark)
+	CM._box(body, Vector3(W + 0.1, 0.35, 0.25), Vector3(0, 0.6, hz + 0.05), Color(0.6, 0.6, 0.62))
+	CM._box(glass, Vector3(W - 0.2, 0.85, 0.04), Vector3(0, 2.6, hz - 0.48), Color(0.1, 0.14, 0.18))
+	for s in [-1.0, 1.0]:
+		CM._box(glass, Vector3(0.03, 0.7, 1.0), Vector3((W * 0.5 + 0.005) * s, 2.6, hz - 1.3), Color(0.1, 0.14, 0.18))
+		CM._ell(lit, Vector3(0.85 * s, 1.0, hz + 0.04), Vector3(0.26, 0.16, 0.05), Color(1, 0.97, 0.88))
+		CM._box(body, Vector3(0.06, 0.5, 0.06), Vector3((W * 0.5 + 0.2) * s, 2.7, hz - 0.6), dark)
+		CM._box(body, Vector3(0.1, 0.36, 0.24), Vector3((W * 0.5 + 0.26) * s, 2.6, hz - 0.55), dark)
+		CM._ell(lit, Vector3(0.95 * s, 0.9, -hz - 0.02), Vector3(0.16, 0.22, 0.05), Color(0.95, 0.06, 0.05))
+	# interior da cabine
+	CM._box(body, Vector3(W - 0.3, 0.12, 0.6), Vector3(0, 1.95, hz - 1.5), Color(0.12, 0.12, 0.13))
+	CM._box(body, Vector3(W - 0.3, 0.5, 0.4), Vector3(0, 2.2, hz - 0.7), Color(0.1, 0.1, 0.1))
+	# chassi e baú de carga
+	CM._box(body, Vector3(W - 0.6, 0.35, L - 1.0), Vector3(0, 0.75, -0.3), dark)
+	CM._box(body, Vector3(W + 0.05, 2.9, L - 2.6), Vector3(0, 2.4, -1.25), Color(0.92, 0.92, 0.9))
+	CM._box(body, Vector3(W + 0.07, 0.35, L - 2.6), Vector3(0, 1.1, -1.25), paint)
+	CM._box(body, Vector3(0.04, 2.6, 0.06), Vector3(0, 2.4, -hz + 0.02), dark)
+	var bm := MeshInstance3D.new()
+	bm.mesh = body.commit()
+	bm.material_override = CM.vc_mat()
+	root.add_child(bm)
+	var lm := MeshInstance3D.new()
+	lm.mesh = lit.commit()
+	lm.material_override = CM.vc_lit()
+	root.add_child(lm)
+	var gm := MeshInstance3D.new()
+	gm.mesh = glass.commit()
+	var g := StandardMaterial3D.new()
+	g.vertex_color_use_as_albedo = true
+	g.albedo_color = Color(1, 1, 1, 0.6)
+	g.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	g.metallic = 0.8
+	g.roughness = 0.05
+	gm.material_override = g
+	root.add_child(gm)
+	var wheels := []
+	var wm := _wheel_mesh(wr, 0.32, Color(0.7, 0.7, 0.72))
+	for wz in [hz - 1.2, -2.6]:
+		for s in [-1.0, 1.0]:
+			var mi := MeshInstance3D.new()
+			mi.mesh = wm
+			mi.material_override = CM.vc_mat()
+			if wz < 0:
+				var dual := MeshInstance3D.new()
+				dual.mesh = wm
+				dual.material_override = CM.vc_mat()
+				dual.position = Vector3(-0.3 * s, 0, 0)
+				mi.add_child(dual)
+			wheels.append({"node": mi, "pos": Vector3((W * 0.5 - 0.15) * s, wr, wz), "front": wz > 0})
+	return {"root": root, "wheels": wheels, "wr": wr, "seat": Vector3(0.55, 1.95, hz - 1.5), "size": Vector3(W, 3.9, L)}

@@ -79,7 +79,7 @@ func _physics_process(dt: float) -> void:
 			get_tree().current_scene.splash_at(global_position)
 	body.swimming = swimming     # todo quadro (o corpo pode ter sido recriado na água)
 	if swimming:
-		target_speed = lerpf(0.0, 3.6 if sprint else 2.3, mag)
+		target_speed = lerpf(0.0, 5.0 if sprint else 3.3, mag)
 	var hv := Vector3(velocity.x, 0, velocity.z)
 	var tv := want.normalized() * target_speed if mag > 0.05 else Vector3.ZERO
 	hv = hv.move_toward(tv, accel * dt * (1.6 if tv == Vector3.ZERO else 1.0))

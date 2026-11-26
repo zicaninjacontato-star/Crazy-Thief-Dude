@@ -35,6 +35,7 @@ var _t := 0.0
 var rng := RandomNumberGenerator.new()
 
 var kind := "cop"
+var swimming := false
 func setup(seed: int, kind := "cop") -> void:
 	self.kind = kind
 	rng.seed = seed
@@ -250,6 +251,14 @@ func _physics_process(dt: float) -> void:
 		velocity.y -= 18.0 * dt
 	else:
 		velocity.y = -0.5
+	# no mar: nada na superfície (mais devagar e sem atirar)
+	var w2 = get_tree().current_scene.get("world2")
+	swimming = w2 != null and w2.is_swim(global_position.x, global_position.z) and global_position.y < w2.WATER_Y - 0.2
+	body.swimming = swimming
+	if swimming:
+		velocity.y = clampf((w2.WATER_Y - 0.9 - global_position.y) * 3.0, -3.0, 3.0)
+		speed = _base_speed * 0.5
+		cool = maxf(cool, 0.3)
 	if anim != "":
 		_anim_tick(dt)
 		return
