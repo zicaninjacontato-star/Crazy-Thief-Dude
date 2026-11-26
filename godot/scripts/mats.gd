@@ -3,6 +3,12 @@ extends RefCounted
 ## Tudo usa mapeamento triplanar em coordenadas do mundo, então a escala da textura é sempre em metros.
 
 static var _cache := {}
+## distâncias de LOD (veículos/pessoas viram modelos simples longe); a qualidade gráfica muda isto
+static var lod_k := 1.0
+static func lod_vehicle() -> float:
+	return 38.0 * lod_k
+static func lod_person() -> float:
+	return 22.0 * lod_k
 static var _facades: Array = []   # materiais de fachada (emissão das janelas à noite)
 
 static func set_night(n: float) -> void:

@@ -80,11 +80,8 @@ func _build_lights() -> void:
 	var bm := BoxMesh.new()
 	bm.size = Vector3(0.36, 1.2, 0.26)
 	_mm(bm, M.plain(Color(0.08, 0.08, 0.08), 0.6), boxes)
-	var lm := SphereMesh.new()
-	lm.radius = 0.12
-	lm.height = 0.24
-	lm.radial_segments = 8
-	lm.rings = 4
+	var lm := BoxMesh.new()          # lâmpada do semáforo: caixa (12 triângulos) em vez de esfera
+	lm.size = Vector3(0.22, 0.22, 0.06)
 	var cols := {"_r": Color(1, 0.08, 0.05), "_y": Color(1, 0.7, 0.05), "_g": Color(0.1, 1, 0.3)}
 	for key in lamp:
 		var mat := StandardMaterial3D.new()

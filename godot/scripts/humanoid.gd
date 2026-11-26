@@ -64,8 +64,10 @@ static func material() -> StandardMaterial3D:
 	return _mat
 
 ## ex (opcional): jacket (Color, alfa 0 = sem), hat (0 nenhum, 1 boné, 2 touca), hat_c (Color), glasses (bool)
+var _pc := [Color.WHITE, Color.GRAY, Color.WHITE]
 func build(shirt: Color, pants: Color, skin: Color, hair: Color, ex := {}) -> void:
 	skin_c = skin
+	_pc = [shirt if not ex.get("beach", false) else skin, pants, skin]
 	var shoe := Color(0.07, 0.07, 0.08)
 	var shin_c := pants
 	if ex.get("beach", false):
@@ -150,16 +152,16 @@ func _cap(r: float, h: float) -> Mesh:
 	var c := CapsuleMesh.new()
 	c.radius = r
 	c.height = maxf(h, r * 2.0)
-	c.radial_segments = 12
-	c.rings = 4
+	c.radial_segments = 8
+	c.rings = 2
 	return c
 
 func _sph(r: float) -> Mesh:
 	var s := SphereMesh.new()
 	s.radius = r
 	s.height = r * 2.0
-	s.radial_segments = 12
-	s.rings = 6
+	s.radial_segments = 8
+	s.rings = 4
 	return s
 
 func _box(size: Vector3) -> Mesh:
@@ -186,12 +188,43 @@ func _mesh(bone: String, items: Array) -> void:
 	mi.material_override = material()
 	bones[bone].add_child(mi)
 
+## pessoa vista de longe: troca os 11 ossos por um boneco simples (~100 triângulos, 1 malha) e
+## deixa de animar (animate() sai cedo). Perto volta o modelo completo.
+var _proxy: MeshInstance3D
+var _lod_d := 0.0
+var _far_now := false
 func set_far(dist: float) -> void:
+	_lod_d = minf(M.lod_person(), dist)
 	for b in bones.values():
 		for c in b.get_children():
 			if c is MeshInstance3D:
-				c.visibility_range_end = dist
+				c.visibility_range_end = _lod_d
 				c.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	if _proxy == null:
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var bm := BoxMesh.new()
+		var add := func(size: Vector3, pos: Vector3, col: Color) -> void:
+			bm.size = size
+			var arr: Array = bm.get_mesh_arrays()
+			var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+			var ns: PackedVector3Array = arr[Mesh.ARRAY_NORMAL]
+			for i in arr[Mesh.ARRAY_INDEX]:
+				st.set_color(col)
+				st.set_normal(ns[i])
+				st.add_vertex(vs[i] + pos)
+		add.call(Vector3(0.42, 0.62, 0.24), Vector3(0, 1.3, 0), _pc[0])      # tronco
+		add.call(Vector3(0.36, 0.86, 0.2), Vector3(0, 0.5, 0), _pc[1])       # pernas
+		add.call(Vector3(0.22, 0.25, 0.22), Vector3(0, 1.72, 0), _pc[2])     # cabeça
+		add.call(Vector3(0.6, 0.12, 0.14), Vector3(0, 1.5, 0), _pc[0])       # ombros
+		_proxy = MeshInstance3D.new()
+		_proxy.mesh = st.commit()
+		_proxy.material_override = material()
+		_proxy.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(_proxy)
+	_proxy.visibility_range_begin = _lod_d
+	_proxy.visibility_range_end = dist
+	_proxy.visible = not ragdolled
 
 ## speed em m/s (0 = parado). Animação procedural: passada com fase por perna, joelho dobrando no
 ## balanço, quadril sobe/desce e gira, tronco contra-gira, inclinação na corrida, transição suave.
@@ -201,6 +234,13 @@ var _t := 0.0
 func animate(speed: float, dt: float) -> void:
 	if ragdolled:
 		return
+	# longe da câmera: só o boneco simples aparece, não precisa mexer os ossos
+	if _lod_d > 0.0:
+		var cam := get_viewport().get_camera_3d()
+		if cam:
+			_far_now = global_position.distance_squared_to(cam.global_position) > (_lod_d + 2.0) * (_lod_d + 2.0)
+			if _far_now:
+				return
 	_t += dt
 	var th: Array = [bones.thighL, bones.thighR]
 	var sh: Array = [bones.shinL, bones.shinR]
@@ -640,6 +680,8 @@ func ragdoll(impulse: Vector3, ignore: PhysicsBody3D = null, gore := false) -> A
 	if ragdolled:
 		return []
 	ragdolled = true
+	if _proxy:
+		_proxy.visible = false
 	var world := get_tree().current_scene
 	var rbs := {}
 	var order := ["hips", "chest", "head", "thighL", "thighR", "shinL", "shinR", "upperL", "upperR", "foreL", "foreR"]

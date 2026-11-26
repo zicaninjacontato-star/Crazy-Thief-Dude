@@ -167,6 +167,7 @@ func setup(kind: String, paint: Color) -> void:
 			if n is MeshInstance3D:
 				n.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 				n.visibility_range_end = 110.0
+	_make_lod()
 
 ## peças pequenas não projetam sombra e somem de longe (vidro, faróis, detalhes); a carroceria fica
 static func optimize_visuals(root: Node, far := 150.0) -> void:
@@ -185,6 +186,56 @@ static func optimize_visuals(root: Node, far := 150.0) -> void:
 			mi.visibility_range_end = far       # carroceria some longe (mapa grande = muitos carros)
 			mi.visibility_range_end_margin = 10.0
 
+## veículo visto de longe: o modelo detalhado some e aparece um modelo simples (caixas coloridas,
+## ~100 triângulos, 1 malha) — antes cada carro desenhava milhares de triângulos em 15–20 malhas
+var lod_proxy: MeshInstance3D
+func _make_lod() -> void:
+	if model_root == null:
+		return
+	if lod_proxy and is_instance_valid(lod_proxy):
+		lod_proxy.queue_free()
+	var d: float = M.lod_vehicle()
+	var s := body_size
+	var col: Color = paint_c if not police else Color(0.05, 0.05, 0.06)
+	var dark := Color(0.06, 0.06, 0.07)
+	var glass := Color(0.1, 0.13, 0.17)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	if kind == "moto":
+		CarModel._box(st, Vector3(0.36, 0.5, s.z * 0.75), Vector3(0, 0.7, 0), col)
+		CarModel._box(st, Vector3(0.12, wheel_r * 2.0, wheel_r * 2.0), Vector3(0, wheel_r, s.z * 0.38), dark)
+		CarModel._box(st, Vector3(0.12, wheel_r * 2.0, wheel_r * 2.0), Vector3(0, wheel_r, -s.z * 0.38), dark)
+	elif s.y > 2.6:
+		# ônibus/caminhão: caixa + faixa de janelas
+		CarModel._box(st, Vector3(s.x, s.y - 0.45, s.z), Vector3(0, 0.45 + (s.y - 0.45) * 0.5, 0), col)
+		CarModel._box(st, Vector3(s.x + 0.03, 0.9, s.z * 0.86), Vector3(0, s.y * 0.68, 0), glass)
+	else:
+		var low := s.y * 0.5
+		CarModel._box(st, Vector3(s.x, low - 0.25, s.z), Vector3(0, 0.25 + (low - 0.25) * 0.5, 0), col)
+		CarModel._box(st, Vector3(s.x * 0.86, s.y - low, s.z * 0.5), Vector3(0, low + (s.y - low) * 0.5, -0.1), glass)
+		CarModel._box(st, Vector3(s.x * 0.8, 0.06, s.z * 0.46), Vector3(0, s.y, -0.1), col)
+	if kind != "moto":
+		for w in wheels:
+			CarModel._box(st, Vector3(0.28, wheel_r * 2.0, wheel_r * 2.0), Vector3(w.position.x, wheel_r, w.position.z), dark)
+	lod_proxy = MeshInstance3D.new()
+	lod_proxy.name = "lod"
+	lod_proxy.mesh = st.commit()
+	lod_proxy.material_override = CarModel.vc_mat()
+	lod_proxy.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	lod_proxy.visibility_range_begin = d
+	lod_proxy.visibility_range_end = 170.0 * M.lod_k
+	model_root.add_child(lod_proxy)
+	# o detalhado só até a distância do LOD
+	for mi in model_root.find_children("*", "MeshInstance3D", true, false):
+		if mi == lod_proxy or mi.get_parent().get_parent() is Node3D and mi.get_parent().get_parent().has_method("set_far") or (mi.visibility_range_end > 0.0 and mi.visibility_range_end < d):
+			continue
+		mi.visibility_range_end = d
+		mi.visibility_range_end_margin = 0.0
+	for w in wheels:
+		for n in w.get_children():
+			if n is MeshInstance3D:
+				n.visibility_range_end = d
+
 func make_police() -> void:
 	police = true
 	_light_bar()
@@ -201,6 +252,7 @@ func repaint(c: Color) -> void:
 			if n.material_override == old:
 				n.material_override = nm
 	paint_c = c
+	_make_lod()
 
 ## tiro no vidro: 1º trinca (branco leitoso), 2º estilhaça (some) — devolve true se acertou vidro
 var _glass_hits := 0
@@ -517,10 +569,11 @@ func _physics_process(dt: float) -> void:
 	if _idle_chk <= 0.0:
 		_idle_chk = 0.5
 		var pl = get_tree().current_scene.get("player")
-		var far: bool = pl != null and global_position.distance_squared_to(pl.global_position) > 85.0 * 85.0
+		var far: bool = pl != null and global_position.distance_squared_to(pl.global_position) > 60.0 * 60.0
 		if freeze and not far:
 			freeze = false
-		elif not freeze and far and linear_velocity.length_squared() < 0.01 and absf(throttle) < 0.01 and driver == null and _t > 3.0:
+		# a suspensão deixa um tremor de poucos cm/s: antes nenhum carro estacionado chegava a "dormir"
+		elif not freeze and far and linear_velocity.length_squared() < 0.06 and absf(throttle) < 0.01 and driver == null and _t > 3.0 and ai_target == null:
 			freeze = true
 	if freeze:
 		return

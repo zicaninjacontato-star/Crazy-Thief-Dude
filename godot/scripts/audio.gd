@@ -107,13 +107,24 @@ func set_siren(on: bool, dist: float) -> void:
 func _process(_dt: float) -> void:
 	_fill_engine()
 	_fill_siren()
-	if not _pending.is_empty():
+	# sons pesados (vozes, baleia, turbina...) são gerados numa thread de fundo, um de cada vez:
+	# antes cada um travava o quadro por dezenas de ms nos primeiros segundos de jogo
+	if not _pending.is_empty() and not _job_running:
+		_job_running = true
 		var job: Array = _pending.pop_front()
-		var w = job[1].call()
-		if sounds.get(job[0]) is Array:
-			sounds[job[0]].append(w)
-		else:
-			sounds[job[0]] = w
+		WorkerThreadPool.add_task(_run_job.bind(job), false, "som")
+
+var _job_running := false
+func _run_job(job: Array) -> void:
+	var w = job[1].call()
+	call_deferred("_job_done", job[0], w)
+
+func _job_done(name: String, w) -> void:
+	if sounds.get(name) is Array:
+		sounds[name].append(w)
+	else:
+		sounds[name] = w
+	_job_running = false
 
 func _fill_engine() -> void:
 	# otimização: sem som de motor (a pé) não gera amostras

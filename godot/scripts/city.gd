@@ -407,6 +407,7 @@ func _park(cx: float, cz: float, inner: float) -> void:
 var _trees: Array = []
 var _lamps: Array = []
 var props: Array = []        # postes e árvores quebráveis
+var map_houses: Array = []   # plantas das casas fora da grade (minimapa/mapa)
 var _fallen: Array = []
 var pmm := {}                # MultiMeshInstance3D: pole, head, trunk, crown
 var _pgrid := {}
@@ -437,8 +438,9 @@ func _markings() -> void:
 				for st in range(-5, 6):
 					zebra.append(Transform3D(Basis(), Vector3(road + st * 1.2, 0.012, cross + side * (ROADW * 0.5 + 1.5))))
 					zebra.append(Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(cross + side * (ROADW * 0.5 + 1.5), 0.012, road + st * 1.2)))
-	_multimesh(_mesh_box(Vector3(0.15, 0.02, 3.0)), M.plain(Color(0.85, 0.75, 0.2), 0.6), dash)
-	_multimesh(_mesh_box(Vector3(0.6, 0.02, 2.6)), M.plain(Color(0.86, 0.86, 0.84), 0.6), zebra)
+	# faixas pintadas: plano de 2 triângulos (antes caixa de 12)
+	_multimesh(_mesh_plane(Vector2(0.15, 3.0)), M.plain(Color(0.85, 0.75, 0.2), 0.6), dash).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_multimesh(_mesh_plane(Vector2(0.6, 2.6)), M.plain(Color(0.86, 0.86, 0.84), 0.6), zebra).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 func _props() -> void:
 	var lamps: Array = []
@@ -452,13 +454,16 @@ func _props() -> void:
 			var r := BLOCK * 0.5 - 0.7
 			for s in range(-2, 3):
 				var o := s * (BLOCK / 5.0)
+				var side_i := -1
 				for p in [Vector3(cx + o, 0.15, cz - r), Vector3(cx + o, 0.15, cz + r), Vector3(cx - r, 0.15, cz + o), Vector3(cx + r, 0.15, cz + o)]:
-					if s % 2 == 0:
+					side_i += 1
+					# otimização: 1 poste por lado (no meio) e 1 árvore a cada 2 lados (antes 3 postes + 2 árvores)
+					if s == 0:
 						props.append({"type": "lamp", "pos": p, "idx": lamps.size(), "shape": _prop_shape(p, 0.15, 7.0), "alive": true})
 						lamps.append(Transform3D(Basis(), p + Vector3(0, 3.5, 0)))
 						heads.append(Transform3D(Basis(), p + Vector3(0, 7.0, 0)))
 						_lamps.append(p)
-					else:
+					elif s == (1 if (i + j + side_i) % 2 == 0 else -1) and (side_i + i) % 2 == 0:
 						trunks.append(Transform3D(Basis(), p + Vector3(0, 1.5, 0)))
 						var sc := rng.randf_range(0.85, 1.25)
 						crowns.append(Transform3D(Basis().scaled(Vector3(sc, sc * 0.9, sc)), p + Vector3(0, 4.2, 0)))
@@ -473,6 +478,7 @@ func _props() -> void:
 	pmm["pole"] = _multimesh(pole, M.plain(Color(0.18, 0.19, 0.2), 0.4, 0.8), lamps)
 	lamp_mat = M.emissive(Color(1.0, 0.86, 0.62), 1.5).duplicate()
 	pmm["head"] = _multimesh(_mesh_box(Vector3(0.5, 0.18, 0.9)), lamp_mat, heads)
+	pmm["head"].cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var trunk := CylinderMesh.new()
 	trunk.top_radius = 0.14
 	trunk.bottom_radius = 0.22
@@ -483,14 +489,20 @@ func _props() -> void:
 	var crown := SphereMesh.new()
 	crown.radius = 2.2
 	crown.height = 3.6
-	crown.radial_segments = 12
-	crown.rings = 7
+	crown.radial_segments = 8
+	crown.rings = 5
 	pmm["crown"] = _multimesh(crown, M.leaves(), crowns)
 	for i in props.size():
 		var k := _pcell(props[i].pos)
 		if not _pgrid.has(k):
 			_pgrid[k] = []
 		_pgrid[k].append(i)
+
+func _mesh_plane(size: Vector2) -> PlaneMesh:
+	var p := PlaneMesh.new()
+	p.size = size
+	p.center_offset = Vector3(0, 0.012, 0)
+	return p
 
 func _mesh_box(size: Vector3) -> BoxMesh:
 	var b := BoxMesh.new()
@@ -876,6 +888,12 @@ func _house(base: Transform3D, L: float, pool: bool) -> void:
 	var hz := -1.5
 	_lb(base, Vector3(w, H, d), Vector3(0, H * 0.5 + 0.02, hz), wallm, true)
 	_roof(base, w, d, H + 0.05, roofm)
+	# planta da casa para o minimapa/mapa (4 cantos no mundo)
+	var corners := PackedVector2Array()
+	for cc in [Vector3(-w * 0.5, 0, hz - d * 0.5), Vector3(w * 0.5, 0, hz - d * 0.5), Vector3(w * 0.5, 0, hz + d * 0.5), Vector3(-w * 0.5, 0, hz + d * 0.5)]:
+		var wp: Vector3 = base * cc
+		corners.append(Vector2(wp.x, wp.z))
+	map_houses.append(corners)
 	# porta, janelas, degrau e chaminé
 	_lb(base, Vector3(1.1, 2.1, 0.08), Vector3(-w * 0.2, 1.07, hz + d * 0.5 + 0.03), M.wood(), false)
 	for x in [w * 0.15, w * 0.35, -w * 0.4]:
@@ -1155,7 +1173,9 @@ func _hill_mesh(c: Vector2, r: float) -> void:
 	mi.material_override = M.grass()
 	add_child(mi)
 	var cs := CollisionShape3D.new()
-	cs.shape = mesh.create_trimesh_shape()
+	var tri: ConcavePolygonShape3D = mesh.create_trimesh_shape()
+	tri.backface_collision = true      # o personagem atravessava o morro (só um lado das faces colidia)
+	cs.shape = tri
 	body.add_child(cs)
 
 func _districts() -> void:

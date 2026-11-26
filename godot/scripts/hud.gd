@@ -105,6 +105,10 @@ var can_enter := false       # há veículo perto (mostra o botão do carro)
 var weapon_kind := "fist"
 var action_kind := ""        # enter / exit / buy / carry / drop / trunk
 var heli := false
+var mm_ctrl: Control
+var _mm_t := 0.0
+var map_houses: Array = []
+var map_runway := Rect2()      # pista do aeroporto (x, z, comprimento, largura)    # [PackedVector2Array] plantas das casas
 var zones: Array = []         # [{pos, r, col, ring}] territórios das gangues e zona da polícia
 var skulls := 0               # procurado pela gangue (caveiras)
 var skull_col := Color.WHITE
@@ -153,6 +157,16 @@ func _ready() -> void:
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(root)
 	root.draw.connect(_draw_controls)
+	# minimapa numa camada própria, redesenhada ~12×/s (recortes de polígonos custavam todo quadro)
+	mm_ctrl = Control.new()
+	mm_ctrl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mm_ctrl.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.add_child(mm_ctrl)
+	mm_ctrl.draw.connect(func():
+		var r0 := root
+		root = mm_ctrl
+		_draw_minimap()
+		root = r0)
 	info = _label(Vector2(16, 10), 16)
 	stars = _label(Vector2(0, 10), 34)
 	stars.set_anchors_preset(Control.PRESET_TOP_RIGHT)
@@ -332,7 +346,6 @@ func _draw_controls() -> void:
 	root.draw_circle(c + joy * jr, 32.0 * jr / R, Color(1, 1, 1, 0.75))
 	if flash > 0.0:
 		root.draw_rect(Rect2(Vector2.ZERO, s), Color(0.8, 0, 0, flash))
-	_draw_minimap()
 	_draw_bars(s)
 	# caveiras da gangue (embaixo das estrelas), na cor da gangue que está atrás de você
 	if skulls > 0:
@@ -538,6 +551,10 @@ func _car_icon(c: Vector2, r: float, col: Color, open_trunk: bool) -> void:
 		root.draw_line(c + Vector2(-0.95, -0.05) * r, c + Vector2(-1.3, -0.6) * r, Color(1, 0.85, 0.3), maxf(2.0, r * 0.12))
 
 func _process(_dt: float) -> void:
+	_mm_t -= _dt
+	if _mm_t <= 0.0 and mm_ctrl:
+		_mm_t = 0.05
+		mm_ctrl.queue_redraw()
 	var s := root.get_viewport_rect().size
 	for ch in root.get_children():
 		ch.visible = not map_full
@@ -597,7 +614,7 @@ func _draw_minimap() -> void:
 		circ.append(C + Vector2(cos(i * TAU / 40.0), sin(i * TAU / 40.0)) * R)
 	var lands: Array = []
 	for r in preload("res://scripts/world2.gd").land_rects():
-		lands.append([r.grow(24.0), Color(0.42, 0.4, 0.37)])
+		lands.append([r.grow(6.0), Color(0.78, 0.7, 0.5)])
 	for r in preload("res://scripts/world2.gd").land_rects():
 		lands.append([r, Color(0.24, 0.33, 0.22)])
 	lands.append([beach, Color(0.78, 0.7, 0.5)])
@@ -648,6 +665,22 @@ func _draw_minimap() -> void:
 					var b2 := t if cuts[t] else t - 1
 					root.draw_line(ea + d * (a2 / 20.0), ea + d * (b2 / 20.0), er[3], maxf(2.0, er[2] * sc))
 					a2 = -1
+	if map_runway.size.x > 0.0:
+		var rw2 := map_runway
+		var rp := PackedVector2Array([tr.call(Vector3(rw2.position.x, 0, rw2.position.y)), tr.call(Vector3(rw2.end.x, 0, rw2.position.y)), tr.call(Vector3(rw2.end.x, 0, rw2.end.y)), tr.call(Vector3(rw2.position.x, 0, rw2.end.y))])
+		for cp in Geometry2D.intersect_polygons(rp, circ):
+			if cp.size() >= 3:
+				root.draw_colored_polygon(cp, Color(0.2, 0.2, 0.22))
+	for hp in map_houses:
+		var c0: Vector2 = hp[0]
+		if absf(c0.x - map_player.x) > 95.0 or absf(c0.y - map_player.z) > 95.0:
+			continue
+		var poly := PackedVector2Array()
+		for v2 in hp:
+			poly.append(tr.call(Vector3(v2.x, 0, v2.y)))
+		for cp in Geometry2D.intersect_polygons(poly, circ):
+			if cp.size() >= 3:
+				root.draw_colored_polygon(cp, Color(0.72, 0.66, 0.58))
 	for z in zones:
 		var zc: Vector2 = tr.call(z.pos)
 		var zr: float = z.r * sc
@@ -799,7 +832,7 @@ func _draw_full_map() -> void:
 	var rects: Array = preload("res://scripts/world2.gd").land_rects()
 	for r in rects:
 		var i0 := _mf_to_screen(Vector3(r.position.x, 0, r.position.y))
-		root.draw_rect(Rect2(i0 - Vector2(24, 24) * sc, (r.size + Vector2(48, 48)) * sc), Color(0.45, 0.43, 0.4))
+		root.draw_rect(Rect2(i0 - Vector2(6, 6) * sc, (r.size + Vector2(12, 12)) * sc), Color(0.78, 0.7, 0.5))
 	for r in rects:
 		root.draw_rect(Rect2(_mf_to_screen(Vector3(r.position.x, 0, r.position.y)), r.size * sc), Color(0.26, 0.4, 0.24))
 	var b0 := _mf_to_screen(Vector3(beach.position.x, 0, beach.position.y))
@@ -807,14 +840,19 @@ func _draw_full_map() -> void:
 	for er in map_extra:
 		root.draw_line(_mf_to_screen(er[0]), _mf_to_screen(er[1]), er[3], maxf(2.0, er[2] * sc))
 	# aeroporto
-	var a0 := _mf_to_screen(Vector3(-500.0, 0, -12.0))
-	root.draw_rect(Rect2(a0, Vector2(340.0, 24.0) * sc), Color(0.2, 0.2, 0.22))
+	var a0 := _mf_to_screen(Vector3(map_runway.position.x, 0, map_runway.position.y))
+	root.draw_rect(Rect2(a0, map_runway.size * sc), Color(0.2, 0.2, 0.22))
 	# quadras e ruas
 	var e0 := _mf_to_screen(Vector3(-map_ext, 0, -map_ext))
 	root.draw_rect(Rect2(e0, Vector2(map_ext, map_ext) * 2.0 * sc), Color(0.55, 0.55, 0.52))
 	for c in map_roads:
 		root.draw_line(_mf_to_screen(Vector3(c, 0, -map_ext)), _mf_to_screen(Vector3(c, 0, map_ext)), Color(0.16, 0.16, 0.18), map_roadw * sc)
 		root.draw_line(_mf_to_screen(Vector3(-map_ext, 0, c)), _mf_to_screen(Vector3(map_ext, 0, c)), Color(0.16, 0.16, 0.18), map_roadw * sc)
+	for hp in map_houses:
+		var poly2 := PackedVector2Array()
+		for v2 in hp:
+			poly2.append(_mf_to_screen(Vector3(v2.x, 0, v2.y)))
+		root.draw_colored_polygon(poly2, Color(0.72, 0.66, 0.58))
 	for z in zones:
 		var zc := _mf_to_screen(z.pos)
 		var zr: float = z.r * sc

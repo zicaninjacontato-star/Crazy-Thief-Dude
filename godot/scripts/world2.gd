@@ -216,17 +216,16 @@ func _beach() -> void:
 	# ilha: praia larga a leste e faixas de areia com rampa até o leito nos outros 3 lados
 	var east := [[BEACH_X0, 0.0], [BEACH_X0 + 22.0, 1.1], [SHORE_X - 6.0, 1.1], [SHORE_X + 8.0, 0.0], [SHORE_X + 70.0, SEA_FLOOR], [SHORE_X + 110.0, SEA_FLOOR]]
 	# costão rochoso nos outros lados: paredão de rocha que cai direto no mar (sem pedrinhas no chão)
-	var rim := [[0.0, 0.0], [1.0, 0.2], [4.0, -4.0], [9.0, SEA_FLOOR], [60.0, SEA_FLOOR]]
+	var rim := [[0.0, 0.0], [3.0, 0.4], [9.0, -1.5], [22.0, SEA_FLOOR], [60.0, SEA_FLOOR]]
 	_strip("x", 1.0, 0.0, east, ISL_Z0 - 120.0, ISL_Z1 + 120.0)
 	for re in rim_edges():
 		var pa: Vector3 = re[0]
 		var pb: Vector3 = re[1]
 		var n: Vector3 = re[2]
-		var rk := M.rock(Color(0.32, 0.3, 0.27))
 		if n.x != 0.0:
-			_strip("x", n.x, pa.x, rim, minf(pa.z, pb.z) - (60.0 if re[3] else 0.0), maxf(pa.z, pb.z) + (60.0 if re[4] else 0.0), rk)
+			_strip("x", n.x, pa.x, rim, minf(pa.z, pb.z) - (60.0 if re[3] else 0.0), maxf(pa.z, pb.z) + (60.0 if re[4] else 0.0))
 		else:
-			_strip("z", n.z, pa.z, rim, minf(pa.x, pb.x) - (60.0 if re[3] else 0.0), maxf(pa.x, pb.x) + (60.0 if re[4] else 0.0), rk)
+			_strip("z", n.z, pa.z, rim, minf(pa.x, pb.x) - (60.0 if re[3] else 0.0), maxf(pa.x, pb.x) + (60.0 if re[4] else 0.0))
 	_rocks()
 	# leito do mar em volta de tudo (−12 m)
 	var fl := CollisionShape3D.new()
@@ -431,47 +430,9 @@ func _strip(axis: String, sgn: float, edge: float, prof: Array, a0: float, a1: f
 func _rocks() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 515
-	var rk := M.rock(Color(0.34, 0.32, 0.29))
-	var rk2 := M.rock(Color(0.27, 0.25, 0.23))
-	var rk3 := M.rock(Color(0.4, 0.37, 0.32))
 	# pontos de pesca (o paredão de rocha abre espaço para o deque)
 	var spots := fish_defs()
-	# costões rochosos: blocos altos de rocha encostados na borda, do fundo do mar até 1–4 m acima do chão
-	for re in rim_edges():
-		var a0: Vector3 = re[0]
-		var a1: Vector3 = re[1]
-		var n: Vector3 = re[2]
-		var L := a0.distance_to(a1)
-		var t := (a1 - a0) / maxf(L, 0.01)
-		var s2 := 0.0
-		while s2 < L:
-			var along := rng.randf_range(4.0, 7.5)
-			var p: Vector3 = a0 + t * minf(s2 + along * 0.5, L)
-			var skip := absf(p.x - 210.0) < 9.0 and (absf(p.z - ISL_Z0) < 4.0 or absf(p.z - ISLAND.end.y) < 4.0)   # ponte
-			for sp in spots:
-				if (sp[0] as Vector3).distance_to(p) < 5.5:
-					skip = true
-			if not skip:
-				var top := rng.randf_range(0.8, 4.2)
-				var outw := rng.randf_range(4.0, 7.0)
-				var hgt := top - SEA_FLOOR
-				var sz := Vector3(along, hgt, outw) if absf(n.z) > 0.5 else Vector3(outw, hgt, along)
-				var pos := p + n * (outw * 0.5 - 0.3)
-				pos.y = SEA_FLOOR + hgt * 0.5
-				var tl := Vector3(rng.randf_range(-0.22, 0.22), 0, rng.randf_range(-0.22, 0.22))
-				_box("rocks", sz, pos, [rk, rk2, rk3][rng.randi() % 3], true, rng.randf_range(-0.35, 0.35), tl)
-				# topo quebrado: blocos menores e inclinados por cima do paredão
-				var cap := Vector3(rng.randf_range(2.0, 3.6), rng.randf_range(1.0, 2.2), rng.randf_range(2.0, 3.6))
-				_box("rocks", cap, p + n * rng.randf_range(0.5, outw - 1.0) + t * rng.randf_range(-1.5, 1.5) + Vector3(0, top + cap.y * 0.25, 0), rk2, false, rng.randf() * PI, Vector3(rng.randf_range(-0.5, 0.5), 0, rng.randf_range(-0.5, 0.5)))
-				# lascas mais baixas na frente (o paredão fica irregular)
-				if rng.randf() < 0.6:
-					var sz2 := sz * Vector3(0.6, 1.0, 0.6)
-					var top2 := rng.randf_range(-1.5, 1.2)
-					sz2.y = top2 - SEA_FLOOR
-					var pos2 := p + n * (outw + 1.2) + t * rng.randf_range(-1.5, 1.5)
-					pos2.y = SEA_FLOOR + sz2.y * 0.5
-					_box("rocks", sz2, pos2, rk2, true, rng.randf() * PI, Vector3(rng.randf_range(-0.3, 0.3), 0, rng.randf_range(-0.3, 0.3)))
-			s2 += along * 0.85
+	# (otimização, pedido do usuário: sem costão de pedras — só praia e água em volta)
 	# pontos de pesca: deque de madeira saindo do costão, banco, balde e pescador com vara
 	for sp in spots:
 		var o: Vector3 = sp[0]

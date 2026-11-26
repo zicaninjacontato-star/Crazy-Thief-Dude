@@ -131,6 +131,8 @@ func _ready() -> void:
 	hud.map_roadw = city.ROADW
 	hud.map_ext = city.extent()
 	hud.map_extra = city.extra_roads
+	hud.map_houses = city.map_houses
+	hud.map_runway = Rect2(world2.AIR_X - 170.0, -12.0, 340.0, 24.0)
 	hud.beach = Rect2(world2.BEACH_X0, world2.ISL_Z0 - 24.0, world2.SHORE_X - world2.BEACH_X0, world2.ISL_Z1 - world2.ISL_Z0 + 48.0)
 	hud.jump_pressed.connect(func(): player.jump())
 	police = Police.new()
@@ -148,6 +150,13 @@ func _ready() -> void:
 	gangs = Gangs.new()
 	add_child(gangs)
 	gangs.setup(self)
+	# a qualidade define quantos carros/pessoas nascem e o LOD: lê antes de povoar o mapa
+	if FileAccess.file_exists("user://settings.json"):
+		var sd = JSON.parse_string(FileAccess.get_file_as_string("user://settings.json"))
+		if sd is Dictionary:
+			quality = clampi(int(sd.get("quality", 1)), 0, 2)
+	M.lod_k = [0.65, 0.85, 1.0][quality]
+	_pop_peds = [22, 28, 32][quality]
 	_spawn_extras()
 	_spawn_population()
 	hud.weapon_pressed.connect(func(): ui.show_wheel())
@@ -261,11 +270,18 @@ func apply_settings(s: Dictionary) -> void:
 	var q: int = s.quality
 	quality = q
 	var mobile := OS.has_feature("mobile")
-	get_viewport().scaling_3d_scale = ([0.6, 0.75, 1.0] if mobile else [0.75, 1.0, 1.0])[q]
+	# BAIXO = leve de verdade (texturas e luz continuam as mesmas): resolução menor, sem sombra/glow/FXAA,
+	# visão até 320 m, LOD mais perto e menos gente/carros na rua
+	get_viewport().scaling_3d_scale = ([0.5, 0.7, 0.9] if mobile else [0.7, 0.9, 1.0])[q]
+	get_viewport().screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if q > 0 else Viewport.SCREEN_SPACE_AA_DISABLED
+	M.lod_k = [0.65, 0.85, 1.0][q]
+	_pop_peds = [22, 28, 32][q]
+	if cam:
+		cam.far = [320.0, 460.0, 650.0][q]
 	if sun:
 		sun.shadow_enabled = q > 0
-		sun.directional_shadow_max_distance = [0.0, 60.0, 90.0][q]
-		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS if q == 2 else DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+		sun.directional_shadow_max_distance = [0.0, 45.0, 75.0][q]
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
 	if world_env:
 		world_env.glow_enabled = q > 0
 		world_env.fog_aerial_perspective = 0.4 if q > 0 else 0.0
@@ -538,7 +554,8 @@ func _water_tick(dt: float) -> void:
 		var cp: Vector3 = c.global_position
 		if not c.has_meta("sink_t") and cp.x > world2.ISL_X0 + 20.0 and cp.x < world2.BEACH_X0 and absf(cp.z) < world2.ISL_Z1 - 20.0:
 			continue          # no meio da cidade não precisa checar o mar
-		if world2.sea_dist(c.global_position.x, c.global_position.z) > 11.0 and world2.is_water(c.global_position.x, c.global_position.z) and not c.has_meta("sinking"):
+		# só afunda se estiver de fato na água (em cima da ponte/viaduto sobre o mar, não)
+		if c.global_position.y < world2.WATER_Y + 0.6 and world2.sea_dist(c.global_position.x, c.global_position.z) > 11.0 and world2.is_water(c.global_position.x, c.global_position.z) and not c.has_meta("sinking"):
 			# boia alguns segundos e vai afundando devagar (quem fica dentro se afoga)
 			c.set_meta("sinking", true)
 			c.set_meta("sink_t", 0.0)
@@ -898,7 +915,7 @@ func _physics_process(dt: float) -> void:
 		player.move_input = Vector2(mv.x, mv.y)
 		player.cam_yaw = cam_yaw + PI
 		player.sprint = hud.sprint or Input.is_action_pressed("sprint")
-	elif not shot_view in ["drive", "motoride", "planefly", "helifly", "jetfly", "attackheli", "wheelie", "crashreact", "boatride", "busride", "motocrash", "props"]:
+	elif not shot_view in ["drive", "motoride", "planefly", "helifly", "jetfly", "attackheli", "wheelie", "crashreact", "bridgedrive", "viaductdrive", "hillwalk", "boatride", "busride", "motocrash", "props"]:
 		var c = player.vehicle
 		var g := 1.0 if hud.gas else 0.0
 		var b := 1.0 if hud.brk else 0.0
@@ -928,10 +945,11 @@ func _physics_process(dt: float) -> void:
 	_safe_door_tick(dt)
 	_props_tick()
 	_car_vs_player()
-	police.tick(dt)
-	gangs.tick(dt)
-	_zones_hud()
-	missions.tick(dt)
+	if not has_meta("skip_pgm"):
+		police.tick(dt)
+		gangs.tick(dt)
+		_zones_hud()
+		missions.tick(dt)
 	_water_tick(dt)
 
 ## carros batendo em postes (fáceis) e árvores (precisam de mais velocidade)
@@ -1725,6 +1743,186 @@ func _test9(v: String) -> void:
 				if n.emitting:
 					parts += 1
 			print("SOAK ", frames, " nodes=", get_tree().get_node_count(), " tmp=", get_tree().get_nodes_in_group("tmp").size(), " rigid=", rb, " emit=", parts, " cars=", cars.filter(func(c): return is_instance_valid(c)).size(), " wrecks=", cars.filter(func(c): return is_instance_valid(c) and c.get("dead")).size(), " peds=", peds.filter(func(q): return is_instance_valid(q) and not q.down).size(), " agents=", traffic_sys.agents.size(), " props_down=", city.props.filter(func(x): return not x.alive).size(), " dc=", RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME), " dead=", combat.dead, " wanted=", wanted)
+	if v == "geoprof" and frames == 12:
+		var tri_of := func(m: Mesh) -> int:
+			var t := 0
+			if m == null:
+				return 0
+			for si in m.get_surface_count():
+				var arr := m.surface_get_arrays(si)
+				var ix = arr[Mesh.ARRAY_INDEX]
+				t += (ix.size() if ix != null and ix.size() > 0 else arr[Mesh.ARRAY_VERTEX].size()) / 3
+			return t
+		var groups := {}
+		var cache := {}
+		for n in find_children("*", "", true, false):
+			var tris := 0
+			var key := ""
+			if n is MultiMeshInstance3D and n.multimesh:
+				var mm: MultiMesh = n.multimesh
+				var mt: int = cache.get(mm.mesh, -1)
+				if mt < 0:
+					mt = tri_of.call(mm.mesh)
+					cache[mm.mesh] = mt
+				tris = mt * mm.visible_instance_count if mm.visible_instance_count >= 0 else mt * mm.instance_count
+				key = "MM:" + str(n.get_parent().name) + "/" + str(n.name) + " x" + str(mm.instance_count)
+			elif n is MeshInstance3D and n.mesh:
+				var mt2: int = cache.get(n.mesh, -1)
+				if mt2 < 0:
+					mt2 = tri_of.call(n.mesh)
+					cache[n.mesh] = mt2
+				tris = mt2
+				var o: Node = n
+				var top := ""
+				while o != null and o.get_parent() != self:
+					o = o.get_parent()
+				top = str(o.name) if o else "?"
+				if o is Car or (o and o.get_script() == Arcade):
+					top = "VEHICLES"
+				elif o and (o.get_script() == Ped or o.get_script() == Cop or o is Humanoid):
+					top = "PEOPLE"
+				key = top
+			else:
+				continue
+			if not groups.has(key):
+				groups[key] = [0, 0]
+			groups[key][0] += tris
+			groups[key][1] += 1
+		var keys := groups.keys()
+		keys.sort_custom(func(a, b): return groups[a][0] > groups[b][0])
+		var tot := 0
+		for k in keys:
+			tot += groups[k][0]
+		print("GEO total_tris=", tot, " nodes=", get_tree().get_node_count())
+		for k in keys.slice(0, 30):
+			print("GEO ", k.left(60), " tris=", groups[k][0], " meshes=", groups[k][1])
+	if v in ["mmhouses", "mmhouses2"]:
+		if frames == 4:
+			player.global_position = Vector3(60.0, 0.3, 330.0) if v == "mmhouses" else Vector3(-60.0, 0.3, -330.0)
+			cam_yaw = PI
+		if frames == 20 and v == "mmhouses2":
+			hud.open_map()
+			hud.map_zoom = 2.5
+			hud.map_pan = Vector2(60.0, 330.0)
+	if v == "hillwalk":
+		if frames == 4:
+			player.global_position = Vector3(-110.0, 0.5, 385.0)
+			cam_yaw = PI * 0.5
+		if frames > 6:
+			hud.joy = Vector2(0, -1)
+			cam_yaw = PI * 0.5
+		if frames % 8 == 0:
+			print("HILL ", frames, " pos=", player.global_position.snapped(Vector3.ONE * 0.1), " ground_h=", snappedf(city.hill_h(player.global_position.x, player.global_position.z), 0.1))
+	if v in ["bridgedrive", "viaductdrive"]:
+		if frames == 4:
+			var st0: Vector3 = Vector3(210.0, 0.8, -395.0) if v == "bridgedrive" else Vector3(-235.0, 0.8, -332.6)
+			var yaw0: float = PI if v == "bridgedrive" else PI * 0.5
+			var bc = _spawn_car(st0, yaw0, Color.RED, false, "sedan")
+			player.global_position = bc.global_position
+			vehanim.cancel()
+			finish_enter(bc)
+		if player.vehicle and frames > 6:
+			player.vehicle.throttle = 1.0
+			player.vehicle.steer_in = 0.0
+		if frames == 70 and player.vehicle:
+			var c0 = player.vehicle
+			for k in player.vehicle.get_colliding_bodies():
+				print("BRG touching ", k, " ", k.get_class(), " at ", k.global_position.snapped(Vector3.ONE))
+			for hh in [0.3, 0.8, 1.5]:
+				var fw: Vector3 = c0.global_transform.basis.z
+				var q := PhysicsRayQueryParameters3D.create(c0.global_position + Vector3(0, hh, 0), c0.global_position + Vector3(0, hh, 0) + fw * 4.0, 1)
+				q.exclude = [c0.get_rid()]
+				var r := get_world_3d().direct_space_state.intersect_ray(q)
+				print("BRG ray h=", hh, " ", (str(r.collider) + " " + str(r.position.snapped(Vector3.ONE * 0.1)) + " shape=" + str(r.shape)) if not r.is_empty() else "-")
+		if frames % 6 == 0 and player.vehicle:
+			print("BRG ", frames, " pos=", player.vehicle.global_position.snapped(Vector3.ONE * 0.1), " spd=", snappedf(player.vehicle.linear_velocity.length(), 0.1))
+	if v == "cpuprof2":
+		var steps2 := ["base", "-combat", "-audio", "-peds", "-police_gangs_missions", "-hud", "-daynight", "-world2", "-sea", "-traffic", "base2"]
+		var w := 30
+		var si3: int = (frames - 60) / w
+		if frames >= 60 and si3 < steps2.size():
+			var f2: int = (frames - 60) % w
+			if f2 >= 8:
+				var acc3: Array = get_meta("c2", [0.0, 0])
+				acc3[0] += Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+				acc3[1] += 1
+				set_meta("c2", acc3)
+			if f2 == w - 1:
+				var a3: Array = get_meta("c2")
+				print("CPU2 ", steps2[si3], " process_ms=", snappedf(a3[0] / a3[1], 0.1))
+				set_meta("c2", [0.0, 0])
+				var nxt: String = steps2[si3 + 1] if si3 + 1 < steps2.size() else ""
+				match nxt:
+					"-hud": hud.set_process(false); hud.root.visible = false
+					"-peds":
+						for q in peds: q.set_process(false)
+					"-audio": audio.set_process(false)
+					"-daynight": daynight.set_process(false)
+					"-world2": world2.set_process(false)
+					"-sea": sea.set_process(false); sea.set_physics_process(false)
+					"-traffic": traffic_sys.set_physics_process(false)
+					"-police_gangs_missions": set_meta("skip_pgm", true)
+					"-combat": combat.set_process(false)
+					"base2":
+						set_process(false)
+	if v == "cpuprof":
+		if frames == 4:
+			player.global_position = Vector3(-64, 0.3, 40)
+		if frames >= 400 and frames < 520:
+			var acc: Array = get_meta("cacc", [0.0, 0.0, 0])
+			acc[0] += Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+			acc[1] += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
+			acc[2] += 1
+			set_meta("cacc", acc)
+		if frames == 520:
+			var a2: Array = get_meta("cacc")
+			print("CPU pending_audio=", audio._pending.size(), " process_ms=", snappedf(a2[0] / a2[2], 0.1), " physics_ms=", snappedf(a2[1] / a2[2], 0.1), " active_bodies=", Performance.get_monitor(Performance.PHYSICS_3D_ACTIVE_OBJECTS), " pairs=", Performance.get_monitor(Performance.PHYSICS_3D_COLLISION_PAIRS), " islands=", Performance.get_monitor(Performance.PHYSICS_3D_ISLAND_COUNT), " nodes=", get_tree().get_node_count(), " cars=", cars.size(), " frozen=", cars.filter(func(c): return c is VehicleBody3D and c.freeze).size(), " peds=", peds.size(), " cops=", police.cops.size())
+			var tm: Dictionary = get_meta("prof", {})
+			var ks := tm.keys()
+			ks.sort_custom(func(x, y): return tm[x] > tm[y])
+			for k in ks:
+				print("CPU sect ", k, " ms=", snappedf(tm[k] / 60.0, 0.01))
+	if v == "primprof":
+		# liga/desliga grupos e mede os triângulos do quadro
+		var steps := ["all", "noshadow", "nocars", "nopeds", "nomm", "nocity", "noworld2", "nosea"]
+		var si2: int = (frames - 10) / 8
+		if frames == 10:
+			player.global_position = Vector3(-64, 0.3, 40)
+			cam_yaw = 1.6
+			cam_pitch = -0.15
+		if frames >= 10 and si2 < steps.size() and (frames - 10) % 8 == 6:
+			print("PRIM ", steps[si2], " prims=", RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME), " draws=", RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME))
+			match steps[si2]:
+				"all": sun.shadow_enabled = false
+				"noshadow":
+					for c in cars: c.visible = false
+				"nocars":
+					for q in peds: q.visible = false
+					for cp in police.cops: if is_instance_valid(cp): cp.visible = false
+				"nopeds":
+					for n in find_children("*", "MultiMeshInstance3D", true, false): n.visible = false
+				"nomm": city.visible = false
+				"nocity": world2.visible = false
+				"noworld2": sea.visible = false
+	if v == "bench":
+		var spots := [[Vector3(0, 0.3, -32), 0.0], [Vector3(-64, 0.3, 40), 1.6], [Vector3(120, 0.3, -96), 3.1], [Vector3(250, 1.3, 30), -1.57], [Vector3(-40, 0.3, 230), 0.8], [Vector3(60, 0.3, 140), 2.4]]
+		var si: int = (frames - 10) / 14
+		if frames >= 10 and si < spots.size():
+			var f: int = (frames - 10) % 14
+			if f == 0:
+				player.global_position = spots[si][0]
+				cam_yaw = spots[si][1]
+				cam_pitch = -0.15
+			if f >= 8:
+				var acc: Array = get_meta("bacc", [0, 0, 0.0, 0])
+				acc[0] += RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME)
+				acc[1] += RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME)
+				acc[2] += Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0 + Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
+				acc[3] += 1
+				set_meta("bacc", acc)
+		if frames == 10 + spots.size() * 14:
+			var acc2: Array = get_meta("bacc")
+			print("BENCH draws=", acc2[0] / acc2[3], " prims=", acc2[1] / acc2[3], " cpu_ms=", snappedf(acc2[2] / acc2[3], 0.1), " nodes=", get_tree().get_node_count(), " cars=", cars.size(), " peds=", peds.size())
 	if v == "dcprof":
 		var groups := {"peds": peds, "cars": cars}
 		if frames == 20:
@@ -2907,10 +3105,10 @@ func _spawn_population(first := true) -> void:
 	var palette := [Color(0.55, 0.02, 0.03), Color(0.85, 0.85, 0.86), Color(0.05, 0.05, 0.06), Color(0.75, 0.45, 0.05), Color(0.2, 0.22, 0.25), Color(0.3, 0.4, 0.3)]
 	# carros nas vagas ao lado das casas, obras e galpões
 	for hs in city._house_spots:
-		if rng.randf() < 0.28:
+		if rng.randf() < 0.16:
 			var hc = _spawn_car(hs + Vector3(0, 0.1, 0), 0.0, palette[rng.randi() % palette.size()])
 			hc.parked = true
-	for k in 12:
+	for k in 8:
 		var road: float = (rng.randi_range(1, city.N - 1) - city.N * 0.5) * city.CELL       # rua interna da grade
 		var mid: float = city._center(rng.randi_range(0, city.N - 1)) + rng.randf_range(-12.0, 12.0)
 		var side: float = 1.0 if rng.randf() < 0.5 else -1.0
@@ -2921,7 +3119,7 @@ func _spawn_population(first := true) -> void:
 		var pc = _spawn_car(pos, yaw, palette[k % palette.size()])
 		pc.parked = true
 	# pedestres
-	for k in 36:
+	for k in _pop_peds:
 		var p := Ped.new()
 		add_child(p)
 		var loopw: Array = city.walk_loops[rng.randi() % city.walk_loops.size()]
@@ -2940,6 +3138,9 @@ func _spawn_vehicles2() -> void:
 	var used := {str(Vector2i(1, 3)) + str(Vector2i(0, 1)): true, str(Vector2i(4, 2)) + str(Vector2i(0, -1)): true}
 	var kinds := ["sedan", "hatch", "suv", "pickup", "sedan", "hatch", "taxi", "sport", "sedan", "suv", "moto", "moto", "moto", "hatch", "pickup", "taxi",
 		"sedan", "suv", "hatch", "sport", "pickup", "moto", "taxi", "sedan", "van", "truck", "offroad", "super", "sportbike", "bike", "van", "truck"]
+	# trânsito por qualidade (Baixo 18 · Médio 24 · Alto 30 carros)
+	kinds.shuffle()
+	kinds = kinds.slice(0, [18, 24, 30][quality])
 	for k in kinds.size():
 		var n := Vector2i(rng.randi_range(0, city.N), rng.randi_range(0, city.N))
 		var dirs := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
