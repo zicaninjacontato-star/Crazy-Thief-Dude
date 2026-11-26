@@ -14,7 +14,8 @@ signal hurt(cop)
 var gang := ""             # "g" verde / "p" rosa (membro de gangue)
 
 var target: Node3D
-var searching := false     # a polícia ainda não sabe onde o jogador está (zona amarela): não atira
+var searching := false
+var _idle_skip := 0.0     # a polícia ainda não sabe onde o jogador está (zona amarela): não atira
 var body: Node3D
 var hp := 170.0
 var _base_speed := -1.0
@@ -304,6 +305,15 @@ func _physics_process(dt: float) -> void:
 		knocked = minf(0.0, knocked + dt)
 		body.animate(0.0, dt)
 		return
+	# sem alvo (gangue parada, patrulha) e longe do jogador: pensa só 4×/s e não move a física
+	if target == null:
+		_idle_skip -= dt
+		if _idle_skip > 0.0:
+			return
+		var pl = get_tree().current_scene.get("player")
+		if pl and global_position.distance_squared_to(pl.global_position) > 55.0 * 55.0:
+			_idle_skip = 0.25
+			return
 	_t += dt
 	if _base_speed < 0.0:
 		_base_speed = speed

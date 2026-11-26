@@ -940,17 +940,38 @@ func _physics_process(dt: float) -> void:
 		combat.fire_held = false
 	combat.missile_held = hud.missile or Input.is_key_pressed(KEY_G)
 	hud.armed = player.vehicle != null and player.vehicle.get("armed") == true
+	var _t0 := Time.get_ticks_usec()
 	_crimes(dt)
 	_tune_tick(dt)
 	_safe_door_tick(dt)
+	var _t1 := Time.get_ticks_usec()
 	_props_tick()
+	var _t2 := Time.get_ticks_usec()
 	_car_vs_player()
-	if not has_meta("skip_pgm"):
-		police.tick(dt)
-		gangs.tick(dt)
-		_zones_hud()
-		missions.tick(dt)
+	var _t3 := Time.get_ticks_usec()
+	police.tick(dt)
+	var _t4 := Time.get_ticks_usec()
+	gangs.tick(dt)
+	var _t5 := Time.get_ticks_usec()
+	_zones_hud()
+	missions.tick(dt)
+	var _t6 := Time.get_ticks_usec()
 	_water_tick(dt)
+	var _t7 := Time.get_ticks_usec()
+	if shot_view == "physprof2":
+		var pr: Dictionary = get_meta("pp", {})
+		for kv in [["crimes+door", _t1 - _t0], ["props", _t2 - _t1], ["car_vs_player", _t3 - _t2], ["police", _t4 - _t3], ["gangs", _t5 - _t4], ["zones+missions", _t6 - _t5], ["water", _t7 - _t6]]:
+			pr[kv[0]] = pr.get(kv[0], 0) + kv[1]
+		pr["n"] = pr.get("n", 0) + 1
+		set_meta("pp", pr)
+
+func _count_phys() -> Dictionary:
+	var d := {}
+	for n in get_tree().root.find_children("*", "", true, false):
+		if n.is_physics_processing() and n.can_process():
+			var k: String = str(n.get_script().resource_path.get_file()) if n.get_script() else n.get_class()
+			d[k] = d.get(k, 0) + 1
+	return d
 
 ## carros batendo em postes (fáceis) e árvores (precisam de mais velocidade)
 # ---------------------------------------------------------------- oficina tuning: o carro entra sozinho (câmera de cinema)
@@ -1836,6 +1857,52 @@ func _test9(v: String) -> void:
 				print("BRG ray h=", hh, " ", (str(r.collider) + " " + str(r.position.snapped(Vector3.ONE * 0.1)) + " shape=" + str(r.shape)) if not r.is_empty() else "-")
 		if frames % 6 == 0 and player.vehicle:
 			print("BRG ", frames, " pos=", player.vehicle.global_position.snapped(Vector3.ONE * 0.1), " spd=", snappedf(player.vehicle.linear_velocity.length(), 0.1))
+	if v == "physprof2" and frames == 500:
+		var pr2: Dictionary = get_meta("pp", {})
+		for k in pr2:
+			if k != "n":
+				print("PHY2 ", k, " us=", pr2[k] / pr2.n)
+		print("PHY2 ticks=", pr2.n, " physics_ms=", snappedf(Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0, 0.01))
+	if v == "physprof":
+		var st3 := ["base", "-gang", "-cops", "-peds", "-traffic_ai", "-parked_cars", "-all_cars", "-player", "-sea", "-mainphys", "-ragdolls"]
+		var w3 := 120
+		var i3: int = (frames - 300) / w3
+		if frames >= 300 and i3 < st3.size():
+			var f3: int = (frames - 300) % w3
+			if f3 >= 10:
+				var a4: Array = get_meta("p3", [0.0, 0.0, 0])
+				var now := Time.get_ticks_usec()
+				a4[0] += (now - int(get_meta("lt", now))) / 1000.0
+				a4[2] += 1
+				set_meta("p3", a4)
+			set_meta("lt", Time.get_ticks_usec())
+			if f3 == w3 - 1:
+				var a5: Array = get_meta("p3")
+				print("PHY ", st3[i3], " frame_ms=", snappedf(a5[0] / a5[2], 0.01), " active=", Performance.get_monitor(Performance.PHYSICS_3D_ACTIVE_OBJECTS), " pairs=", Performance.get_monitor(Performance.PHYSICS_3D_COLLISION_PAIRS))
+				set_meta("p3", [0.0, 0.0, 0])
+				var nx: String = st3[i3 + 1] if i3 + 1 < st3.size() else ""
+				match nx:
+					"-gang":
+						for q in gangs.alive(): q.process_mode = Node.PROCESS_MODE_DISABLED
+					"-cops":
+						for q in police.cops + police.patrol_cops:
+							if is_instance_valid(q): q.process_mode = Node.PROCESS_MODE_DISABLED
+					"-peds":
+						for q in peds: q.process_mode = Node.PROCESS_MODE_DISABLED
+					"-traffic_ai": traffic_sys.process_mode = Node.PROCESS_MODE_DISABLED
+					"-parked_cars":
+						for c in cars:
+							if is_instance_valid(c) and not traffic_sys.is_agent(c): c.process_mode = Node.PROCESS_MODE_DISABLED
+					"-all_cars":
+						for c in cars:
+							if is_instance_valid(c): c.process_mode = Node.PROCESS_MODE_DISABLED
+					"-player": player.process_mode = Node.PROCESS_MODE_DISABLED
+					"-sea": sea.process_mode = Node.PROCESS_MODE_DISABLED
+					"-mainphys": set_physics_process(false)
+					"-ragdolls":
+						for n in get_tree().get_nodes_in_group("tmp"):
+							n.process_mode = Node.PROCESS_MODE_DISABLED
+						print("PHY nodes_with_physics: ", _count_phys())
 	if v == "cpuprof2":
 		var steps2 := ["base", "-combat", "-audio", "-peds", "-police_gangs_missions", "-hud", "-daynight", "-world2", "-sea", "-traffic", "base2"]
 		var w := 30
