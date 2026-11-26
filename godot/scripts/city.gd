@@ -90,6 +90,18 @@ func _bus_line() -> void:
 		add_child(lb)
 
 func _flush() -> void:
+	if OS.get_cmdline_user_args().has("--view=matstat"):
+		var st := {}
+		for mat in _batch:
+			var m: StandardMaterial3D = mat
+			var k := "tex" if m.albedo_texture else "notex"
+			k += "_emi" if m.emission_enabled else ""
+			k += "_tri" if m.uv1_triplanar else ""
+			k += "_alpha" if m.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED else ""
+			k += "_nrm" if m.normal_enabled else ""
+			k += "_vc" if m.vertex_color_use_as_albedo else ""
+			st[k] = st.get(k, 0) + 1
+		print("MATSTAT ", st, " total=", _batch.size())
 	for mat in _batch:
 		var mi := MeshInstance3D.new()
 		mi.mesh = _batch[mat].commit()
@@ -107,15 +119,74 @@ func extent() -> float:
 ## a cidade inteira vira ~15 draw calls em vez de centenas.
 var _batch := {}
 
-func _box(size: Vector3, pos: Vector3, mat: Material, collide := true, parent: Node = self) -> void:
-	var bm := BoxMesh.new()
-	bm.size = size
-	if parent == self:
+## material liso (só cor, sem textura/emissão/transparência): vai para um lote único com cor por
+## vértice, separado só por rugosidade/metal. Antes eram ~580 materiais = ~580 malhas/draw calls.
+var _vc_mats := {}
+func _vc_key(mat: Material):
+	if not (mat is StandardMaterial3D):
+		return null
+	var m: StandardMaterial3D = mat
+	# letreiros/luzes de uma cor só (emissão sem textura): um material sem sombreamento com cor por vértice
+	if m.emission_enabled and m.emission_texture == null and m.albedo_texture == null and m.transparency == BaseMaterial3D.TRANSPARENCY_DISABLED:
+		if not _vc_mats.has("emi"):
+			var em := StandardMaterial3D.new()
+			em.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			em.vertex_color_use_as_albedo = true
+			_vc_mats["emi"] = em
+		return "emi"
+	if m.emission_enabled or m.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED or m.vertex_color_use_as_albedo or m.albedo_color.a < 0.99:
+		return null
+	# mesmo "acabamento" (texturas, rugosidade, metal, escala/triplanar) = mesmo material; a cor vai no vértice
+	var key := "vc|%s|%s|%s|%.1f|%.1f|%s|%s" % [m.albedo_texture, m.normal_texture if m.normal_enabled else null, m.roughness_texture, snappedf(m.roughness, 0.1), snappedf(m.metallic, 0.1), m.uv1_scale, m.uv1_triplanar]
+	if not _vc_mats.has(key):
+		var vm: StandardMaterial3D = m.duplicate()
+		vm.vertex_color_use_as_albedo = true
+		vm.albedo_color = Color.WHITE
+		vm.roughness = snappedf(m.roughness, 0.1)
+		vm.metallic = snappedf(m.metallic, 0.1)
+		_vc_mats[key] = vm
+	return key
+
+func _batch_add(mesh: Mesh, xf: Transform3D, mat: Material) -> void:
+	var key = _vc_key(mat)
+	if key == null:
 		if not _batch.has(mat):
 			var st := SurfaceTool.new()
 			st.begin(Mesh.PRIMITIVE_TRIANGLES)
 			_batch[mat] = st
-		_batch[mat].append_from(bm, 0, Transform3D(Basis(), pos))
+		_batch[mat].append_from(mesh, 0, xf)
+		return
+	var vm: StandardMaterial3D = _vc_mats[key]
+	if not _batch.has(vm):
+		var st2 := SurfaceTool.new()
+		st2.begin(Mesh.PRIMITIVE_TRIANGLES)
+		_batch[vm] = st2
+	var col: Color = (mat as StandardMaterial3D).albedo_color
+	if key == "emi":
+		var sm: StandardMaterial3D = mat
+		col = sm.emission.lightened(clampf((sm.emission_energy_multiplier - 1.0) * 0.15, 0.0, 0.35))
+	var arr: Array = mesh.get_mesh_arrays()
+	var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+	var ns: PackedVector3Array = arr[Mesh.ARRAY_NORMAL]
+	var uvs: PackedVector2Array = arr[Mesh.ARRAY_TEX_UV]
+	var tg = arr[Mesh.ARRAY_TANGENT]
+	var ix: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+	var stv: SurfaceTool = _batch[vm]
+	var has_tg: bool = tg != null and tg.size() >= vs.size() * 4
+	for i in ix:
+		stv.set_color(col)
+		stv.set_normal((xf.basis * ns[i]).normalized())
+		stv.set_uv(uvs[i])
+		if has_tg:
+			var t3 := (xf.basis * Vector3(tg[i * 4], tg[i * 4 + 1], tg[i * 4 + 2])).normalized()
+			stv.set_tangent(Plane(t3, tg[i * 4 + 3]))
+		stv.add_vertex(xf * vs[i])
+
+func _box(size: Vector3, pos: Vector3, mat: Material, collide := true, parent: Node = self) -> void:
+	var bm := BoxMesh.new()
+	bm.size = size
+	if parent == self:
+		_batch_add(bm, Transform3D(Basis(), pos), mat)
 	else:
 		var mi := MeshInstance3D.new()
 		mi.mesh = bm
@@ -837,11 +908,7 @@ func _police_station(cx: float, cz: float) -> void:
 func _boxr(size: Vector3, xf: Transform3D, mat: Material, collide := true) -> void:
 	var bm := BoxMesh.new()
 	bm.size = size
-	if not _batch.has(mat):
-		var st := SurfaceTool.new()
-		st.begin(Mesh.PRIMITIVE_TRIANGLES)
-		_batch[mat] = st
-	_batch[mat].append_from(bm, 0, xf)
+	_batch_add(bm, xf, mat)
 	if collide:
 		var cs := CollisionShape3D.new()
 		var sh := BoxShape3D.new()

@@ -233,8 +233,44 @@ func is_agent(car) -> bool:
 	return false
 
 # ---------------------------------------------------------------- direção
+## grade espacial (24 m) de carros e pessoas, refeita 1× por passo: cada carro do trânsito só
+## olha os vizinhos (antes percorria todos os carros e pedestres a cada decisão)
+const GCELL := 24.0
+var _g_cars := {}
+var _g_bodies := {}
+func _grid_build() -> void:
+	_g_cars.clear()
+	_g_bodies.clear()
+	for o in main.cars:
+		if is_instance_valid(o):
+			var k := Vector2i(floori(o.global_position.x / GCELL), floori(o.global_position.z / GCELL))
+			if not _g_cars.has(k):
+				_g_cars[k] = []
+			_g_cars[k].append(o)
+	var bl: Array = main.peds.duplicate()
+	if main.player.vehicle == null:
+		bl.append(main.player)
+	for p in bl:
+		if is_instance_valid(p) and not p.get("down"):
+			var k2 := Vector2i(floori(p.global_position.x / GCELL), floori(p.global_position.z / GCELL))
+			if not _g_bodies.has(k2):
+				_g_bodies[k2] = []
+			_g_bodies[k2].append(p)
+
+func _near(g: Dictionary, pos: Vector3) -> Array:
+	var out := []
+	var cx := floori(pos.x / GCELL)
+	var cz := floori(pos.z / GCELL)
+	for dx in [-1, 0, 1]:
+		for dz in [-1, 0, 1]:
+			var a = g.get(Vector2i(cx + dx, cz + dz))
+			if a:
+				out.append_array(a)
+	return out
+
 func _physics_process(dt: float) -> void:
 	clock += dt
+	_grid_build()
 	_update_lamps()
 	for d in drifting.duplicate():
 		var dc = d.car
@@ -452,7 +488,7 @@ func _ahead_limit(c, pos: Vector3, no_cars := false, ign = null) -> float:
 	var f: Vector3 = c.global_transform.basis.z
 	var lim := 99.0
 	var reach: float = 16.0 + c.body_size.z * 0.5
-	for o in main.cars:
+	for o in _near(_g_cars, pos):
 		if o == c or o == ign or not is_instance_valid(o):
 			continue
 		if no_cars and is_agent(o):
@@ -465,13 +501,7 @@ func _ahead_limit(c, pos: Vector3, no_cars := false, ign = null) -> float:
 		if lat < 1.9 + o.body_size.x * 0.3:
 			last_block = o
 			lim = minf(lim, maxf(0.0, fwd - c.body_size.z * 0.5 - o.body_size.z * 0.5 - 2.5) * 0.8)
-	var bodies: Array = []
-	if main.player.vehicle == null:
-		bodies.append(main.player)
-	for p in main.peds:
-		if is_instance_valid(p) and not p.down:
-			bodies.append(p)
-	for p in bodies:
+	for p in _near(_g_bodies, pos):
 		var rel2: Vector3 = p.global_position - pos
 		var fwd2 := rel2.dot(f)
 		if fwd2 < 0.5 or fwd2 > 12.0:

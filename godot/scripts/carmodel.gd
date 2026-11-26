@@ -227,19 +227,21 @@ static func build(kind: String, paint: Color) -> Dictionary:
 	# interior simples (bancos e painel) visível pelos vidros
 	var seat_c := Color(0.09, 0.09, 0.1)
 	_box(det, Vector3(W * 0.78, 0.25, 0.4), Vector3(0, belt - 0.05, zc1 - 0.35), seat_c)
+	# encosto limitado pela altura real do teto (em carro baixo passava pelo teto)
+	var zs := (zc0 + zc1) * 0.5 - 0.12
+	var back_h := clampf(_top(top, zs) - 0.14 - 0.51, 0.25, 0.62)
 	for s in [-1.0, 1.0]:
 		_box(det, Vector3(0.48, 0.12, 0.5), Vector3(0.38 * s, 0.5, (zc0 + zc1) * 0.5 + 0.15), seat_c)
-		_box(det, Vector3(0.48, 0.62, 0.12), Vector3(0.38 * s, 0.82, (zc0 + zc1) * 0.5 - 0.12), seat_c)
+		_box(det, Vector3(0.48, back_h, 0.12), Vector3(0.38 * s, 0.51 + back_h * 0.5, zs), seat_c)
 	# forro interno da cabine: assoalho, laterais, teto, parede traseira e volante — pelos vidros
 	# agora se vê o interior do carro (antes as faces internas sumiam e aparecia o chão)
 	var cab_mid := (zc0 + zc1) * 0.5
 	var cab_len := zc1 - zc0 + 0.5
-	var roof_in := _top(top, cab_mid) - 0.07
 	var lining := Color(0.16, 0.15, 0.15)
 	_box(det, Vector3(W * 0.88, 0.05, cab_len + 0.4), Vector3(0, 0.36, cab_mid), Color(0.07, 0.07, 0.075))
 	for s in [-1.0, 1.0]:
 		_box(det, Vector3(0.05, belt - 0.32, cab_len), Vector3(s * (W * 0.5 - 0.11), (belt + 0.36) * 0.5, cab_mid), lining)
-	_box(det, Vector3(W * 0.7, 0.03, maxf(0.4, cab_len - 0.5)), Vector3(0, roof_in, cab_mid), Color(0.55, 0.53, 0.5))
+	# (sem forro de teto: a placa plana atravessava o teto curvo e aparecia como um "teto quadrado branco")
 	_box(det, Vector3(W * 0.86, belt - 0.32, 0.05), Vector3(0, (belt + 0.36) * 0.5, zc0 - 0.1), lining)
 	_box(det, Vector3(W * 0.86, belt - 0.3, 0.05), Vector3(0, (belt + 0.36) * 0.5, zc1 + 0.12), Color(0.05, 0.05, 0.055))
 	_ell(det, Vector3(0.38, belt + 0.1, zc1 - 0.62), Vector3(0.34, 0.34, 0.05), Color(0.04, 0.04, 0.045))

@@ -781,6 +781,7 @@ func _tune_panel() -> void:
 				pb.pressed.connect(func(): _tune_set("paint", col.to_html()))
 				grid.add_child(pb)
 			_info(box, "Pintura: $%d" % TN.price("paint", 0), Color(1, 0.85, 0.4))
+			_tune_buy_btn(box, cat)
 			continue
 		for i in info.opts.size():
 			var owned: bool = int(_tune_old.get(cat, 0)) == i
@@ -793,7 +794,8 @@ func _tune_panel() -> void:
 			ob.alignment = HORIZONTAL_ALIGNMENT_LEFT
 			ob.custom_minimum_size = Vector2(440, 46)
 			ob.add_theme_font_size_override("font_size", 19)
-	_btn(box, "INSTALAR ($%d)" % cost, func():
+		_tune_buy_btn(box, cat)
+	_btn(box, "COMPRAR TUDO ($%d)" % cost, func():
 		var cc: int = TN.cost(_tune_old, _tune_new)
 		if main.money >= cc:
 			main.money -= cc
@@ -802,10 +804,28 @@ func _tune_panel() -> void:
 			if cc > 0:
 				main.audio.play("cash")
 			_tune_panel(), cost > 0 and main.money >= cost)
-	_btn(box, "SAIR DA OFICINA", func():
+	_btn(box, "SAIR DA OFICINA (desfaz o que não foi comprado)", func():
 		TN.apply(_tune_car, _tune_old)
 		_close()
 		main.end_tuning())
+
+## escolher uma opção só mostra no carro (prévia); este botão compra só a peça desta categoria
+func _tune_buy_btn(box: VBoxContainer, cat: String) -> void:
+	var cur = _tune_new.get(cat, 0 if cat != "paint" else "")
+	var old = _tune_old.get(cat, 0 if cat != "paint" else "")
+	if str(cur) == str(old):
+		_info(box, "Toque numa opção para ver no carro antes de comprar", Color(0.7, 0.7, 0.72))
+		return
+	var p: int = TN.price(cat, cur) if cat != "paint" else TN.price("paint", 0)
+	var b := _btn(box, "COMPRAR ESTA PEÇA ($%d)" % p, func():
+		if main.money >= p:
+			main.money -= p
+			_tune_old[cat] = cur
+			main.save_mods(_tune_car)
+			if p > 0:
+				main.audio.play("cash")
+			_tune_panel(), main.money >= p)
+	b.add_theme_color_override("font_color", Color(0.4, 1, 0.4))
 
 func _tune_set(cat: String, v) -> void:
 	if _tune_car == null or not is_instance_valid(_tune_car):

@@ -836,6 +836,7 @@ func trunk_action(car) -> void:
 		_make_carried()
 
 func _respawn(pos: Vector3, text: String) -> void:
+	main.end_tuning()
 	var p = main.player
 	Engine.time_scale = 1.0
 	main.ui.hide_respawn()

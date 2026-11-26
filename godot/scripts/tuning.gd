@@ -264,13 +264,20 @@ static func _interior(c, st: SurfaceTool, lv: int) -> int:
 		return 0
 	var col: Color = SEAT[lv]
 	var s: Vector3 = c.seat
+	# altura do encosto limitada pelo teto do modelo (não atravessa o teto em carro baixo)
+	var roof := 9.0
+	var kk: String = c.kind if CM.KINDS.has(c.kind) else ("sedan" if c.kind in ["police", "taxi"] else "")
+	if kk != "":
+		roof = CM._top(CM.KINDS[kk].top, s.z - 0.3) - 0.1
+	var bh := clampf(roof - (s.y + 0.1), 0.25, 0.62)
 	for sx in [-1.0, 1.0]:
 		var x: float = absf(s.x) * sx
 		_bx(st, Vector3(0.5, 0.1, 0.5), Vector3(x, s.y + 0.06, s.z), col)
-		_bx(st, Vector3(0.5, 0.62, 0.11), Vector3(x, s.y + 0.4, s.z - 0.28), col, Basis(Vector3.RIGHT, -0.12))
-		_bx(st, Vector3(0.3, 0.16, 0.09), Vector3(x, s.y + 0.8, s.z - 0.33), col)
+		_bx(st, Vector3(0.5, bh, 0.11), Vector3(x, s.y + 0.1 + bh * 0.5, s.z - 0.28), col, Basis(Vector3.RIGHT, -0.12))
+		if bh > 0.55:
+			_bx(st, Vector3(0.3, 0.14, 0.09), Vector3(x, s.y + 0.1 + bh + 0.04, s.z - 0.33), col)
 		if lv == 5 or lv == 2:
-			_bx(st, Vector3(0.08, 0.6, 0.115), Vector3(x, s.y + 0.4, s.z - 0.28), Color(0.9, 0.9, 0.9) if lv == 5 else Color(0.1, 0.1, 0.1), Basis(Vector3.RIGHT, -0.12))
+			_bx(st, Vector3(0.08, bh - 0.02, 0.115), Vector3(x, s.y + 0.1 + bh * 0.5, s.z - 0.28), Color(0.9, 0.9, 0.9) if lv == 5 else Color(0.1, 0.1, 0.1), Basis(Vector3.RIGHT, -0.12))
 	return 1
 
 static func _moto_sticker(c, st: SurfaceTool, lv: int) -> int:

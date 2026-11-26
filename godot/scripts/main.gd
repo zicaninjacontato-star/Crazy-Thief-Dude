@@ -179,6 +179,8 @@ func _ready() -> void:
 
 ## novo jogo: só soco, $600, sem carros comprados
 func new_game() -> void:
+	end_tuning()
+	cine_cam = false
 	player.global_position = spawn_point()
 	player.velocity = Vector3.ZERO
 	money = 600
@@ -198,6 +200,8 @@ func new_game() -> void:
 	ui.save_game()
 
 func load_game() -> void:
+	end_tuning()
+	cine_cam = false
 	player.global_position = spawn_point()
 	player.velocity = Vector3.ZERO
 	var d: Dictionary = ui.load_save()
@@ -915,7 +919,7 @@ func _physics_process(dt: float) -> void:
 		player.move_input = Vector2(mv.x, mv.y)
 		player.cam_yaw = cam_yaw + PI
 		player.sprint = hud.sprint or Input.is_action_pressed("sprint")
-	elif not shot_view in ["drive", "motoride", "planefly", "helifly", "jetfly", "attackheli", "wheelie", "crashreact", "bridgedrive", "viaductdrive", "hillwalk", "boatride", "busride", "motocrash", "props"]:
+	elif not shot_view in ["drive", "motoride", "planefly", "helifly", "jetfly", "attackheli", "wheelie", "crashreact", "bridgedrive", "viaductdrive", "hillwalk", "tuning", "boatride", "busride", "motocrash", "props"]:
 		var c = player.vehicle
 		var g := 1.0 if hud.gas else 0.0
 		var b := 1.0 if hud.brk else 0.0
@@ -992,7 +996,10 @@ func start_tuning() -> void:
 	out = out.normalized()
 	c.throttle = 0.0
 	c.brake_in = 0.0
-	c.freeze = true
+	# sem "freeze": congelado, a física não reposiciona as rodas e elas ficavam para fora da oficina.
+	# Integrador próprio = sem gravidade/forças; a posição é ditada por _tune_tick a cada passo.
+	c.freeze = false
+	c.custom_integrator = true
 	var pts := [c.global_position, door + out * 5.0, door, center]
 	var lens := []
 	var total := 0.0
@@ -1010,7 +1017,9 @@ func _tune_tick(dt: float) -> void:
 	if tune.is_empty():
 		return
 	var c = tune.car
-	if not is_instance_valid(c):
+	if not is_instance_valid(c) or player.vehicle != c or combat.dead:
+		if ui.overlay:
+			ui._close()
 		end_tuning()
 		return
 	tune.t += dt
@@ -1067,7 +1076,12 @@ func end_tuning() -> void:
 	cine_cam = false
 	hud.input_block = false
 	if not tune.is_empty() and is_instance_valid(tune.car):
-		tune.car.freeze = false
+		var c = tune.car
+		c.custom_integrator = false
+		c.freeze = false
+		c.linear_velocity = Vector3.ZERO
+		c.angular_velocity = Vector3.ZERO
+		c.global_position += Vector3(0, 0.15, 0)
 	tune = {}
 
 ## carro comprado: os mods vão para o save
@@ -1274,6 +1288,10 @@ func _msg(t: String) -> void:
 	msg_t = 3.0
 
 func _process(dt: float) -> void:
+	# trava de segurança: câmera de cena só existe com a oficina ou o tubarão gigante ativos
+	if cine_cam and tune.is_empty() and (sea == null or sea.squid_t < 0.0):
+		cine_cam = false
+		hud.input_block = false
 	_upkeep(dt)
 	frames += 1
 	# câmera em 3ª pessoa
@@ -1764,6 +1782,37 @@ func _test9(v: String) -> void:
 				if n.emitting:
 					parts += 1
 			print("SOAK ", frames, " nodes=", get_tree().get_node_count(), " tmp=", get_tree().get_nodes_in_group("tmp").size(), " rigid=", rb, " emit=", parts, " cars=", cars.filter(func(c): return is_instance_valid(c)).size(), " wrecks=", cars.filter(func(c): return is_instance_valid(c) and c.get("dead")).size(), " peds=", peds.filter(func(q): return is_instance_valid(q) and not q.down).size(), " agents=", traffic_sys.agents.size(), " props_down=", city.props.filter(func(x): return not x.alive).size(), " dc=", RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME), " dead=", combat.dead, " wanted=", wanted)
+	if v == "dcwho" and frames == 14:
+		# quem são as instâncias visíveis (cada uma = 1+ draw call)
+		var cnt := {}
+		var tot := 0
+		for n in find_children("*", "GeometryInstance3D", true, false):
+			if not n.is_visible_in_tree():
+				continue
+			var o: Node = n
+			while o.get_parent() != self and o.get_parent() != null:
+				o = o.get_parent()
+			var top := str(o.name) if not (o is Car or o.get_script() == Arcade or o.get_script() == Ped or o.get_script() == Cop) else ("car" if (o is Car or o.get_script() == Arcade) else "person")
+			var key := top + ":" + n.get_class()
+			cnt[key] = cnt.get(key, 0) + 1
+			tot += 1
+		var ks := cnt.keys()
+		ks.sort_custom(func(a, b): return cnt[a] > cnt[b])
+		print("DCW total_instances=", tot)
+		var cc := {}
+		for n in city.find_children("*", "MeshInstance3D", true, false):
+			var k2: String = n.mesh.get_class() + "|" + (n.get_parent().get_class() if n.get_parent() != city else "city") + "|" + ("vc" if n.material_override and n.material_override.vertex_color_use_as_albedo else "m")
+			cc[k2] = cc.get(k2, 0) + 1
+		print("DCW city_breakdown ", cc)
+		var c3 := {}
+		for n in city.get_children():
+			if n is MeshInstance3D and n.material_override is StandardMaterial3D and not n.material_override.vertex_color_use_as_albedo:
+				var m: StandardMaterial3D = n.material_override
+				var k3 := ("emi " if m.emission_enabled else "") + ("alpha " if m.transparency != 0 else "") + ("tex " if m.albedo_texture else "") + ("emitex " if m.emission_texture else "")
+				c3[k3] = c3.get(k3, 0) + 1
+		print("DCW city_m ", c3)
+		for k in ks.slice(0, 25):
+			print("DCW ", k, " ", cnt[k])
 	if v == "geoprof" and frames == 12:
 		var tri_of := func(m: Mesh) -> int:
 			var t := 0
@@ -2685,6 +2734,24 @@ func _test_views() -> void:
 			print("TUN cost=", TUNING.cost(ui._tune_old, ui._tune_new), " mods=", tune.car.mods)
 		if frames == 76:
 			tune_cam(0.9)
+		if frames in [40, 70, 100, 130] and player.vehicle:
+			var c0 = player.vehicle
+			var wd := 0.0
+			for w in c0.wheels:
+				wd = maxf(wd, w.global_position.distance_to(c0.global_position))
+			print("TUN2 ", frames, " car=", c0.global_position.snapped(Vector3.ONE * 0.1), " max_wheel_dist=", snappedf(wd, 0.01), " cine=", cine_cam, " tune=", not tune.is_empty(), " paused=", get_tree().paused)
+		if frames == 80 and v == "tuning":
+			ui._tune_set("wheels", 1)
+			ui._tune_buy_btn(VBoxContainer.new(), "wheels")
+			var p0 := money
+			ui._tune_old["wheels"] = ui._tune_new["wheels"]
+			print("TUN2 bought_wheels mods_old=", ui._tune_old.get("wheels"))
+		if frames == 90:
+			TUNING.apply(tune.car, ui._tune_old)
+			ui._close()
+			end_tuning()
+		if frames > 92 and frames < 130 and player.vehicle:
+			player.vehicle.throttle = 0.7
 	if v == "boatride":
 		if frames == 4:
 			for c in cars:
