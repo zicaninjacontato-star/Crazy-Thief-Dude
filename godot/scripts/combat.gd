@@ -992,7 +992,9 @@ func npc_out(car, how: String) -> void:
 		var t = Cop.new()
 		main.add_child(t)
 		t.setup(rng.randi(), "thug")
-		t.global_position = car.door_world() + car.global_transform.basis.x * 0.8
+		var tp: Vector3 = car.door_world() + car.global_transform.basis.x * 0.8
+		tp.y = main.ground_at(tp, [car.get_rid()]) + 0.05
+		t.global_position = tp
 		t.target = main.player
 		t.shot_player.connect(_on_cop_shot)
 		main.missions.thugs.append(t)
@@ -1019,7 +1021,7 @@ func _driver_out(car) -> void:
 		return
 	var h: Node3D = info.drv
 	var pos: Vector3 = car.door_world() + car.global_transform.basis.x * 1.0
-	pos.y = car.global_position.y - 0.4
+	pos.y = main.ground_at(pos, [car.get_rid()])      # antes car.y − 0.4: o NPC ficava enterrado na rua
 	var Ped := preload("res://scripts/ped.gd")
 	var q = Ped.new()
 	main.add_child(q)

@@ -838,6 +838,8 @@ func finish_enter(best) -> Node3D:
 	seated.moto_pose = best.kind == "moto"
 	if best.lean:
 		best.lean.add_child(seated)
+	elif not (best is VehicleBody3D) and best.get("model_root") != null:
+		best.model_root.add_child(seated)       # barco/avião/heli: inclina junto com o modelo
 	else:
 		best.add_child(seated)
 	seated.animate(0, 0)
@@ -851,6 +853,32 @@ func seat_pos(c) -> Vector3:
 	if c.kind == "moto":
 		return Vector3(0, 0.84 - 0.98 * 0.85 + 0.04, -0.22)
 	return Vector3(s.x, s.y + 0.07 - 0.98 * 0.85, s.z)
+
+## altura do chão (rua, calçada, morro) num ponto — para pôr quem sai do carro em pé no chão
+func ground_at(p: Vector3, exclude := []) -> float:
+	var q := PhysicsRayQueryParameters3D.create(p + Vector3(0, 2.5, 0), p + Vector3(0, -4.0, 0), 1)
+	q.exclude = exclude
+	var r := get_world_3d().direct_space_state.intersect_ray(q)
+	if r.is_empty():
+		return maxf(0.0, city.hill_h(p.x, p.z) if city.has_method("hill_h") else 0.0)
+	return r.position.y
+
+## motorista/piloto NPC visível em qualquer veículo (carro, moto, ônibus, caminhão, barco, avião, heli)
+func seat_npc(c) -> Node3D:
+	if c.get("model_root") == null or c is VehicleBody3D:
+		traffic_sys._driver({"car": c})
+		return c.get_meta("drv_node")
+	var h := Humanoid.new()
+	var pol: bool = c.get("police") == true
+	h.build(Color(0.12, 0.2, 0.42) if pol else Color(0.85, 0.75, 0.3), Color(0.1, 0.1, 0.16), Color(0.78, 0.56, 0.38), Color(0.08, 0.06, 0.05), {"hat": 1, "hat_c": Color(0.08, 0.1, 0.22)} if pol else {})
+	h.sitting = true
+	h.scale = Vector3.ONE * 0.85
+	h.position = seat_pos(c)
+	c.model_root.add_child(h)
+	h.animate(0, 0)
+	h.set_far(45.0)
+	c.set_meta("drv_node", h)
+	return h
 
 func anim_done() -> void:
 	if player.vehicle:
@@ -866,6 +894,7 @@ func _spawn_fleeing(c) -> void:
 			loop = l
 	p.setup(loop, 0, rng)
 	p.position = c.door_world() + c.global_transform.basis.x * 0.8
+	p.position.y = ground_at(p.position, [c.get_rid()])
 	p.died.connect(_on_ped_died)
 	p.scare()
 	p.flee = 10.0
@@ -1606,8 +1635,64 @@ func _process(dt: float) -> void:
 	if shot != "":
 		_shot_tick()
 
+## teste do lote 18: um motorista em cada veículo; fotos de lado e em 1ª pessoa (seat_<tipo>_side/_fp.png)
+const SEAT_KINDS := ["sedan", "hatch", "suv", "pickup", "van", "offroad", "super", "sport", "police", "taxi", "moto", "bike", "sportbike", "bus", "truck", "boat", "jetski", "plane", "jet", "heli", "attack"]
+var _sg: Array = []
+func _seatgrid() -> void:
+	var only: String = OS.get_environment("SEATK")
+	var kinds: Array = SEAT_KINDS if only == "" else Array(only.split(","))
+	if frames == 6:
+		player.global_position = Vector3(world2.AIR_X, 0.3, 60.0)
+		for i in kinds.size():
+			var k: String = kinds[i]
+			var pos := Vector3(world2.AIR_X - 150.0 + i * 15.0, 0.8, 0.0)
+			var c
+			if k in ["boat", "jetski", "plane", "jet", "heli", "attack"]:
+				c = _spawn_arcade(k, pos + Vector3(0, -0.6, 0), 0.0, Color(0.7, 0.2, 0.2))
+			else:
+				c = _spawn_car(pos, 0.0, Color(0.2, 0.35, 0.7), k == "police", "" if k == "police" else k)
+			if OS.get_environment("TUNE") != "" and c is VehicleBody3D:
+				var tv: int = int(OS.get_environment("TUNE"))
+				var mm := {"wheels": 3, "hood": 1 + tv % 3, "trunk": 1 + tv % 2, "sticker": 1 + tv % 5, "spoiler": 2 + tv % 2, "fbumper": 1 + tv % 2, "rbumper": 1 + tv % 2, "tint": 2, "interior": 2,
+					"mexhaust": 1 + tv % 2, "mseat": 1 + tv % 3, "mfront": 1 + tv % 2, "mlight": 1 + tv % 2}
+				TUNING.apply(c, mm)
+			else:
+				seat_npc(c)
+			_sg.append([k, c])
+	var base := 40
+	var i2: int = (frames - base) / 14
+	var ph: int = (frames - base) % 14
+	if frames < base or i2 >= _sg.size():
+		return
+	var c2 = _sg[i2][1]
+	var xf: Transform3D = c2.global_transform
+	var sp: Vector3 = xf * seat_pos(c2)
+	if ph < 7:
+		var side: Vector3 = xf.basis.x.normalized()
+		var dist: float = clampf(c2.body_size.z * 1.05, 4.5, 16.0) * (float(OS.get_environment("SEATD")) if OS.get_environment("SEATD") != "" else 1.0)
+		var rear: bool = OS.get_environment("SEATREAR") != ""
+		cam.global_position = c2.global_position + side * dist * (0.45 if rear else 1.0) - xf.basis.z * (dist * 0.95 * (-1.0 if OS.get_environment("SEATFRONT") != "" else 1.0) if rear else 0.0) + Vector3(0, 1.6 + c2.body_size.y * 0.3, 0)
+		cam.look_at(c2.global_position + Vector3(0, c2.body_size.y * 0.5, 0) + (Vector3.ZERO if rear else sp - c2.global_position) * 0.5, Vector3.UP)
+	else:
+		var dn = c2.get_meta("drv_node") if c2.has_meta("drv_node") else null
+		var eye: Vector3 = sp + Vector3(0, 1.1, 0)
+		if dn and dn.bones.has("head"):
+			dn.bones["head"].visible = false
+			eye = dn.bones["head"].global_position + Vector3(0, 0.13, 0)
+		cam.global_position = eye
+		cam.look_at(eye + xf.basis.z * 10.0 + Vector3(0, -0.4, 0), Vector3.UP)
+	if ph == 5 or ph == 12:
+		var dir := shot.get_base_dir()
+		get_viewport().get_texture().get_image().save_png(dir + "/seat_%s_%s.png" % [_sg[i2][0], "side" if ph == 5 else "fp"])
+		print("SEAT ", _sg[i2][0], " ", "side" if ph == 5 else "fp", " seat=", c2.seat, " sp=", seat_pos(c2))
+	if i2 == _sg.size() - 1 and ph == 13:
+		get_tree().quit()
+
 ## cenas de teste do lote 9
 func _test9(v: String) -> void:
+	if v == "seatgrid":
+		_seatgrid()
+		return
 	if v in ["swimpose", "gun1", "gun2", "gun3"]:
 		if frames == 4:
 			if v == "swimpose":
@@ -2641,6 +2726,45 @@ func _test_views() -> void:
 				if is_instance_valid(q):
 					pos.append([snappedf(q.global_position.distance_to(gc), 1), snappedf(q.global_position.y, 0.1), q.visible, q.down, q.body.visible if q.body else null])
 			print("GPOP ", frames, " g=", g, " n=", gangs.members[g].size(), " ", pos)
+	if v == "crashparts":
+		# dano por peça: 4 carros, cada um batido de um lado (frente, trás, lado do motorista, lado do passageiro)
+		if frames == 6:
+			player.global_position = Vector3(world2.AIR_X, 0.3, 40.0)
+			var kinds := ["sedan", "suv", "hatch", "van"]
+			for i in 4:
+				var c = _spawn_car(Vector3(world2.AIR_X - 14.0 + i * 7.0, 0.8, 0.0), 0.0, Color(0.75, 0.12, 0.1), false, kinds[i])
+				set_meta("cp%d" % i, c)
+		if frames in [30, 45, 60]:
+			for i in 4:
+				var c = get_meta("cp%d" % i)
+				var dirs := [Vector3(0, 0, 1), Vector3(0, 0, -1), Vector3(1, 0, 0.1), Vector3(-1, 0, 0.3)]
+				c._impact_at(dirs[i], 16.0)
+				print("CRP ", frames, " ", c.kind, " parts=", c.part_dmg, " hood_pop=", snappedf(c.hood_pop, 0.01), " ajar=", snappedf(c.door_ajar, 0.01), " trunk=", snappedf(c.trunk_pop, 0.01), " bent=", c.bent.size(), " bumpers_vis=", c.bumpers.values().map(func(b): return b.visible))
+		if frames > 62 or (frames > 8 and OS.get_environment("CRPNEW") != ""):
+			var i3: int = int(OS.get_environment("CRPI")) if OS.get_environment("CRPI") != "" else 0
+			var c3 = get_meta("cp%d" % i3)
+			var vw: Vector3 = [Vector3(2.2, 1.3, 5.0), Vector3(2.5, 1.6, -5.0), Vector3(5.2, 1.4, 1.0), Vector3(-5.2, 1.4, 1.5)][i3]
+			cam.global_position = c3.global_transform * vw
+			cam.look_at(c3.global_position + Vector3(0, 0.6, 0), Vector3.UP)
+		if frames == 64 and OS.get_environment("CRPHIDE") != "":
+			var cc = get_meta("cp2")
+			for mi in cc.door_node.get_children():
+				if mi is MeshInstance3D and mi.material_override is StandardMaterial3D and mi.material_override.albedo_color.r < 0.1 and mi.material_override.albedo_color.a > 0.9:
+					mi.visible = false
+					print("CRP hid inner")
+			for mi in cc.door_node.get_children():
+				if mi is MeshInstance3D:
+					var ar = mi.mesh.surface_get_arrays(0)
+					var nn := Vector3.ZERO
+					var vv := Vector3.ZERO
+					for k in ar[Mesh.ARRAY_NORMAL].size():
+						nn += ar[Mesh.ARRAY_NORMAL][k]
+						vv += ar[Mesh.ARRAY_VERTEX][k]
+					print("CRP door mesh col=", mi.material_override.albedo_color, " n=", (nn / ar[Mesh.ARRAY_NORMAL].size()).snapped(Vector3.ONE * 0.01), " v=", (vv / ar[Mesh.ARRAY_VERTEX].size()).snapped(Vector3.ONE * 0.01), " vis=", mi.visible, " rot=", cc.door_node.rotation)
+		if frames == 66 and OS.get_environment("CRPFIX") != "":
+			for i in 4:
+				get_meta("cp%d" % i).repair()
+			print("CRP repaired")
 	if v in ["gangbase", "gangview", "gangview2"]:
 		var gg: String = "p" if v == "gangview2" else "g"
 		var hq: Dictionary = city.gang_hq[gg]

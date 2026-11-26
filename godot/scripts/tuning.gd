@@ -4,6 +4,7 @@ extends RefCounted
 
 const CM := preload("res://scripts/carmodel.gd")
 const M := preload("res://scripts/mats.gd")
+const VM := preload("res://scripts/vehmodel.gd")
 
 ## id -> {name, opts: [nomes], price: [preço por opção]}
 const CATS := {
@@ -19,10 +20,15 @@ const CATS := {
 	"spoiler": {"name": "Aerofólio", "opts": ["Nenhum", "Lip discreto", "Asa esportiva", "Asa GT"], "price": [0, 400, 900, 1500]},
 	"fbumper": {"name": "Para-choque dianteiro", "opts": ["Original", "Splitter esportivo", "Quebra-mato"], "price": [0, 650, 800]},
 	"rbumper": {"name": "Para-choque traseiro", "opts": ["Original", "Difusor", "Escape duplo"], "price": [0, 650, 700]},
+	"mexhaust": {"name": "Escapamento", "opts": ["Original", "Esportivo cromado", "Duplo preto"], "price": [0, 500, 650]},
+	"mseat": {"name": "Banco", "opts": ["Original", "Couro marrom", "Esportivo vermelho", "Duplo com encosto"], "price": [0, 250, 300, 450]},
+	"mfront": {"name": "Frente", "opts": ["Original", "Para-brisa fumê", "Carenagem esportiva"], "price": [0, 350, 700]},
+	"mlight": {"name": "Luzes", "opts": ["Original", "Farol LED", "Neon azul"], "price": [0, 200, 400]},
 	"susp": {"name": "Suspensão", "opts": ["Original", "Esportiva (-6 cm)", "Rebaixada (-12 cm)", "Elevada (+14 cm)"], "price": [0, 800, 1200, 1000]},
 }
 const CAR_CATS := ["paint", "wheels", "interior", "hood", "trunk", "sticker", "spoiler", "fbumper", "rbumper", "tint", "susp", "engine", "armor"]
-const MOTO_CATS := ["paint", "wheels", "sticker", "engine", "armor"]
+const MOTO_CATS := ["paint", "wheels", "sticker", "mexhaust", "mseat", "mfront", "mlight", "engine", "armor"]
+const BIKE_CATS := ["paint", "wheels", "sticker", "mseat", "mlight"]
 const BIG_CATS := ["paint", "wheels", "sticker", "engine", "armor", "tint"]
 
 const RIM := [Color(0, 0, 0, 0), Color(0.88, 0.89, 0.92), Color(0.07, 0.07, 0.08), Color(0.85, 0.66, 0.2), Color(0.75, 0.06, 0.05), Color(0.7, 0.72, 0.75)]
@@ -35,7 +41,7 @@ const TINT := [0.62, 0.76, 0.88, 0.96]
 
 static func cats_for(c) -> Array:
 	if c.kind == "moto":
-		return MOTO_CATS
+		return BIKE_CATS if c.get("variant") == "bike" else MOTO_CATS
 	if c.kind in ["bus", "truck"]:
 		return BIG_CATS
 	return CAR_CATS
@@ -70,13 +76,18 @@ static func apply(c, mods: Dictionary) -> void:
 	c.eng_mult = ENG[clampi(int(mods.get("engine", 0)), 0, 3)]
 	c.vmax_mult = VMX[clampi(int(mods.get("engine", 0)), 0, 3)]
 	c.dmg_mult = ARM[clampi(int(mods.get("armor", 0)), 0, 3)]
-	var old = c.model_root.get_node_or_null("mods")
-	if old:
-		c.model_root.remove_child(old)
-		old.queue_free()
+	# peças antigas: no nó "mods" e presas nas peças da lataria (capô, porta-malas, para-choques, moto)
+	for old in c.model_root.find_children("mods*", "", true, false):
+		if is_instance_valid(old) and old.get_parent():
+			old.get_parent().remove_child(old)
+			old.queue_free()
 	var root := Node3D.new()
 	root.name = "mods"
-	c.model_root.add_child(root)
+	# moto: as peças vão no nó que inclina/empina (senão ficavam paradas no ar nas curvas)
+	if c.kind == "moto" and c.get("lean") != null:
+		c.lean.add_child(root)
+	else:
+		c.model_root.add_child(root)
 	_wheels(c, int(mods.get("wheels", 0)))
 	_susp(c, int(mods.get("susp", 0)))
 	_tint(c, int(mods.get("tint", 0)))
@@ -85,6 +96,7 @@ static func apply(c, mods: Dictionary) -> void:
 	var n := 0
 	if c.kind == "moto":
 		n += _moto_sticker(c, st, int(mods.get("sticker", 0)))
+		n += _moto_parts(c, st, mods, root)
 	else:
 		var kk: String = c.kind if CM.KINDS.has(c.kind) else ("sedan" if c.kind in ["police", "taxi"] else "")
 		if kk != "":
@@ -123,44 +135,54 @@ static func _bx(st: SurfaceTool, size: Vector3, pos: Vector3, col: Color, rot :=
 	bm.size = size
 	CM._prim(st, bm, Transform3D(rot, pos), col)
 
-static func _body_parts(c, st: SurfaceTool, k: Dictionary, mods: Dictionary, root: Node3D) -> int:
+static func _body_parts(c, st0: SurfaceTool, k: Dictionary, mods: Dictionary, root: Node3D) -> int:
 	var L: float = k.L
 	var W: float = k.W
 	var belt: float = k.belt
 	var hz := L * 0.5
 	var n := 0
+	# cada grupo vai preso na peça de verdade: amassa, abre e cai junto com ela
+	var g_hood := _sst()
+	var g_trunk := _sst()
+	var g_fb := _sst()
+	var g_rb := _sst()
+	var st := st0
+	var hzr: Array = c.door_info.get("hood_z", [hz - 1.35, hz - 0.18])
+	var hzc: float = (hzr[0] + hzr[1]) * 0.5
 	var carbon := Color(0.08, 0.08, 0.09)
 	var paint: Color = c.paint_c
 	var dark := Color(0.06, 0.06, 0.065)
 	# capô: frente do carro até ~1,3 m para trás
 	var hood_z0 := hz - 0.18
 	var hood_z1 := hz - 1.35
+	hood_z0 = hzr[1]
+	hood_z1 = hzr[0] + 0.05
 	match int(mods.get("hood", 0)):
 		1:
-			var z := hz - 0.85
-			_bx(st, Vector3(0.62, 0.1, 0.72), Vector3(0, _top(k, z) + 0.06, z), paint.darkened(0.1))
-			_bx(st, Vector3(0.5, 0.07, 0.04), Vector3(0, _top(k, z) + 0.07, z + 0.36), dark)
+			var z := hzc
+			_bx(g_hood, Vector3(0.62, 0.1, 0.72), Vector3(0, _top(k, z) + 0.06, z), paint.darkened(0.1))
+			_bx(g_hood, Vector3(0.5, 0.07, 0.04), Vector3(0, _top(k, z) + 0.07, z + 0.36), dark)
 			n += 1
 		2:
-			_strip(st, k, hood_z0, hood_z1, 0.0, W * 0.78, carbon, 0.014, 0.016)
+			_strip(g_hood, k, hood_z0, hood_z1, 0.0, W * 0.66, carbon, 0.035, 0.016)
 			n += 1
 		3:
 			for s in [-1.0, 1.0]:
-				var z2 := hz - 0.75
-				_bx(st, Vector3(0.32, 0.05, 0.42), Vector3(0.36 * s, _top(k, z2) + 0.03, z2), dark)
+				var z2 := hzc
+				_bx(g_hood, Vector3(0.32, 0.05, 0.42), Vector3(0.36 * s, _top(k, z2) + 0.03, z2), dark)
 				for q in 3:
-					_bx(st, Vector3(0.3, 0.02, 0.03), Vector3(0.36 * s, _top(k, z2) + 0.06, z2 - 0.14 + q * 0.14), Color(0.2, 0.2, 0.21))
+					_bx(g_hood, Vector3(0.3, 0.02, 0.03), Vector3(0.36 * s, _top(k, z2) + 0.06, z2 - 0.14 + q * 0.14), Color(0.2, 0.2, 0.21))
 			n += 1
 	# porta-malas
 	var tz0 := -hz + 0.12
 	var tz1 := -hz + 0.95
 	match int(mods.get("trunk", 0)):
 		1:
-			_strip(st, k, tz0, tz1, 0.0, W * 0.76, carbon, 0.014, 0.016)
+			_strip(g_trunk, k, tz0, tz1, 0.0, W * 0.66, carbon, 0.035, 0.016)
 			n += 1
 		2:
 			var z := -hz + 0.2
-			_bx(st, Vector3(W * 0.8, 0.07, 0.24), Vector3(0, _top(k, z) + 0.06, z), paint, Basis(Vector3.RIGHT, 0.35))
+			_bx(g_trunk, Vector3(W * 0.74, 0.07, 0.24), Vector3(0, _top(k, z) + 0.06, z), paint, Basis(Vector3.RIGHT, 0.35))
 			n += 1
 	# adesivos
 	match int(mods.get("sticker", 0)):
@@ -211,7 +233,24 @@ static func _body_parts(c, st: SurfaceTool, k: Dictionary, mods: Dictionary, roo
 	# aerofólio
 	var rz := -hz + 0.22
 	var ry := _top(k, rz)
-	match int(mods.get("spoiler", 0)):
+	# traseira alta (van/SUV/jipe): aerofólio de teto, rente à borda de trás do teto
+	var tall: bool = k.top[0][1] > belt + 0.2
+	if tall:
+		rz = -hz + 0.12
+		ry = _top(k, rz + 0.1)
+		match int(mods.get("spoiler", 0)):
+			1:
+				_bx(st, Vector3(W * 0.78, 0.05, 0.2), Vector3(0, ry + 0.02, rz - 0.02), dark, Basis(Vector3.RIGHT, 0.25))
+				n += 1
+			2:
+				_bx(st, Vector3(W * 0.82, 0.05, 0.32), Vector3(0, ry + 0.05, rz - 0.06), paint, Basis(Vector3.RIGHT, 0.18))
+				n += 1
+			3:
+				for s in [-1.0, 1.0]:
+					_bx(st, Vector3(0.05, 0.16, 0.1), Vector3(0.5 * s, ry + 0.08, rz + 0.05), dark)
+				_bx(st, Vector3(W * 0.9, 0.05, 0.36), Vector3(0, ry + 0.17, rz - 0.02), carbon, Basis(Vector3.RIGHT, -0.1))
+				n += 1
+	match int(mods.get("spoiler", 0) if not tall else 0):
 		1:
 			_bx(st, Vector3(W * 0.82, 0.06, 0.12), Vector3(0, ry + 0.04, rz - 0.02), dark, Basis(Vector3.RIGHT, -0.3))
 			n += 1
@@ -226,37 +265,47 @@ static func _body_parts(c, st: SurfaceTool, k: Dictionary, mods: Dictionary, roo
 				_bx(st, Vector3(0.03, 0.2, 0.42), Vector3((W * 0.5 + 0.06) * s, ry + 0.5, rz), carbon)
 			_bx(st, Vector3(W + 0.12, 0.05, 0.4), Vector3(0, ry + 0.5, rz), carbon, Basis(Vector3.RIGHT, -0.16))
 			n += 1
-	# para-choques
+	# para-choques: presos no para-choque de verdade (y 0,37, pontas em ±(L/2 − 0,05)), por fora dele
+	var fz := hz + 0.02
 	match int(mods.get("fbumper", 0)):
 		1:
-			_bx(st, Vector3(W * 0.98, 0.04, 0.3), Vector3(0, 0.22, hz - 0.02), carbon)
+			_bx(g_fb, Vector3(W * 0.86, 0.035, 0.22), Vector3(0, 0.24, fz + 0.04), carbon)          # splitter
 			for s in [-1.0, 1.0]:
-				_bx(st, Vector3(0.04, 0.14, 0.3), Vector3(W * 0.47 * s, 0.28, hz - 0.02), carbon)
+				_bx(g_fb, Vector3(0.035, 0.12, 0.2), Vector3(W * 0.42 * s, 0.29, fz + 0.03), carbon)
+				_bx(g_fb, Vector3(0.22, 0.08, 0.02), Vector3(W * 0.3 * s, 0.36, fz + 0.1), Color(0.03, 0.03, 0.03))   # entradas de ar
 			n += 1
 		2:
 			var tube := Color(0.15, 0.15, 0.16)
 			for s in [-1.0, 1.0]:
-				_bx(st, Vector3(0.07, 0.62, 0.07), Vector3(0.42 * s, 0.6, hz + 0.16), tube)
-			_bx(st, Vector3(W * 0.85, 0.07, 0.07), Vector3(0, 0.88, hz + 0.16), tube)
-			_bx(st, Vector3(W * 0.85, 0.07, 0.07), Vector3(0, 0.48, hz + 0.18), tube)
-			_bx(st, Vector3(0.6, 0.3, 0.05), Vector3(0, 0.62, hz + 0.18), Color(0.25, 0.25, 0.27))
+				_bx(g_fb, Vector3(0.07, 0.62, 0.07), Vector3(0.42 * s, 0.6, fz + 0.2), tube)
+				_bx(g_fb, Vector3(0.07, 0.07, 0.25), Vector3(0.42 * s, 0.4, fz + 0.08), tube)
+			_bx(g_fb, Vector3(W * 0.8, 0.07, 0.07), Vector3(0, 0.88, fz + 0.2), tube)
+			_bx(g_fb, Vector3(W * 0.8, 0.07, 0.07), Vector3(0, 0.48, fz + 0.22), tube)
+			_bx(g_fb, Vector3(0.6, 0.3, 0.05), Vector3(0, 0.66, fz + 0.22), Color(0.25, 0.25, 0.27))
 			n += 1
+	var rzb := -hz - 0.02
 	match int(mods.get("rbumper", 0)):
 		1:
-			_bx(st, Vector3(W * 0.8, 0.05, 0.32), Vector3(0, 0.22, -hz + 0.05), carbon)
+			_bx(g_rb, Vector3(W * 0.78, 0.04, 0.24), Vector3(0, 0.24, rzb - 0.04), carbon)          # difusor
 			for q in 5:
-				_bx(st, Vector3(0.03, 0.14, 0.3), Vector3(-0.5 + q * 0.25, 0.28, -hz + 0.05), carbon)
+				_bx(g_rb, Vector3(0.025, 0.14, 0.24), Vector3(-0.5 + q * 0.25, 0.3, rzb - 0.05), carbon)
 			n += 1
 		2:
 			for s in [-1.0, 1.0]:
 				var cy := CylinderMesh.new()
-				cy.top_radius = 0.07
-				cy.bottom_radius = 0.07
-				cy.height = 0.3
+				cy.top_radius = 0.065
+				cy.bottom_radius = 0.065
+				cy.height = 0.34
 				cy.radial_segments = 12
-				CM._prim(st, cy, Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0.45 * s, 0.3, -hz - 0.05)), Color(0.75, 0.75, 0.78))
-				_bx(st, Vector3(0.1, 0.1, 0.02), Vector3(0.45 * s, 0.3, -hz - 0.2), Color(0.02, 0.02, 0.02))
+				CM._prim(g_rb, cy, Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0.42 * s, 0.27, rzb - 0.08)), Color(0.75, 0.75, 0.78))
+				_bx(g_rb, Vector3(0.1, 0.1, 0.02), Vector3(0.42 * s, 0.27, rzb - 0.25), Color(0.02, 0.02, 0.02))
 			n += 1
+	# prende cada grupo na peça (posição de repouso da peça → coordenadas locais dela)
+	var bump: Dictionary = c.get("bumpers") if c.get("bumpers") != null else {}
+	_attach(c, g_hood, c.get("hood_node"), c.get("_hood0"), root)
+	_attach(c, g_trunk, c.get("trunk_node"), Transform3D(Basis(), c.trunk_node.position) if c.get("trunk_node") != null else null, root)
+	_attach(c, g_fb, bump.get(1.0), c._bump0.get(1.0) if bump.has(1.0) else null, root)
+	_attach(c, g_rb, bump.get(-1.0), c._bump0.get(-1.0) if bump.has(-1.0) else null, root)
 	return n
 
 static func _interior(c, st: SurfaceTool, lv: int) -> int:
@@ -284,10 +333,17 @@ static func _moto_sticker(c, st: SurfaceTool, lv: int) -> int:
 	if lv <= 0:
 		return 0
 	var cols := [Color.WHITE, Color(0.95, 0.95, 0.95), Color(1, 0.55, 0.05), Color(0.95, 0.95, 0.95), Color(0.9, 0.1, 0.08), Color(0.06, 0.06, 0.07)]
+	if c.get("variant") == "bike":
+		# bicicleta: faixas nos tubos do quadro
+		for q in 3:
+			_bx(st, Vector3(0.052, 0.05, 0.1), Vector3(0, 0.62 + (q - 1) * 0.09, 0.12 + (q - 1) * 0.04), cols[lv], Basis(Vector3.RIGHT, 1.2))
+			_bx(st, Vector3(0.05, 0.1, 0.05), Vector3(0, 0.5 + q * 0.08, -0.2 - q * 0.03), cols[lv], Basis(Vector3.RIGHT, -0.35))
+		return 1
+	# na lateral do tanque (elipse 0,34 × 0,24 × 0,5 em y 0,82) e da rabeta, rente à pintura
 	for s in [-1.0, 1.0]:
-		_bx(st, Vector3(0.012, 0.07, 0.5), Vector3(0.19 * s, 0.9, 0.2), cols[lv])
-		_bx(st, Vector3(0.012, 0.04, 0.4), Vector3(0.17 * s, 0.74, -0.45), cols[lv])
-	_bx(st, Vector3(0.08, 0.012, 0.45), Vector3(0, 1.0, 0.2), cols[lv])
+		_bx(st, Vector3(0.012, 0.06, 0.36), Vector3(0.168 * s, 0.83, 0.22), cols[lv])
+		_bx(st, Vector3(0.012, 0.035, 0.22), Vector3(0.105 * s, 0.82, -0.58), cols[lv])
+	_bx(st, Vector3(0.07, 0.012, 0.34), Vector3(0, 0.945, 0.22), cols[lv])
 	return 1
 
 static func _big_sticker(c, st: SurfaceTool, lv: int) -> int:
@@ -300,14 +356,17 @@ static func _big_sticker(c, st: SurfaceTool, lv: int) -> int:
 	return 1
 
 static func _wheels(c, lv: int) -> void:
-	for w in c.wheels:
-		var host: Node3D = null
-		for ch in w.get_children():
-			if ch is Node3D:
-				host = ch
-				break
-		if host == null:
-			continue
+	# moto/bicicleta: as rodas que aparecem são as visuais (c.spin); as físicas são invisíveis
+	var hosts: Array = []
+	if c.kind == "moto" and not c.spin.is_empty():
+		hosts = c.spin
+	else:
+		for w in c.wheels:
+			for ch in w.get_children():
+				if ch is Node3D:
+					hosts.append(ch)
+					break
+	for host in hosts:
 		var old = host.get_node_or_null("rim_mod")
 		if old:
 			host.remove_child(old)
@@ -349,10 +408,13 @@ static func _wheels(c, lv: int) -> void:
 static func _susp(c, lv: int) -> void:
 	if not c.has_meta("rest0"):
 		c.set_meta("rest0", c.wheels[0].wheel_rest_length if c.wheels.size() > 0 else 0.14)
+	if not c.has_meta("stiff0"):
+		c.set_meta("stiff0", c.wheels[0].suspension_stiffness if c.wheels.size() > 0 else 48.0)
 	var r0: float = c.get_meta("rest0")
+	var k0: float = c.get_meta("stiff0")      # cada veículo com a sua (moto 30, ônibus 70...)
 	for w in c.wheels:
 		w.wheel_rest_length = maxf(0.03, r0 + SUSP[lv])
-		w.suspension_stiffness = 48.0 * (1.25 if lv in [1, 2] else 1.0)
+		w.suspension_stiffness = k0 * (1.25 if lv in [1, 2] else 1.0)
 
 static func _tint(c, lv: int) -> void:
 	for mi in c.model_root.find_children("*", "MeshInstance3D", true, false):
@@ -370,3 +432,96 @@ static func _tint(c, lv: int) -> void:
 		var g: StandardMaterial3D = g0.duplicate()
 		g.albedo_color = Color(0.02, 0.025, 0.03, TINT[lv])
 		mi.material_override = g
+
+
+static func _sst() -> SurfaceTool:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	return st
+
+## malha de um grupo de peças presa em "host" (capô, porta-malas, para-choque); sem a peça, no nó "mods"
+static func _attach(c, st: SurfaceTool, host, rest, fallback: Node3D) -> void:
+	var mesh := st.commit()
+	if mesh.get_surface_count() == 0:
+		return
+	var mi := MeshInstance3D.new()
+	mi.name = "mods_part"
+	mi.mesh = mesh
+	mi.material_override = CM.vc_mat()
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	if host != null and is_instance_valid(host) and host.visible and rest != null:
+		mi.transform = (rest as Transform3D).affine_inverse()
+		host.add_child(mi)
+	else:
+		fallback.add_child(mi)
+
+## moto: escapamento, banco, frente (para-brisa/carenagem no garfo) e luzes
+static func _moto_parts(c, st: SurfaceTool, mods: Dictionary, root: Node3D) -> int:
+	var n := 0
+	var bike: bool = c.get("variant") == "bike"
+	var paint: Color = c.paint_c
+	var chrome := Color(0.82, 0.83, 0.86)
+	var blk := Color(0.05, 0.05, 0.055)
+	if not bike:
+		match int(mods.get("mexhaust", 0)):
+			1:
+				CM._prim(st, VM._cyl(0.075, 0.55, 12), Transform3D(Basis(Vector3.RIGHT, PI * 0.5 - 0.3), Vector3(0.19, 0.44, -0.52)), chrome)
+				CM._prim(st, VM._cyl(0.05, 0.04, 12), Transform3D(Basis(Vector3.RIGHT, PI * 0.5 - 0.3), Vector3(0.19, 0.52, -0.8)), Color(0.02, 0.02, 0.02))
+				n += 1
+			2:
+				for s in [-1.0, 1.0]:
+					CM._prim(st, VM._cyl(0.06, 0.6, 10), Transform3D(Basis(Vector3.RIGHT, PI * 0.5 - 0.22), Vector3(0.19 * s, 0.46, -0.5)), blk)
+					CM._prim(st, VM._cyl(0.035, 0.04, 10), Transform3D(Basis(Vector3.RIGHT, PI * 0.5 - 0.22), Vector3(0.19 * s, 0.53, -0.8)), Color(0.75, 0.3, 0.1))
+				n += 1
+	var seat_lv := int(mods.get("mseat", 0))
+	if seat_lv > 0:
+		var sc: Color = [Color.WHITE, Color(0.4, 0.24, 0.12), Color(0.75, 0.06, 0.05), Color(0.08, 0.08, 0.09)][seat_lv]
+		if bike:
+			CM._ell(st, Vector3(0, 0.93, -0.25), Vector3(0.14, 0.06, 0.26), sc)
+		else:
+			CM._ell(st, Vector3(0, 0.8, -0.24), Vector3(0.31, 0.12, 0.58), sc)
+			if seat_lv == 3:
+				CM._ell(st, Vector3(0, 0.84, -0.56), Vector3(0.26, 0.1, 0.3), sc)
+				_bx(st, Vector3(0.26, 0.2, 0.06), Vector3(0, 1.0, -0.72), sc, Basis(Vector3.RIGHT, -0.2))
+				for s in [-1.0, 1.0]:
+					_bx(st, Vector3(0.025, 0.4, 0.025), Vector3(0.14 * s, 0.98, -0.75), chrome)
+		n += 1
+	# frente: presa no garfo (esterça junto)
+	var fk = c.get("fork")
+	var fst := _sst()
+	var lst := _sst()
+	if not bike:
+		match int(mods.get("mfront", 0)):
+			1:
+				_bx(fst, Vector3(0.28, 0.24, 0.012), Vector3(0, 0.26, 0.12), Color(0.35, 0.42, 0.5), Basis(Vector3.RIGHT, -0.35))
+				n += 1
+			2:
+				CM._ell(fst, Vector3(0, 0.02, 0.1), Vector3(0.46, 0.4, 0.34), paint)
+				_bx(fst, Vector3(0.3, 0.2, 0.015), Vector3(0, 0.26, 0.16), Color(0.15, 0.2, 0.25), Basis(Vector3.RIGHT, -0.5))
+				n += 1
+	match int(mods.get("mlight", 0)):
+		1:
+			CM._ell(lst, Vector3(0, -0.02, 0.2 if not bike else 0.05), Vector3(0.14, 0.14, 0.05), Color(0.85, 0.95, 1.0))
+			n += 1
+		2:
+			var neon := _sst()
+			_bx(neon, Vector3(0.1, 0.03, 1.1 if not bike else 0.8), Vector3(0, 0.22, 0.0), Color(0.15, 0.45, 1.0))
+			var nm := MeshInstance3D.new()
+			nm.name = "mods_neon"
+			nm.mesh = neon.commit()
+			nm.material_override = CM.vc_lit()
+			root.add_child(nm)
+			n += 1
+	for pair in [[fst, CM.vc_mat()], [lst, CM.vc_lit()]]:
+		var m: Mesh = pair[0].commit()
+		if m.get_surface_count() == 0:
+			continue
+		var mi := MeshInstance3D.new()
+		mi.name = "mods_front"
+		mi.mesh = m
+		mi.material_override = pair[1]
+		if fk != null and is_instance_valid(fk):
+			fk.add_child(mi)
+		else:
+			root.add_child(mi)
+	return n

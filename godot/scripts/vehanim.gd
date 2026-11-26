@@ -266,6 +266,7 @@ func _drop_driver() -> void:
 		drv_info = {}
 		return
 	var pos := h.global_position
+	pos.y = main.ground_at(pos, [car.get_rid()])
 	var q = Ped.new()
 	main.add_child(q)
 	var loop: Array = main.city.walk_loops[0]

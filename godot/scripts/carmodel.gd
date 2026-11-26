@@ -10,15 +10,15 @@ const KINDS := {
 	"sedan": {"L": 4.65, "W": 1.82, "wb": 2.75, "wr": 0.33, "belt": 0.95,
 		"top": [[-2.33, 0.6], [-2.2, 0.93], [-1.75, 1.0], [-1.25, 1.03], [-0.7, 1.42], [0.35, 1.44], [1.1, 1.0], [1.9, 0.89], [2.33, 0.66]]},
 	"hatch": {"L": 4.15, "W": 1.78, "wb": 2.55, "wr": 0.31, "belt": 0.97,
-		"top": [[-2.08, 0.62], [-2.02, 0.98], [-1.85, 1.38], [-1.45, 1.45], [0.3, 1.46], [0.95, 1.01], [1.7, 0.9], [2.08, 0.66]]},
+		"top": [[-2.08, 1.02], [-2.03, 1.3], [-1.85, 1.42], [-1.45, 1.45], [0.3, 1.46], [0.95, 1.01], [1.7, 0.9], [2.08, 0.66]]},
 	"suv": {"L": 4.75, "W": 1.92, "wb": 2.8, "wr": 0.38, "belt": 1.15,
-		"top": [[-2.38, 0.75], [-2.32, 1.2], [-2.18, 1.74], [-1.6, 1.8], [0.55, 1.8], [1.25, 1.2], [2.0, 1.1], [2.38, 0.82]]},
+		"top": [[-2.38, 1.5], [-2.33, 1.68], [-2.18, 1.76], [-1.6, 1.8], [0.55, 1.8], [1.25, 1.2], [2.0, 1.1], [2.38, 0.82]]},
 	"pickup": {"L": 5.2, "W": 1.95, "wb": 3.2, "wr": 0.38, "belt": 1.12,
 		"top": [[-2.6, 0.78], [-2.55, 1.1], [-0.45, 1.12], [-0.4, 1.78], [0.75, 1.8], [1.4, 1.2], [2.2, 1.1], [2.6, 0.82]]},
 	"van": {"L": 5.0, "W": 1.98, "wb": 3.05, "wr": 0.36, "belt": 1.18,
-		"top": [[-2.5, 0.82], [-2.48, 1.6], [-2.4, 2.08], [-1.4, 2.12], [1.2, 2.1], [1.7, 1.55], [2.15, 1.18], [2.5, 0.86]]},
+		"top": [[-2.5, 1.86], [-2.45, 2.04], [-2.35, 2.1], [-1.4, 2.12], [1.2, 2.1], [1.7, 1.55], [2.15, 1.18], [2.5, 0.86]]},
 	"offroad": {"L": 4.3, "W": 1.98, "wb": 2.55, "wr": 0.46, "belt": 1.3,
-		"top": [[-2.15, 0.98], [-2.12, 1.4], [-2.02, 1.98], [0.4, 2.0], [0.85, 1.4], [1.75, 1.32], [2.15, 1.0]]},
+		"top": [[-2.15, 1.7], [-2.1, 1.9], [-2.02, 1.98], [0.4, 2.0], [0.85, 1.4], [1.75, 1.32], [2.15, 1.0]]},
 	"super": {"L": 4.55, "W": 2.02, "wb": 2.7, "wr": 0.35, "belt": 0.74,
 		"top": [[-2.28, 0.55], [-2.12, 0.86], [-1.3, 0.92], [-0.7, 1.1], [0.15, 1.13], [0.95, 0.8], [1.85, 0.6], [2.28, 0.48]]},
 	"sport": {"L": 4.45, "W": 1.95, "wb": 2.65, "wr": 0.34, "belt": 0.82,
@@ -104,6 +104,18 @@ static func build(kind: String, paint: Color) -> Dictionary:
 		var sb := SurfaceTool.new()
 		sb.begin(Mesh.PRIMITIVE_TRIANGLES)
 		tst[kst] = sb
+	# capô: recortado da carroceria (dobradiça junto ao para-brisa) — amassa e abre nas batidas de frente
+	var h_z0 := zc1 + 0.08
+	var h_z1 := L * 0.5 - 0.2
+	var h_piv := Vector3(0.0, _top(top, h_z0), h_z0)
+	var has_hood: bool = h_z1 - h_z0 > 0.45
+	var hst := {}
+	for kst in [st_p, st_d, st_g, st_t]:
+		var sh := SurfaceTool.new()
+		sh.begin(Mesh.PRIMITIVE_TRIANGLES)
+		hst[kst] = sh
+	var h_in := SurfaceTool.new()
+	h_in.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var d_in := SurfaceTool.new()
 	d_in.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var t_in := SurfaceTool.new()
@@ -145,10 +157,20 @@ static func build(kind: String, paint: Color) -> Dictionary:
 					st = st_t
 				var in_door: bool = side > 0 and j >= 2 and j <= 7 and zc > d_zb and zc < d_zf
 				var in_trunk: bool = has_trunk and j >= 8 and zc < zc0 - 0.12 and zc > -L * 0.5 + 0.12
-				if in_door:
+				var in_hood: bool = has_hood and j >= 7 and zc > h_z0 and zc < h_z1 and st != st_g
+				if in_hood:
+					var o3 := h_piv
+					if side > 0:
+						_quad(hst[st], p00 - o3, p10 - o3, p11 - o3, p01 - o3)
+						_quad(h_in, p00 - o3 + Vector3(0, -0.03, 0), p01 - o3 + Vector3(0, -0.03, 0), p11 - o3 + Vector3(0, -0.03, 0), p10 - o3 + Vector3(0, -0.03, 0))
+					else:
+						_quad(hst[st], p00 - o3, p01 - o3, p11 - o3, p10 - o3)
+						_quad(h_in, p00 - o3 + Vector3(0, -0.03, 0), p10 - o3 + Vector3(0, -0.03, 0), p11 - o3 + Vector3(0, -0.03, 0), p01 - o3 + Vector3(0, -0.03, 0))
+				elif in_door:
 					var o := d_piv
 					_quad(dst[st], p00 - o, p10 - o, p11 - o, p01 - o)
-					_quad(d_in, p00 - o + Vector3(-0.03, 0, 0), p01 - o + Vector3(-0.03, 0, 0), p11 - o + Vector3(-0.03, 0, 0), p10 - o + Vector3(-0.03, 0, 0))
+					if j <= 5:      # face interna só na chapa (abaixo do vidro): antes cobria a janela de preto
+						_quad(d_in, p00 - o + Vector3(-0.03, 0, 0), p01 - o + Vector3(-0.03, 0, 0), p11 - o + Vector3(-0.03, 0, 0), p10 - o + Vector3(-0.03, 0, 0))
 				elif in_trunk:
 					var o2 := t_piv
 					if side > 0:
@@ -162,6 +184,10 @@ static func build(kind: String, paint: Color) -> Dictionary:
 				else:
 					_quad(st, p00, p01, p11, p10)
 	# tampas da frente e de trás
+	var cap_p := SurfaceTool.new()
+	var cap_t := SurfaceTool.new()
+	cap_p.begin(Mesh.PRIMITIVE_TRIANGLES)
+	cap_t.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for end in [0, NZ]:
 		var z: float = rings[end][0]
 		var r: Array = rings[end][1]
@@ -171,17 +197,21 @@ static func build(kind: String, paint: Color) -> Dictionary:
 				var a := Vector3(r[j].x * side, r[j].y, z)
 				var b := Vector3(r[j + 1].x * side, r[j + 1].y, z)
 				var front: bool = end == NZ
-				var cw: bool = (side > 0) == front
+				var cw: bool = (side > 0) != front      # (estava invertido: a tampa de trás sumia)
+				# tampas em malhas próprias: normais retas (antes se misturavam com as laterais e a
+				# traseira da van/SUV ficava escura)
 				if cw:
-					_tri(st_t if j < 3 else st_p, c, a, b)
+					_tri(cap_t if j < 3 else cap_p, c, a, b)
 				else:
-					_tri(st_t if j < 3 else st_p, c, b, a)
+					_tri(cap_t if j < 3 else cap_p, c, b, a)
 	var root := Node3D.new()
 	root.name = "Carroceria"
 	_add(root, st_p, paint_m)
 	_add(root, st_d, door_m)
 	_add(root, st_g, glass_m)
 	_add(root, st_t, trim_m)
+	_add_flat(root, cap_p, paint_m)
+	_add_flat(root, cap_t, trim_m)
 	var inner_m := M.plain(Color(0.07, 0.07, 0.075), 0.9)
 	var door_node := Node3D.new()
 	door_node.name = "porta"
@@ -200,6 +230,44 @@ static func build(kind: String, paint: Color) -> Dictionary:
 		for kt in tst:
 			_add(trunk_node, tst[kt], mats[kt])
 		_add(trunk_node, t_in, inner_m)
+	var hood_node: Node3D = null
+	if has_hood:
+		hood_node = Node3D.new()
+		hood_node.name = "capo"
+		hood_node.position = h_piv
+		root.add_child(hood_node)
+		for kh in hst:
+			_add(hood_node, hst[kh], mats[kh])
+		_add(hood_node, h_in, inner_m)
+		# vão do motor (visto quando o capô abre/amassa)
+		var bay := SurfaceTool.new()
+		bay.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var hb := (h_z1 - h_z0)
+		_box(bay, Vector3(W * 0.7, 0.05, hb), Vector3(0, _top(top, h_z0 + hb * 0.5) - 0.32, h_z0 + hb * 0.5), Color(0.06, 0.06, 0.065))
+		_box(bay, Vector3(W * 0.42, 0.22, hb * 0.6), Vector3(0, _top(top, h_z0 + hb * 0.5) - 0.2, h_z0 + hb * 0.5), Color(0.25, 0.26, 0.28))
+		_commit(root, bay, vc_mat())
+	# --- para-choques: peças próprias (amassam, ficam penduradas e caem em batida forte) ---
+	var bumpers := {}
+	for bs in [1.0, -1.0]:
+		var bn := Node3D.new()
+		bn.name = "pc_d" if bs > 0.0 else "pc_t"
+		var zb: float = (L * 0.5 - 0.05) * bs
+		bn.position = Vector3(0, 0.37, zb)
+		root.add_child(bn)
+		var bst := SurfaceTool.new()
+		bst.begin(Mesh.PRIMITIVE_TRIANGLES)
+		_ell(bst, Vector3.ZERO, Vector3(W * 0.88, 0.2, 0.22), Color.WHITE)
+		var bmi := MeshInstance3D.new()
+		bmi.mesh = bst.commit()
+		bmi.material_override = paint_m
+		bmi.name = "pc_body"
+		bn.add_child(bmi)
+		var lst := SurfaceTool.new()
+		lst.begin(Mesh.PRIMITIVE_TRIANGLES)
+		_box(lst, Vector3(W * 0.8, 0.07, 0.2), Vector3(0, -0.12, 0.04 * bs), Color(0.05, 0.05, 0.055))
+		_box(lst, Vector3(0.5, 0.12, 0.02), Vector3(0, 0.0, 0.13 * bs), Color(0.92, 0.92, 0.9))      # placa
+		_commit(bn, lst, vc_mat())
+		bumpers[bs] = bn
 	# --- detalhes (fundidos: 1 malha com cor por vértice + 1 malha de luzes) ---
 	var det := SurfaceTool.new()
 	det.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -216,35 +284,59 @@ static func build(kind: String, paint: Color) -> Dictionary:
 	var pc: Color = Color(0.04, 0.04, 0.05) if police else paint
 	var za := _first_cabin_z(top, belt, true)
 	for s in [-1.0, 1.0]:
-		_ell(litf, Vector3(hwf * 0.72 * s, yf - 0.1, zf - 0.07), Vector3(0.36, 0.1, 0.12), head_c)
-		_ell(lit, Vector3(hwf * 0.75 * s, _top(top, -zf + 0.15) - 0.1, -zf + 0.06), Vector3(0.34, 0.09, 0.1), tail_c)
+		_ell(litf, Vector3(hwf * 0.72 * s, maxf(yf - 0.08, 0.56), zf - 0.03), Vector3(0.36, 0.11, 0.14), head_c)
+		var ty := minf(_top(top, -zf + 0.15) - 0.1, belt + 0.08)
+		if top[0][1] > belt + 0.2:
+			_box(lit, Vector3(0.12, 0.42, 0.06), Vector3(W * 0.5 * 0.78 * s, belt - 0.05, -zf - 0.01), tail_c)   # lanterna vertical
+		else:
+			_ell(lit, Vector3(hwf * 0.75 * s, ty, -zf + 0.06), Vector3(0.34, 0.09, 0.1), tail_c)
 		_ell(det, Vector3((W * 0.5 + 0.06) * s, belt + 0.1, za - 0.15), Vector3(0.14, 0.09, 0.2), pc)
 		_ell(det, Vector3((W * 0.5 - 0.01) * s, belt - 0.08, 0.25), Vector3(0.03, 0.03, 0.14), chrome)
 		_ell(det, Vector3((W * 0.5 - 0.01) * s, belt - 0.08, -0.75), Vector3(0.03, 0.03, 0.14), chrome)
 	_ell(det, Vector3(0, yf - 0.22, zf - 0.03), Vector3(0.75, 0.13, 0.06), Color(0.05, 0.05, 0.055))
-	_ell(det, Vector3(0, 0.42, zf - 0.02), Vector3(0.5, 0.11, 0.05), Color(0.85, 0.85, 0.83))
-	_ell(det, Vector3(0, 0.45, -zf + 0.02), Vector3(0.5, 0.11, 0.05), Color(0.85, 0.85, 0.83))
-	# interior simples (bancos e painel) visível pelos vidros
+	# interior: bancos da frente logo atrás do volante (antes ficavam no meio da cabine: na van o
+	# motorista ia sentado lá atrás), banco traseiro só em cabine longa; altura pela linha de cintura
 	var seat_c := Color(0.09, 0.09, 0.1)
-	_box(det, Vector3(W * 0.78, 0.25, 0.4), Vector3(0, belt - 0.05, zc1 - 0.35), seat_c)
-	# encosto limitado pela altura real do teto (em carro baixo passava pelo teto)
-	var zs := (zc0 + zc1) * 0.5 - 0.12
-	var back_h := clampf(_top(top, zs) - 0.14 - 0.51, 0.25, 0.62)
+	var seat_y := clampf(belt - 0.45, 0.36, 0.85)
+	var drv_z := maxf(zc1 - 1.15, zc0 + 0.5)
+	var z_lo := maxf(zc0 - 0.1, -L * 0.5 + 0.45)
+	var z_hi := zc1 + 0.12
+	var floor_y := minf(0.36, seat_y - 0.12)
 	for s in [-1.0, 1.0]:
-		_box(det, Vector3(0.48, 0.12, 0.5), Vector3(0.38 * s, 0.5, (zc0 + zc1) * 0.5 + 0.15), seat_c)
-		_box(det, Vector3(0.48, back_h, 0.12), Vector3(0.38 * s, 0.51 + back_h * 0.5, zs), seat_c)
-	# forro interno da cabine: assoalho, laterais, teto, parede traseira e volante — pelos vidros
-	# agora se vê o interior do carro (antes as faces internas sumiam e aparecia o chão)
-	var cab_mid := (zc0 + zc1) * 0.5
-	var cab_len := zc1 - zc0 + 0.5
+		var bz := drv_z - 0.3
+		var bh := clampf(_top(top, bz) - 0.14 - seat_y, 0.25, 0.62)
+		_box(det, Vector3(0.48, 0.12, 0.5), Vector3(0.38 * s, seat_y, drv_z), seat_c)
+		_box(det, Vector3(0.48, seat_y - floor_y, 0.4), Vector3(0.38 * s, (seat_y + floor_y) * 0.5, drv_z), Color(0.06, 0.06, 0.065))
+		_box(det, Vector3(0.48, bh, 0.12), Vector3(0.38 * s, seat_y + 0.01 + bh * 0.5, bz), seat_c)
+	var rear_z := drv_z - 0.95
+	if rear_z - 0.3 > z_lo + 0.1 and kind != "pickup":
+		var rbh := clampf(_top(top, rear_z - 0.3) - 0.14 - seat_y, 0.25, 0.58)
+		_box(det, Vector3(W * 0.74, 0.12, 0.5), Vector3(0, seat_y, rear_z), seat_c)
+		_box(det, Vector3(W * 0.74, rbh, 0.12), Vector3(0, seat_y + 0.01 + rbh * 0.5, rear_z - 0.3), seat_c)
+	# forro interno da cabine: assoalho, laterais, parede traseira e painel — dentro da lataria (antes
+	# era maior que a carroceria e saía como uma "caixa preta" atrás da van/SUV/hatch/jipe)
+	var cab_mid := (z_lo + z_hi) * 0.5
+	var cab_len := z_hi - z_lo
 	var lining := Color(0.16, 0.15, 0.15)
-	_box(det, Vector3(W * 0.88, 0.05, cab_len + 0.4), Vector3(0, 0.36, cab_mid), Color(0.07, 0.07, 0.075))
+	var hw_in := W * 0.5 * (1.0 - 0.18 * pow(clampf((absf(z_lo) - (L * 0.5 - 0.65)) / 0.65, 0.0, 1.0), 2.0)) - 0.12
+	_box(det, Vector3(hw_in * 2.0, 0.05, cab_len), Vector3(0, floor_y, cab_mid), Color(0.07, 0.07, 0.075))
 	for s in [-1.0, 1.0]:
-		_box(det, Vector3(0.05, belt - 0.32, cab_len), Vector3(s * (W * 0.5 - 0.11), (belt + 0.36) * 0.5, cab_mid), lining)
-	# (sem forro de teto: a placa plana atravessava o teto curvo e aparecia como um "teto quadrado branco")
-	_box(det, Vector3(W * 0.86, belt - 0.32, 0.05), Vector3(0, (belt + 0.36) * 0.5, zc0 - 0.1), lining)
-	_box(det, Vector3(W * 0.86, belt - 0.3, 0.05), Vector3(0, (belt + 0.36) * 0.5, zc1 + 0.12), Color(0.05, 0.05, 0.055))
-	_ell(det, Vector3(0.38, belt + 0.1, zc1 - 0.62), Vector3(0.34, 0.34, 0.05), Color(0.04, 0.04, 0.045))
+		# laterais subdivididas: amassam junto com a lataria (senão apareciam pelo amassado)
+		var lb := BoxMesh.new()
+		lb.size = Vector3(0.05, belt - floor_y - 0.02, cab_len)
+		lb.subdivide_depth = int(cab_len / 0.15)
+		lb.subdivide_height = 4
+		_prim(det, lb, Transform3D(Basis(), Vector3(s * hw_in, (belt + floor_y) * 0.5, cab_mid)), lining)
+	_box(det, Vector3(hw_in * 2.0, belt - floor_y - 0.02, 0.05), Vector3(0, (belt + floor_y) * 0.5, z_lo), lining)
+	_box(det, Vector3(W * 0.86, belt - 0.3, 0.05), Vector3(0, (belt + 0.36) * 0.5, z_hi), Color(0.05, 0.05, 0.055))
+	_box(det, Vector3(W * 0.8, 0.14, 0.4), Vector3(0, belt + 0.02, zc1 - 0.15), Color(0.06, 0.06, 0.065))   # painel
+	_ell(det, Vector3(0.38, belt - 0.04, drv_z + 0.6), Vector3(0.34, 0.3, 0.04), Color(0.04, 0.04, 0.045))   # volante
+	_box(det, Vector3(0.05, 0.05, 0.3), Vector3(0.38, belt - 0.07, drv_z + 0.74), Color(0.04, 0.04, 0.045))   # coluna de direção
+	# traseira reta (van/SUV/hatch/jipe): vidro traseiro na tampa
+	var yr: float = top[0][1]
+	if yr > belt + 0.2:
+		var hwr := W * 0.5 * 0.82
+		_box(det, Vector3(hwr * 1.5, yr - belt - 0.22, 0.03), Vector3(0, (yr + belt) * 0.5 + 0.02, -L * 0.5 - 0.005), Color(0.04, 0.06, 0.08))
 	if kind == "pickup":
 		_box(det, Vector3(W * 0.86, 0.05, 1.9), Vector3(0, 1.06, -1.5), Color(0.1, 0.1, 0.11))
 	if kind == "offroad":
@@ -306,9 +398,9 @@ static func build(kind: String, paint: Color) -> Dictionary:
 			n.mesh = wmesh[s]
 			n.material_override = vc_mat()
 			wheels.append({"node": n, "pos": Vector3((W * 0.5 - 0.15) * s, wr, wz), "front": wz > 0})
-	var seat_z := (zc0 + zc1) * 0.5 + 0.1
-	var door := {"zf": d_zf, "zb": d_zb, "y0": 0.32, "y1": belt + 0.02, "x": W * 0.5, "node": door_node, "trunk": trunk_node, "trunk_z": zc0, "L": L}
-	return {"root": root, "wheels": wheels, "wr": wr, "seat": Vector3(0.38, 0.38 if kind == "sport" else 0.5, seat_z), "size": Vector3(W, roof_max, L), "door": door, "paint": paint}
+	var seat_z := drv_z
+	var door := {"zf": d_zf, "zb": d_zb, "y0": 0.32, "y1": belt + 0.02, "x": W * 0.5, "node": door_node, "trunk": trunk_node, "trunk_z": zc0, "L": L, "hood": hood_node, "bumpers": bumpers, "hood_z": [h_z0, h_z1]}
+	return {"root": root, "wheels": wheels, "wr": wr, "seat": Vector3(0.38, seat_y, seat_z), "size": Vector3(W, roof_max, L), "door": door, "paint": paint}
 
 static func _first_cabin_z(top: Array, belt: float, front: bool) -> float:
 	# z onde o teto (vidro) encontra a linha de cintura, na frente ou atrás
@@ -350,6 +442,18 @@ static func _tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3) -> void:
 	st.add_vertex(a)
 	st.add_vertex(b)
 	st.add_vertex(c)
+
+## tampa: cada triângulo com a própria normal (sem suavizar com as laterais)
+static func _add_flat(root: Node3D, st: SurfaceTool, mat: Material) -> void:
+	st.generate_normals()
+	var mesh := st.commit()
+	if mesh.get_surface_count() == 0:
+		return
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.material_override = mat
+	mi.name = "tampas"
+	root.add_child(mi)
 
 static func _add(root: Node3D, st: SurfaceTool, mat: Material) -> void:
 	st.index()

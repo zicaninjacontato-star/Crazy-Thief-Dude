@@ -92,7 +92,7 @@ func setup(k: String, paint: Color) -> void:
 			else:
 				_boat(paint)
 				body_size = Vector3(2.2, 1.4, 6.0)
-				seat = Vector3(0.35, 0.55, -0.4)
+				seat = Vector3(0.35, 1.08, -0.4)      # sobre o banco (antes afundava no piso)
 				hp = 120.0
 		"plane":
 			if armed:

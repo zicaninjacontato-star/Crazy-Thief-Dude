@@ -243,6 +243,7 @@ func _spawn_heli(pp: Vector3) -> void:
 	h.ai_target = main.player
 	h.world2 = main.world2
 	h.add_gunners()
+	main.seat_npc(h)          # piloto visível na cabine
 	h.destroyed.connect(main._on_vehicle_destroyed)
 	main.cars.append(h)
 	heli = h
@@ -624,7 +625,7 @@ func _spawn_boat(pp: Vector3) -> void:
 		dh.build(Color(0.12, 0.2, 0.42), Color(0.08, 0.1, 0.2), Color(0.78, 0.56, 0.38), Color(0.06, 0.05, 0.05), {"hat": 1, "hat_c": Color(0.08, 0.1, 0.22)})
 		dh.sitting = k == 0
 		dh.scale = Vector3.ONE * 0.85
-		dh.position = Vector3(b.seat.x - k * 0.8, b.seat.y + (0.07 - 0.98 * 0.85 if k == 0 else -0.6), b.seat.z - k * 1.4)
+		dh.position = Vector3(b.seat.x - k * 0.8, (b.seat.y + 0.07 - 0.98 * 0.85 if k == 0 else 0.92), b.seat.z - k * 1.4)
 		b.model_root.add_child(dh)
 		dh.aiming = k == 1
 		dh.animate(0, 0)
