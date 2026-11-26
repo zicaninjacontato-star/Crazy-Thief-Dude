@@ -10,8 +10,11 @@ const FX := preload("res://scripts/fx.gd")
 
 signal shot_player(dmg: float, from: Vector3)
 signal died(cop)
+signal hurt(cop)
+var gang := ""             # "g" verde / "p" rosa (membro de gangue)
 
 var target: Node3D
+var searching := false     # a polícia ainda não sabe onde o jogador está (zona amarela): não atira
 var body: Node3D
 var hp := 170.0
 var _base_speed := -1.0
@@ -76,6 +79,13 @@ func _rebuild_body(first := false) -> void:
 				weapon = "rifle"
 				dmg = 13.0
 				rate = 0.38
+		"gang_g", "gang_p":
+			# gangue: camiseta/bandana na cor da gangue
+			var gc: Color = Color(0.1, 0.62, 0.22) if kind == "gang_g" else Color(0.95, 0.32, 0.68)
+			body.build(gc, Color(0.12, 0.12, 0.14), skin, Color(0.04, 0.03, 0.02), {"hat": 2 if rng.randf() < 0.5 else 1, "hat_c": gc.darkened(0.2), "jacket": Color(0.06, 0.06, 0.07) if rng.randf() < 0.4 else Color(0, 0, 0, 0)})
+			if first:
+				hp = 120.0
+				speed = 4.8
 		"thug":
 			body.build(Color(0.15, 0.15, 0.15), Color(0.1, 0.1, 0.32), skin, Color(0.05, 0.04, 0.03), {"hat": 1, "hat_c": Color(0.7, 0.1, 0.1), "jacket": Color(0.6, 0.05, 0.05)})
 			if first:
@@ -96,6 +106,7 @@ var arm_t := 0.0
 func damage(amount: float, dir: Vector3, gore: bool, src: PhysicsBody3D = null, zone := "torso") -> bool:
 	if down:
 		return false
+	hurt.emit(self)
 	amount *= {"head": 2.4 if kind != "heavy" else 1.5, "leg": 0.6, "arm": 0.5}.get(zone, 1.0)
 	hp -= amount
 	if hp > 0.0:
@@ -126,13 +137,22 @@ func hit(from_body: PhysicsBody3D, vel: Vector3, gore: bool) -> void:
 
 ## derrubado (queda da moto, empurrão): ragdoll e levanta com animação depois de ~3 s
 var knocked := 0.0
-func knock(vel: Vector3) -> void:
+func knock(vel: Vector3, _dmg := 0.0) -> void:
 	if down or knocked > 0.0:
 		return
 	knocked = 3.0
 	collision_mask = 0
 	body.rag_alive = true
 	body.ragdoll(vel, null, false)
+
+## troca a arma (gangue sobe de nível: pistola → submetralhadora/escopeta)
+func set_weapon(w: String) -> void:
+	weapon = w
+	rate = {"pistol": 1.1, "smg": 0.45, "shotgun": 1.4, "rifle": 0.6}.get(w, 1.0)
+	dmg = {"pistol": 8.0, "smg": 6.0, "shotgun": 16.0, "rifle": 9.0}.get(w, 8.0)
+	if body and is_instance_valid(body) and not body.ragdolled:
+		body.give_gun(W.gun_mesh(w))
+		body.gun_kind = w
 
 func _get_up() -> void:
 	var hips := global_position
@@ -406,7 +426,7 @@ func _physics_process(dt: float) -> void:
 	cool -= dt
 	if get_tree().current_scene.combat.hostage != null and d < 40.0:
 		return     # refém: a polícia não atira
-	if cool <= 0.0 and d < 34.0 and _los:
+	if cool <= 0.0 and d < 34.0 and _los and not searching:
 		cool = rng.randf_range(rate * 0.7, rate * 1.3)
 		var muzzle := global_position + Vector3(0, 1.4, 0) + dirv * 0.6
 		if body and body.has_method("muzzle_pos"):

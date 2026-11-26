@@ -164,8 +164,16 @@ func damage(amount: float, dir: Vector3, gore: bool, src: PhysicsBody3D = null, 
 	flee = 8.0
 	return false
 
+## testemunha: liga para a polícia enquanto se afasta (se morrer antes, ninguém avisa)
+func start_call(t: float) -> void:
+	_end_mode()
+	mode = "call"
+	mode_t = t
+	body.arm_pose = "phone"
+	flee = 0.0
+
 func scare() -> void:
-	if not down and mode != "hostage" and mode != "handsup" and mode != "clerk":
+	if not down and mode != "hostage" and mode != "handsup" and mode != "clerk" and mode != "call":
 		_end_mode()
 		flee = 6.0
 
@@ -253,9 +261,12 @@ func _mode_tick(dt: float) -> void:
 			if mode_t <= 0.0:
 				_end_mode()
 				flee = 10.0
-				if main.wanted == 0:
-					main._add_wanted(1)
-				main._msg("Alguém chamou a polícia!")
+				if main.witness == self and main.crime_pending > 0:
+					main.witness_report(self)
+				elif main.wanted == 0:
+					main.crime_pending = 1
+					main.crime_pos = main.player.global_position
+					main.witness_report(self)
 		"brawl":
 			if pl.vehicle != null or main.combat.dead or d > 24.0 or mode_t <= 0.0:
 				_end_mode()

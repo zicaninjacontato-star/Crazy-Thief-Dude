@@ -15,6 +15,16 @@ const Combat := preload("res://scripts/combat.gd")
 const UI := preload("res://scripts/ui.gd")
 const DayNight := preload("res://scripts/daynight.gd")
 const Police := preload("res://scripts/police.gd")
+const Gangs := preload("res://scripts/gangs.gd")
+var gangs: Node = null
+var cam_mode := 1          # 0 perto · 1 média · 2 longe · 3 primeira pessoa
+const CAM_NAMES := ["Câmera perto", "Câmera média", "Câmera longe", "Primeira pessoa"]
+func cycle_cam() -> void:
+	cam_mode = (cam_mode + 1) % 4
+	ui.settings["cam"] = cam_mode
+	ui.apply_now()
+	_msg(CAM_NAMES[cam_mode])
+var loot_target = null
 const Arcade := preload("res://scripts/arcade.gd")
 const World2 := preload("res://scripts/world2.gd")
 const Missions := preload("res://scripts/missions.gd")
@@ -135,6 +145,9 @@ func _ready() -> void:
 	add_child(combat)
 	combat.setup(self)
 	missions.setup(self)
+	gangs = Gangs.new()
+	add_child(gangs)
+	gangs.setup(self)
 	_spawn_extras()
 	_spawn_population()
 	hud.weapon_pressed.connect(func(): ui.show_wheel())
@@ -142,6 +155,7 @@ func _ready() -> void:
 	hud.siren_pressed.connect(_toggle_siren)
 	hud.rob_pressed.connect(func(): combat.rob_target())
 	hud.hostage_pressed.connect(func(): combat.toggle_hostage())
+	hud.cam_pressed.connect(cycle_cam)
 	daynight = DayNight.new()
 	add_child(daynight)
 	daynight.setup(self)
@@ -151,7 +165,7 @@ func _ready() -> void:
 	ui.apply_now()
 	if shot == "" or shot_view in ["menu", "shop", "cars_shop", "settings"]:
 		ui.show_main_menu()
-	if shot_view in ["menu", "shop", "cars_shop", "settings", "clothes", "tuning", "tuning2"]:
+	if shot_view in ["menu", "shop", "cars_shop", "settings", "clothes", "tuning", "tuning2", "hudedit"]:
 		process_mode = Node.PROCESS_MODE_ALWAYS   # captura de teste com o menu aberto
 
 ## novo jogo: só soco, $600, sem carros comprados
@@ -236,6 +250,12 @@ func _place_owned(kind: String, col: Color, i: int) -> void:
 
 ## configurações do menu (sangue, gore, qualidade, contador)
 func apply_settings(s: Dictionary) -> void:
+	cam_mode = int(s.get("cam", 1))
+	if hud:
+		var lo = s.get("hud_layout", {})
+		hud.layout_ovr = lo if lo is Dictionary else {}
+		hud.hud_alpha = float(s.get("hud_alpha", 1.0))
+		hud.root.modulate.a = hud.hud_alpha
 	gore = s.gore
 	FX.blood_on = s.blood
 	var q: int = s.quality
@@ -462,6 +482,9 @@ func _shop_action() -> void:
 				_msg("Salgadinho: +15 de vida")
 		"rob":
 			_rob_clerk(shop_near)
+		"loot":
+			if loot_target != null:
+				gangs.take_loot(loot_target)
 		"sleep":
 			ui.show_sleep()
 		"tune":
@@ -654,7 +677,7 @@ func _make_shark() -> Node3D:
 	return n
 
 func _inputs() -> void:
-	var map := {"move_f": [KEY_W, KEY_UP], "move_b": [KEY_S, KEY_DOWN], "move_l": [KEY_A, KEY_LEFT], "move_r": [KEY_D, KEY_RIGHT], "enter": [KEY_E, KEY_F], "jump": [KEY_SPACE], "sprint": [KEY_SHIFT], "fire": [KEY_J, KEY_CTRL], "weapon": [KEY_Q, KEY_TAB], "shop": [KEY_B], "pause": [KEY_ESCAPE, KEY_P], "aim": [KEY_R]}
+	var map := {"move_f": [KEY_W, KEY_UP], "move_b": [KEY_S, KEY_DOWN], "move_l": [KEY_A, KEY_LEFT], "move_r": [KEY_D, KEY_RIGHT], "enter": [KEY_E, KEY_F], "jump": [KEY_SPACE], "sprint": [KEY_SHIFT], "fire": [KEY_J, KEY_CTRL], "weapon": [KEY_Q, KEY_TAB], "shop": [KEY_B], "pause": [KEY_ESCAPE, KEY_P], "aim": [KEY_R], "camera": [KEY_V]}
 	for a in map:
 		if not InputMap.has_action(a):
 			InputMap.add_action(a)
@@ -783,7 +806,7 @@ func finish_enter(best) -> Node3D:
 		_add_wanted(1)
 	if best.has_meta("military") and not best.get_meta("stolen", false):
 		best.set_meta("stolen", true)
-		_add_wanted(maxi(0, 3 - wanted))
+		_raise_wanted(maxi(0, 3 - wanted))      # a base viu: sem precisar de testemunha
 		_msg("Aeronave militar roubada! Metralhadora: ATIRAR · Mísseis: botão do foguete")
 	seated = player.make_body()
 	seated.sitting = true
@@ -853,6 +876,8 @@ func eject_player(_impulse: Vector3) -> void:
 func _unhandled_input(e: InputEvent) -> void:
 	if e.is_action_pressed("enter"): _toggle_car()
 	if e.is_action_pressed("jump"): player.jump()
+	if e.is_action_pressed("camera"):
+		cycle_cam()
 	if e.is_action_pressed("fire"):
 		combat.fire_held = true
 		combat.pending_shot = 0.4
@@ -904,6 +929,8 @@ func _physics_process(dt: float) -> void:
 	_props_tick()
 	_car_vs_player()
 	police.tick(dt)
+	gangs.tick(dt)
+	_zones_hud()
 	missions.tick(dt)
 	_water_tick(dt)
 
@@ -1012,6 +1039,22 @@ func save_mods(c) -> void:
 			owned_cars[i]["mods"] = c.mods.duplicate()
 			ui.save_game()
 
+## primeira pessoa: esconde a cabeça (e o que está nela) para não tapar a visão
+var _fp_hidden := []
+func _fp_head(on: bool) -> void:
+	var want := []
+	if on:
+		if player.vehicle and seated and is_instance_valid(seated):
+			want.append(seated)          # no veículo: o corpo sentado inteiro (joelhos tapavam a visão)
+		elif player.body and is_instance_valid(player.body) and player.body.bones.has("head"):
+			want.append(player.body.bones.head)
+	for n in _fp_hidden:
+		if is_instance_valid(n) and not (n in want):
+			n.visible = true
+	for n in want:
+		n.visible = false
+	_fp_hidden = want
+
 ## porta da casa segura: abre quando o jogador (a pé) chega perto e fecha quando ele se afasta
 var _door_a := 0.0
 func _safe_door_tick(dt: float) -> void:
@@ -1020,6 +1063,11 @@ func _safe_door_tick(dt: float) -> void:
 		return
 	var hinge: Vector3 = city.safehouse.door_hinge
 	var near := player.vehicle == null and player.global_position.distance_to(hinge + Vector3(0.6, 0, 0)) < 3.2
+	if not near:
+		for cp in police.cops:
+			if is_instance_valid(cp) and not cp.down and cp.global_position.distance_to(hinge + Vector3(0.6, 0, 0)) < 3.4:
+				near = true      # a polícia entra atrás de você
+				break
 	var inside_dir := signf(city.safehouse.spawn.z - hinge.z)
 	var want := -inside_dir * 1.55 if near else 0.0
 	var prev := _door_a
@@ -1105,7 +1153,78 @@ func _crimes(dt: float) -> void:
 				audio.play("hit", c.global_position, 4.0)
 				_add_wanted(2 if c in police.cops else 0)
 
+## crime: a polícia só vem se VIR o crime ou se uma testemunha ligar. Com testemunha, a polícia
+## procura numa zona amarela em volta do local do crime até achar o jogador.
+var crime_pending := 0
+var crime_pos := Vector3.ZERO
+var witness = null
 func _add_wanted(n: int) -> void:
+	if interior != "" or n <= 0:
+		return
+	var pos: Vector3 = player.global_position
+	if wanted > 0 or police.seen_by_cop(pos) or gang_war():
+		if not gang_war():
+			_raise_wanted(n)
+			police.knows = true
+			police.last_known = pos
+		return
+	crime_pending = mini(5, crime_pending + n)
+	crime_pos = pos
+	if witness != null and is_instance_valid(witness) and not witness.down and witness.mode == "call":
+		return
+	# testemunha: alguém perto que viu (não está caído); ela liga enquanto se afasta
+	var best = null
+	var bd := 42.0
+	for q in peds:
+		if not is_instance_valid(q) or q.down or q.mode in ["hostage", "fish", "clerk"]:
+			continue
+		var d: float = q.global_position.distance_to(pos)
+		if d < bd:
+			bd = d
+			best = q
+	if best == null:
+		crime_pending = 0           # ninguém viu
+		if shot != "":
+			print("WTN nobody saw")
+		return
+	witness = best
+	best.start_call(4.5)
+	if shot != "":
+		print("WTN witness at ", snappedf(bd, 0.1), " m pending=", crime_pending)
+
+## a testemunha terminou a ligação: estrelas + zona de busca amarela no local do crime
+func witness_report(q) -> void:
+	if crime_pending <= 0:
+		return
+	_raise_wanted(crime_pending)
+	crime_pending = 0
+	police.knows = false
+	police.search_pos = crime_pos
+	police.last_known = crime_pos
+	_msg("Uma testemunha chamou a polícia! Saia da zona amarela")
+
+## gangue te caçando: a polícia não se mete
+func gang_war() -> bool:
+	return gangs != null and gangs.skulls > 0
+
+## zonas do minimapa: territórios das gangues + zona da polícia (amarela procurando, azul prender,
+## vermelha matar, roxa exército)
+func _zones_hud() -> void:
+	var z: Array = gangs.zones()
+	if wanted > 0:
+		if wanted >= 5:
+			z.append({"pos": player.global_position, "r": 60.0, "col": Color(0.65, 0.2, 0.95, 0.3), "ring": true})
+		elif not police.knows:
+			z.append({"pos": police.search_pos, "r": police.ZONE_R, "col": Color(1.0, 0.85, 0.1, 0.3), "ring": true})
+		elif wanted <= 2:
+			z.append({"pos": player.global_position, "r": 40.0, "col": Color(0.2, 0.45, 1.0, 0.3), "ring": true})
+		else:
+			z.append({"pos": player.global_position, "r": 45.0, "col": Color(1.0, 0.15, 0.12, 0.3), "ring": true})
+	hud.zones = z
+	hud.skulls = gangs.skulls
+	hud.skull_col = gangs.T[gangs.hunter].col if gangs.hunter != "" else Color.WHITE
+
+func _raise_wanted(n: int) -> void:
 	if interior != "":
 		return
 	wanted = mini(5, wanted + n)
@@ -1122,7 +1241,7 @@ func _process(dt: float) -> void:
 	var drag: Vector2 = hud.take_cam_drag()
 	if drag.length() > 0:
 		cam_yaw -= drag.x * 0.006
-		cam_pitch = clampf(cam_pitch - drag.y * 0.004, -1.0, 1.05 if hud.aim else 0.2)
+		cam_pitch = clampf(cam_pitch - drag.y * 0.004, -1.0, 1.05 if (hud.aim or cam_mode == 3) else 0.2)
 		cam_idle = 2.0
 	cam_idle -= dt
 	var tgt: Node3D = player.vehicle if player.vehicle else player
@@ -1138,15 +1257,20 @@ func _process(dt: float) -> void:
 		hud.aim = false
 	var aiming: bool = hud.aim and player.vehicle == null and not combat.dead and combat.down_t <= 0.0 and not player.swimming
 	combat.aim = aiming
+	var fp: bool = cam_mode == 3 and not combat.dead and not (player.body and player.body.ragdolled) and not cine_cam
 	if not aiming:
 		player.aim_yaw = NAN
-		cam_pitch = minf(cam_pitch, 0.2)
+		if not fp:
+			cam_pitch = minf(cam_pitch, 0.2)
 	if player.body:
 		player.body.aim_pitch = clampf(cam_pitch + 0.25, -0.6, 1.2) if aiming else 0.0
 	hud.swim_mode = player.swimming
 	hud.crosshair = aiming
 	if interior != "":
 		dist = 3.6
+	if cam_mode < 3 and not aiming:
+		dist *= [0.68, 1.0, 1.45][cam_mode]
+		h *= [0.95, 1.0, 1.12][cam_mode]
 	if aiming:
 		dist = 2.4
 		h = 1.65
@@ -1173,7 +1297,24 @@ func _process(dt: float) -> void:
 	var ch := get_world_3d().direct_space_state.intersect_ray(cq)
 	if not ch.is_empty():
 		want_pos = ch.position + (focus - want_pos).normalized() * 0.3
-	if not cine_cam:
+	_fp_head(fp)
+	if fp:
+		# primeira pessoa: câmera nos olhos do personagem (sentado no veículo ou a pé)
+		var hb: Node3D = null
+		var look_up := 0.0
+		if player.vehicle and seated and is_instance_valid(seated):
+			hb = seated.bones.get("head")
+			look_up = 0.06
+		elif player.body:
+			hb = player.body.bones.get("head")
+		if hb:
+			var look := -off.normalized()
+			var eye: Vector3 = hb.global_position + Vector3(0, 0.13 + look_up, 0) + Vector3(look.x, 0, look.z).normalized() * 0.1
+			cam.global_position = eye
+			cam.look_at(eye + look * 10.0, Vector3.UP)
+			if player.vehicle == null and not aiming:
+				player.aim_yaw = cam_yaw + PI
+	elif not cine_cam:
 		cam.global_position = cam.global_position.lerp(want_pos, minf(1.0, dt * (14.0 if aiming else 8.0))) if frames > 2 else want_pos
 		cam.look_at(focus + (-off.normalized() * 6.0 if aiming else Vector3.ZERO), Vector3.UP)
 	# ambiente: cidade x mar pela distância da água; braçadas; carros e barcos passando
@@ -1255,6 +1396,11 @@ func _process(dt: float) -> void:
 						"shop24", "shop24b": shop_action = "rob" if combat.weapon not in ["fist", "grenade"] else "snack"
 						"tuning": shop_action = ""
 						_: shop_action = "buy"
+			# esconderijos das gangues: cofre, drogas, armas
+			loot_target = gangs.loot_near(player.global_position)
+			if loot_target != null:
+				shop_action = "loot"
+				shop_near = "loot"
 			# casa segura: cama
 			if not city.safehouse.is_empty() and player.global_position.distance_to(city.safehouse.bed) < 2.0:
 				shop_action = "sleep"
@@ -1292,7 +1438,7 @@ func _process(dt: float) -> void:
 				ce = true
 				break
 	hud.can_enter = ce
-	hud.shop_label = {"enter": "ENTRAR", "exit": "SAIR", "buy": "COMPRAR", "carry": "CARREGAR", "drop": "SOLTAR", "trunk": "PORTA-MALAS", "eat": "COMER", "rob": "ASSALTAR", "snack": "COMPRAR", "sleep": "DORMIR", "tune": "OFICINA"}.get(shop_action, "")
+	hud.shop_label = {"enter": "ENTRAR", "exit": "SAIR", "buy": "COMPRAR", "carry": "CARREGAR", "drop": "SOLTAR", "trunk": "PORTA-MALAS", "eat": "COMER", "rob": "ASSALTAR", "snack": "COMPRAR", "sleep": "DORMIR", "tune": "OFICINA", "loot": "PEGAR"}.get(shop_action, "")
 	var pk: String = player.vehicle.kind if player.vehicle else ""
 	hud.gas_name = "SUBIR" if pk == "heli" else "ACEL"
 	hud.brk_name = "DESCER" if pk == "heli" else "FREIO"
@@ -1318,6 +1464,7 @@ func _process(dt: float) -> void:
 	for a in police.army:
 		if is_instance_valid(a) and not a.dead:
 			bl.append({"pos": a.global_position, "col": Color(0.35, 0.45, 0.2), "near": true, "icon": a.kind})
+	bl.append_array(gangs.blips())
 	hud.map_blips = bl
 	# rastro até o destino (missão/táxi tem prioridade sobre o ponto marcado no mapa)
 	_route_t -= dt
@@ -1347,6 +1494,8 @@ func _process(dt: float) -> void:
 	if msg_t > 0:
 		msg_t -= dt
 		if msg_t <= 0: hud.hint.text = ""
+	elif shop_action == "loot":
+		hud.hint.text = {"safe": "Cofre da gangue", "drugs": "Drogas da gangue", "guns": "Armas da gangue"}.get(loot_target.kind, "") + " · toque em PEGAR"
 	elif shop_action in ["enter", "exit", "buy", "eat", "rob", "snack", "sleep", "tune"]:
 		hud.hint.text = {"guns": "AMMU★NATION", "cars": "Concessionária", "clothes": "Loja de roupas", "food": "Lanchonete · lanche $12 (+50 de vida)", "shop24": "Loja 24h" + (" · ASSALTE o caixa" if shop_action == "rob" else " · salgadinho $5 (+15 de vida)"), "shop24b": "Loja 24h" + (" · ASSALTE o caixa" if shop_action == "rob" else " · salgadinho $5 (+15 de vida)"), "safe": "Casa segura · dormir salva o jogo", "tuning": "Oficina tuning"}.get(shop_near, "") + " · toque em " + hud.shop_label
 	else:
@@ -1924,18 +2073,19 @@ func _test9(v: String) -> void:
 			print("CAR cargo=", my_car.cargo, " carrying=", combat.carrying != null, " trunk=", snappedf(my_car.trunk_open, 0.01))
 	if v == "arrest1":
 		if frames == 4:
+			player.global_position = Vector3(city._center(3), 0.3, -0.5 * city.CELL + 7.5)
 			combat.owned = {"fist": true}
 			combat.weapon = "fist"
 			combat._equip()
-			_add_wanted(1)
+			_raise_wanted(1)
 		if frames % 20 == 0:
 			for cp in police.cops:
 				if is_instance_valid(cp):
 					print("   cop d=", snappedf(cp.global_position.distance_to(player.global_position), 0.1), " arrest=", cp.arrest_only, " anim=", cp.anim, " target=", cp.target != null, " pose=", cp.body.pose, " v=", snappedf(cp.velocity.length(), 0.1))
-			print("ARR ", frames, " stars=", wanted, " cops=", police.cops.size(), " arresting=", police.arresting, " busted_t=", snappedf(combat.busted_t, 0.1), " down=", snappedf(combat.down_t, 0.1), " wasted=", hud.wasted, " pos=", player.global_position.snapped(Vector3.ONE))
+			print("ARR ", frames, " knows=", police.knows, " seen=", police.seen, " stars=", wanted, " cops=", police.cops.size(), " arresting=", police.arresting, " busted_t=", snappedf(combat.busted_t, 0.1), " down=", snappedf(combat.down_t, 0.1), " wasted=", hud.wasted, " pos=", player.global_position.snapped(Vector3.ONE))
 	if v == "cover":
 		if frames == 4:
-			_add_wanted(3)
+			_raise_wanted(3)
 			combat.weapon = "pistol"
 			god = true
 		if frames % 30 == 0:
@@ -2083,6 +2233,69 @@ func _test_views() -> void:
 				vc.parked = true
 			cam_yaw = PI
 			cam_pitch = -0.2
+	if v in ["fpcam", "fpcar", "farcam"]:
+		if frames == 4:
+			player.global_position = Vector3(city._center(3), 0.3, -0.5 * city.CELL + 6.0)
+			cam_mode = 3 if v != "farcam" else 2
+			cam_yaw = PI * 0.5
+		if v == "fpcar" and frames == 6:
+			var fc = _spawn_car(Vector3(city._center(3), 0.7, -0.5 * city.CELL + 2.6), PI * 0.5, Color.RED, false, "sedan")
+			player.global_position = fc.global_position
+			vehanim.cancel()
+			finish_enter(fc)
+		if frames % 10 == 0:
+			print("CAM ", frames, " mode=", cam_mode, " cam=", cam.global_position.snapped(Vector3.ONE * 0.1), " head_hidden=", _fp_hidden.size())
+	if v == "hudedit":
+		if frames == 6:
+			ui.open_hud_editor(func(): pass)
+		if frames == 12:
+			hud.edit_sel = "fire"
+			hud.layout_ovr["fire"] = [-300.0, -150.0, 1.0]
+			hud.edit_scale(1.3)
+			hud.layout_ovr["minimap"] = [40.0, 30.0, 0.8]
+			hud.root.queue_redraw()
+		if frames == 30:
+			print("HED ovr=", hud.layout_ovr, " fire=", hud.buttons.get("fire"))
+		if frames == 34:
+			ui._hed_close(true)
+			print("HED saved=", ui.settings.get("hud_layout"), " edit=", hud.edit_mode, " paused=", get_tree().paused)
+	if v == "gangwar":
+		var gc: Vector3 = gangs.T["g"].c
+		if frames == 4:
+			player.global_position = gangs._free_spot(gc, 0.0, 10.0) + Vector3(0, 0.3, 0)
+			print("GNG members g=", gangs.members["g"].size(), " p=", gangs.members["p"].size(), " loots=", gangs.loots.size())
+		if frames % 10 == 0:
+			print("GNG ", frames, " warn=", snappedf(gangs.warn_t, 0.1), " skulls=", gangs.skulls, " hunter=", gangs.hunter, " hp=", snappedf(hp, 1), " wanted=", wanted, " hint=", hud.hint.text.left(60))
+		if frames == 90:
+			var l = gangs.loots[0]
+			player.global_position = l.pos + Vector3(1.2, 0.3, 0)
+		if frames == 96:
+			print("GNG loot_action=", shop_action, " money0=", money)
+			_shop_action()
+			print("GNG money1=", money, " skulls=", gangs.skulls)
+	if v == "witness":
+		if frames == 4:
+			player.global_position = Vector3(city._center(3), 0.3, -0.5 * city.CELL + 6.0)
+			combat.owned["pistol"] = true
+			combat.weapon = "pistol"
+		if frames == 10:
+			var victim = null
+			for q in peds:
+				if is_instance_valid(q) and not q.down and q.mode == "" and (victim == null or q.global_position.distance_to(player.global_position) < victim.global_position.distance_to(player.global_position)):
+					victim = q
+			var other = null
+			for q in peds:
+				if is_instance_valid(q) and not q.down and q.mode == "" and q != victim:
+					other = q
+					break
+			if other:
+				other.global_position = player.global_position + Vector3(12, 0, 4)
+			if victim:
+				victim.global_position = player.global_position + Vector3(3, 0, 0)
+				combat._damage(victim, 500.0, Vector3.FORWARD)
+			print("WIT crime: pending=", crime_pending, " witness=", witness != null, " wanted=", wanted)
+		if frames % 10 == 0 and frames > 10:
+			print("WIT ", frames, " pending=", crime_pending, " wanted=", wanted, " knows=", police.knows, " zones=", hud.zones.size(), " wmode=", witness.mode if witness and is_instance_valid(witness) else "-")
 	if v == "helicrew":
 		if frames == 4:
 			player.global_position = Vector3(city._center(3), 0.3, -0.5 * city.CELL)
@@ -2251,7 +2464,7 @@ func _test_views() -> void:
 			print("EXP ", frames, " car_dead=", my_car.dead, " hp=", snappedf(hp, 1), " down=", snappedf(combat.down_t, 0.1))
 	if v == "wanted":
 		if frames == 4:
-			_add_wanted(4)
+			_raise_wanted(4)
 			combat.weapon = "pistol"
 			god = true
 		if frames % 30 == 0:
@@ -2474,7 +2687,7 @@ func _shot_tick() -> void:
 		shot_ped.hit(my_car, Vector3(7, 0, 4), gore)
 		audio.play("scream", shot_ped.global_position)
 	if shot_view == "police" and frames == 6:
-		_add_wanted(2)
+		_raise_wanted(2)
 		set_meta("pd0", 0.0)
 	if shot_view == "police" and frames == 20 and police_car:
 		set_meta("pd0", police_car.global_position.distance_to(player.global_position))
@@ -2813,6 +3026,7 @@ func _spawn_vehicles2() -> void:
 		police.patrol_cops.append(cp)
 	_spawn_clerks()
 	_spawn_fishers()
+	gangs.populate()
 	_pop_agents = traffic_sys.agents.size()
 	for i in owned_cars.size():
 		var oc: Dictionary = owned_cars[i]

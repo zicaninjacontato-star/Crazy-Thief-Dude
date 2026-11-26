@@ -27,6 +27,13 @@ var bust_t := 0.0
 var armed_t := 0.0          # >0: jogador sacou/atirou recentemente
 var rng := RandomNumberGenerator.new()
 var _mk: Marker3D
+# busca: a polícia sabe onde você está (knows) ou procura numa zona em volta do último ponto conhecido
+var knows := true
+var search_pos := Vector3.ZERO
+var last_known := Vector3.ZERO
+const ZONE_R := 75.0
+var _sk: Marker3D
+var _sw_t := 0.0
 var army: Array = []        # tanques e caças (5 estrelas)
 var patrol_cops: Array = []  # policiais a pé patrulhando (viram perseguidores com estrela)
 var jet_cd := 0.0
@@ -39,6 +46,8 @@ func setup(m: Node3D) -> void:
 	rng.seed = 404
 	_mk = Marker3D.new()
 	m.add_child(_mk)
+	_sk = Marker3D.new()
+	m.add_child(_sk)
 
 func clear() -> void:
 	for c in cops:
@@ -63,6 +72,7 @@ func clear() -> void:
 			c.queue_free()
 	patrol_cops.clear()
 	unseen = 0.0
+	knows = true
 	main.police_car = null
 
 func on_crime() -> void:
@@ -95,6 +105,19 @@ func tick(dt: float) -> void:
 	var s: int = main.wanted
 	var p: Node3D = main.player.vehicle if main.player.vehicle else main.player
 	var pp: Vector3 = p.global_position
+	# sem saber onde você está: as unidades vasculham pontos da zona amarela
+	if knows or main.wanted >= 5:
+		last_known = pp
+	else:
+		_sw_t -= dt
+		if _sw_t <= 0.0:
+			_sw_t = 7.0
+			var a := rng.randf() * TAU
+			_sk.global_position = search_pos + Vector3(cos(a), 0, sin(a)) * rng.randf_range(0.0, ZONE_R * 0.8)
+	var real_p := p
+	if not knows and main.wanted < 5:
+		p = _sk
+		pp = _sk.global_position
 	# viatura mais próxima (sirene e minimapa)
 	var near = null
 	var nd := 1e9
@@ -143,12 +166,15 @@ func tick(dt: float) -> void:
 	if heli and is_instance_valid(heli):
 		# helicóptero: devagar até 4★ (dá para fugir); no máximo de estrelas, a toda velocidade
 		heli.ai_speed = 34.0 if s >= 5 else 12.0
-	_army_tick(dt, s, pp)
+	_army_tick(dt, s, real_p.global_position)
 	_units_tick(dt, s, p, pp)
 	_cops_tick(dt, s, p)
+	for cp in cops:
+		cp.searching = not knows
 	_heli_tick(dt, s, p)
-	_visibility(dt, s, pp)
-	_bust(dt, s, pp)
+	_visibility(dt, s, real_p.global_position)
+	if knows:
+		_bust(dt, s, real_p.global_position)
 
 ## ponto numa rua da grade a ~80 m do jogador, de preferência fora da tela
 func _spawn_point(pp: Vector3) -> Array:
@@ -372,7 +398,7 @@ func _heli_tick(dt: float, s: int, p: Node3D) -> void:
 			heli.queue_free()
 			heli = null
 		return
-	if heli._fall:
+	if heli._fall or not knows:
 		return
 	heli.ai_target = p
 	var d: float = heli.global_position.distance_to(p.global_position)
@@ -399,21 +425,32 @@ func _heli_tick(dt: float, s: int, p: Node3D) -> void:
 
 func _visibility(dt: float, s: int, pp: Vector3) -> void:
 	seen = false
+	var sr := 1.0 if knows else 0.7       # procurando: precisa chegar mais perto para reconhecer
 	for u in units:
-		if u.car.global_position.distance_to(pp) < 55.0:
+		if u.car.global_position.distance_to(pp) < 55.0 * sr:
 			seen = true
 	for cp in cops:
-		if not cp.down and cp.global_position.distance_to(pp) < 42.0:
+		if not cp.down and cp.global_position.distance_to(pp) < 42.0 * sr:
 			seen = true
-	if heli and is_instance_valid(heli) and not heli.dead and heli.global_position.distance_to(pp) < (95.0 if s >= 5 else 60.0):
+	if heli and is_instance_valid(heli) and not heli.dead and heli.global_position.distance_to(pp) < (95.0 if s >= 5 else 60.0) * sr:
 		seen = true
 	if s >= 5:
 		seen = true      # nível máximo: o exército não desiste (só acaba morrendo)
+	if seen and not knows:
+		knows = true
+		main._msg("A polícia te encontrou!")
 	if seen:
 		unseen = 0.0
 	else:
 		unseen += dt
-		if unseen > 7.0 + s * 2.0:
+		# perdeu você de vista: volta a procurar na zona em volta do último ponto
+		if knows and unseen > 7.0:
+			knows = false
+			search_pos = last_known
+			_sw_t = 0.0
+		# fora da zona amarela as estrelas caem mais rápido
+		var out_zone: bool = not knows and pp.distance_to(search_pos) > ZONE_R
+		if unseen > (7.0 + s * 2.0) * (0.5 if out_zone else 1.0):
 			unseen = 0.0
 			main.wanted -= 1
 			if main.wanted == 0:

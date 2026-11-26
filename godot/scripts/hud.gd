@@ -8,6 +8,65 @@ signal shop_pressed
 signal siren_pressed
 signal rob_pressed
 signal hostage_pressed
+signal cam_pressed
+# ---- editor de HUD: posição/tamanho de cada botão, do minimapa e do joystick (salvo nas configurações)
+var layout_ovr := {}          # nome -> [dx, dy, escala]
+var hud_alpha := 1.0
+var edit_mode := false
+var edit_sel := ""
+var edit_block := Rect2()     # painel do editor (os toques ali são dos botões do painel)
+var _ed_idx := -1
+var _ed_last := Vector2.ZERO
+
+func _ov(k: String) -> Array:
+	return layout_ovr.get(k, [0.0, 0.0, 1.0])
+
+func mm_center() -> Vector2:
+	var o := _ov("minimap")
+	return Vector2(118, 128) + Vector2(o[0], o[1])
+
+func mm_radius() -> float:
+	return 100.0 * float(_ov("minimap")[2])
+
+func joy_home(s: Vector2) -> Vector2:
+	var o := _ov("joy")
+	return Vector2(150, s.y - 150) + Vector2(o[0], o[1])
+
+func edit_scale(f: float) -> void:
+	if edit_sel == "":
+		return
+	var o: Array = _ov(edit_sel).duplicate()
+	o[2] = clampf(float(o[2]) * f, 0.5, 2.2)
+	layout_ovr[edit_sel] = o
+	root.queue_redraw()
+
+func _edit_input(e: InputEvent) -> void:
+	if e is InputEventScreenTouch:
+		var p: Vector2 = e.position
+		if edit_block.has_point(p):
+			return
+		if e.pressed:
+			_layout()
+			var hit := ""
+			for k in buttons:
+				if buttons[k].has_point(p):
+					hit = k
+			if hit == "" and p.distance_to(mm_center()) < mm_radius():
+				hit = "minimap"
+			if hit == "" and p.distance_to(joy_home(root.get_viewport_rect().size)) < R * float(_ov("joy")[2]):
+				hit = "joy"
+			edit_sel = hit
+			_ed_idx = e.index if hit != "" else -1
+			_ed_last = p
+		elif e.index == _ed_idx:
+			_ed_idx = -1
+		root.queue_redraw()
+	elif e is InputEventScreenDrag and e.index == _ed_idx and edit_sel != "":
+		var o: Array = _ov(edit_sel).duplicate()
+		o[0] = float(o[0]) + e.relative.x
+		o[1] = float(o[1]) + e.relative.y
+		layout_ovr[edit_sel] = o
+		root.queue_redraw()
 
 var joy := Vector2.ZERO
 var gas := false
@@ -46,6 +105,9 @@ var can_enter := false       # há veículo perto (mostra o botão do carro)
 var weapon_kind := "fist"
 var action_kind := ""        # enter / exit / buy / carry / drop / trunk
 var heli := false
+var zones: Array = []         # [{pos, r, col, ring}] territórios das gangues e zona da polícia
+var skulls := 0               # procurado pela gangue (caveiras)
+var skull_col := Color.WHITE
 var armed := false            # pilotando caça/helicóptero armado
 var missile := false
 var rise_held := false        # SUBIR (debaixo d'água)
@@ -161,6 +223,14 @@ func _layout() -> void:
 	buttons["weapon"] = Rect2(s.x - 170, 122, 150, 78)
 	if shop_label != "" and (not driving or action_kind == "tune"):
 		buttons["shop"] = Rect2(s.x - b - 24, s.y * 0.38 - b - 16, b, b)
+	buttons["cam"] = Rect2(236, 30, 64, 64)
+	# editor de HUD: deslocamento e escala de cada botão (em volta do centro)
+	for k in buttons.keys():
+		if layout_ovr.has(k):
+			var o: Array = layout_ovr[k]
+			var r: Rect2 = buttons[k]
+			var sz: Vector2 = r.size * float(o[2])
+			buttons[k] = Rect2(r.get_center() + Vector2(o[0], o[1]) - sz * 0.5, sz)
 
 func banner(text: String, col: Color, secs := 3.5) -> void:
 	_banner.text = text
@@ -168,6 +238,9 @@ func banner(text: String, col: Color, secs := 3.5) -> void:
 	_banner_t = secs
 
 func _input(e: InputEvent) -> void:
+	if edit_mode:
+		_edit_input(e)
+		return
 	if input_block:
 		return
 	_layout()
@@ -176,7 +249,7 @@ func _input(e: InputEvent) -> void:
 		return
 	if e is InputEventScreenTouch:
 		var p: Vector2 = e.position
-		if e.pressed and p.distance_to(Vector2(118, 128)) < 100.0 and not input_block:
+		if e.pressed and p.distance_to(mm_center()) < mm_radius() and not input_block:
 			open_map()
 			return
 		if e.pressed:
@@ -209,7 +282,7 @@ func _input(e: InputEvent) -> void:
 			root.queue_redraw()
 			return
 		if e.index == _joy_id:
-			var d: Vector2 = (e.position - _joy_center) / R
+			var d: Vector2 = (e.position - _joy_center) / (R * float(_ov("joy")[2]))
 			joy = d.limit_length(1.0)
 		elif e.index == _cam_id:
 			cam_drag += e.position - _cam_last
@@ -237,6 +310,8 @@ func _press(k: String, on: bool) -> void:
 		"shop":
 			if on: shop_pressed.emit()
 		"rise": rise_held = on
+		"cam":
+			if on: cam_pressed.emit()
 		"siren":
 			if on: siren_pressed.emit()
 		"rob":
@@ -250,14 +325,19 @@ func _draw_controls() -> void:
 		return
 	_layout()
 	var s := root.get_viewport_rect().size
-	var c := _joy_center if _joy_id >= 0 else Vector2(150, s.y - 150)
-	root.draw_circle(c, R, Color(0, 0, 0, 0.28))
-	root.draw_arc(c, R, 0, TAU, 48, Color(1, 1, 1, 0.5), 3.0)
-	root.draw_circle(c + joy * R, 32, Color(1, 1, 1, 0.75))
+	var c := _joy_center if _joy_id >= 0 else joy_home(s)
+	var jr := R * float(_ov("joy")[2])
+	root.draw_circle(c, jr, Color(0, 0, 0, 0.28))
+	root.draw_arc(c, jr, 0, TAU, 48, Color(1, 1, 1, 0.5), 3.0)
+	root.draw_circle(c + joy * jr, 32.0 * jr / R, Color(1, 1, 1, 0.75))
 	if flash > 0.0:
 		root.draw_rect(Rect2(Vector2.ZERO, s), Color(0.8, 0, 0, flash))
 	_draw_minimap()
 	_draw_bars(s)
+	# caveiras da gangue (embaixo das estrelas), na cor da gangue que está atrás de você
+	if skulls > 0:
+		for i in 4:
+			_skull(Vector2(s.x - 360 + i * 38, 112), 15.0, skull_col, i < skulls)
 	if crosshair:
 		var cc := s * 0.5
 		for v in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
@@ -290,6 +370,20 @@ func _draw_controls() -> void:
 			"shop": ik = "a_" + action_kind
 			"hostage": ik = "release" if hostage_on else "hostage"
 		_icon(ik, c2, rad * 0.62, white)
+	if edit_mode:
+		_draw_edit(s)
+
+## editor de HUD: contorno em tudo que pode ser movido; o selecionado em amarelo
+func _draw_edit(s: Vector2) -> void:
+	root.draw_rect(Rect2(Vector2.ZERO, s), Color(0, 0, 0, 0.18))
+	var y := Color(1, 0.85, 0.2)
+	var w := Color(1, 1, 1, 0.7)
+	for k in buttons:
+		root.draw_rect(buttons[k].grow(3), y if k == edit_sel else w, false, 3.0 if k == edit_sel else 1.5)
+	root.draw_arc(mm_center(), mm_radius() + 4, 0, TAU, 48, y if edit_sel == "minimap" else w, 3.0 if edit_sel == "minimap" else 1.5)
+	root.draw_arc(joy_home(s), R * float(_ov("joy")[2]) + 4, 0, TAU, 48, y if edit_sel == "joy" else w, 3.0 if edit_sel == "joy" else 1.5)
+	var font := ThemeDB.fallback_font
+	root.draw_string(font, Vector2(20, s.y - 16), "Arraste um botão para mover · selecione e use − / + para o tamanho", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1, 1, 1))
 
 ## ícones vetoriais dos botões
 func _icon(kind: String, c: Vector2, r: float, col: Color) -> void:
@@ -320,6 +414,11 @@ func _icon(kind: String, c: Vector2, r: float, col: Color) -> void:
 			root.draw_line(c + Vector2(-0.3, 0.55) * r, c + Vector2(0.3, 0.55) * r, Color(0.5, 0.35, 0.1), w)
 		"car":
 			_car_icon(c, r, col, false)
+		"cam":
+			# câmera: corpo + lente
+			root.draw_rect(Rect2(c + Vector2(-0.75, -0.45) * r, Vector2(1.5, 1.0) * r), col, false, 2.5)
+			root.draw_arc(c + Vector2(0, 0.05) * r, r * 0.32, 0, TAU, 20, col, 2.5)
+			root.draw_rect(Rect2(c + Vector2(-0.35, -0.65) * r, Vector2(0.4, 0.2) * r), col)
 		"exit":
 			root.draw_rect(Rect2(c + Vector2(-0.7, -0.8) * r, Vector2(0.8, 1.6) * r), col, false, w)
 			root.draw_line(c + Vector2(-0.1, 0) * r, c + Vector2(0.9, 0) * r, col, w)
@@ -482,8 +581,8 @@ func _draw_bars(s: Vector2) -> void:
 
 ## minimapa redondo (gira com a câmera), ruas da grade, jogador e polícia
 func _draw_minimap() -> void:
-	var C := Vector2(118, 128)
-	var R := 100.0
+	var C := mm_center()
+	var R := mm_radius()
 	var sc := R / 90.0
 	root.draw_circle(C, R + 4, Color(0, 0, 0, 0.6))
 	root.draw_circle(C, R, Color(0.12, 0.33, 0.5))
@@ -549,6 +648,25 @@ func _draw_minimap() -> void:
 					var b2 := t if cuts[t] else t - 1
 					root.draw_line(ea + d * (a2 / 20.0), ea + d * (b2 / 20.0), er[3], maxf(2.0, er[2] * sc))
 					a2 = -1
+	for z in zones:
+		var zc: Vector2 = tr.call(z.pos)
+		var zr: float = z.r * sc
+		if zc.distance_to(C) > R + zr:
+			continue
+		var zp := PackedVector2Array()
+		for i in 32:
+			zp.append(zc + Vector2(cos(i * TAU / 32.0), sin(i * TAU / 32.0)) * zr)
+		for cp in Geometry2D.intersect_polygons(zp, circ):
+			if cp.size() >= 3:
+				root.draw_colored_polygon(cp, z.col)
+		if z.get("ring", false):
+			var oc := Color(z.col.r, z.col.g, z.col.b, 0.95)
+			var prev := Vector2.INF
+			for i in 33:
+				var q: Vector2 = zc + Vector2(cos(i * TAU / 32.0), sin(i * TAU / 32.0)) * zr
+				if prev != Vector2.INF and q.distance_to(C) < R and prev.distance_to(C) < R:
+					root.draw_line(prev, q, oc, 2.5)
+				prev = q
 	if map_route.size() > 1:
 		var pts := PackedVector2Array()
 		for q in map_route:
@@ -697,6 +815,11 @@ func _draw_full_map() -> void:
 	for c in map_roads:
 		root.draw_line(_mf_to_screen(Vector3(c, 0, -map_ext)), _mf_to_screen(Vector3(c, 0, map_ext)), Color(0.16, 0.16, 0.18), map_roadw * sc)
 		root.draw_line(_mf_to_screen(Vector3(-map_ext, 0, c)), _mf_to_screen(Vector3(map_ext, 0, c)), Color(0.16, 0.16, 0.18), map_roadw * sc)
+	for z in zones:
+		var zc := _mf_to_screen(z.pos)
+		var zr: float = z.r * sc
+		root.draw_circle(zc, zr, z.col)
+		root.draw_arc(zc, zr, 0, TAU, 48, Color(z.col.r, z.col.g, z.col.b, 0.95), 2.5)
 	if map_route.size() > 1:
 		var pts := PackedVector2Array()
 		for q in map_route:
@@ -732,9 +855,28 @@ func _draw_full_map() -> void:
 		ly += 26.0
 
 ## símbolo no minimapa/mapa: fundo colorido + desenho do tipo (viaturas, exército, lojas, casa, etc.)
+## caveira (procurado pela gangue): crânio, olhos, nariz e dentes
+func _skull(c: Vector2, r: float, col: Color, filled: bool) -> void:
+	var dark := Color(0, 0, 0, 0.85)
+	if not filled:
+		root.draw_arc(c + Vector2(0, -r * 0.15), r * 0.8, 0, TAU, 20, Color(1, 1, 1, 0.45), 2.0)
+		return
+	root.draw_circle(c + Vector2(0, -r * 0.15), r * 0.82, dark)
+	root.draw_circle(c + Vector2(0, -r * 0.15), r * 0.72, col)
+	root.draw_rect(Rect2(c + Vector2(-r * 0.42, r * 0.3), Vector2(r * 0.84, r * 0.45)), col)
+	for sx in [-1.0, 1.0]:
+		root.draw_circle(c + Vector2(r * 0.3 * sx, -r * 0.15), r * 0.2, dark)
+	root.draw_colored_polygon(PackedVector2Array([c + Vector2(0, r * 0.05), c + Vector2(-r * 0.1, r * 0.25), c + Vector2(r * 0.1, r * 0.25)]), dark)
+	for i in 3:
+		root.draw_line(c + Vector2(-r * 0.2 + i * r * 0.2, r * 0.42), c + Vector2(-r * 0.2 + i * r * 0.2, r * 0.75), dark, 1.5)
+
 func _blip(p: Vector2, bl: Dictionary, k: float) -> void:
 	var ic: String = bl.get("icon", "")
 	var col: Color = bl.col
+	if ic == "loot":
+		root.draw_rect(Rect2(p - Vector2(6, 5) * k, Vector2(12, 10) * k), Color(0, 0, 0, 0.8))
+		root.draw_rect(Rect2(p - Vector2(5, 4) * k, Vector2(10, 8) * k), col)
+		return
 	if ic == "":
 		root.draw_circle(p, 6.0 * k, Color(0, 0, 0, 0.7))
 		root.draw_circle(p, 4.5 * k, col)

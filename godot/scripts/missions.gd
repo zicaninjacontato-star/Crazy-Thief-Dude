@@ -61,6 +61,8 @@ func setup(m: Node3D) -> void:
 
 func hostiles() -> Array:
 	thugs = thugs.filter(func(t): return is_instance_valid(t))
+	if main.gangs:
+		return thugs + main.gangs.alive()
 	return thugs
 
 ## pontos para o minimapa: [{pos, col}]

@@ -354,7 +354,100 @@ func show_settings(back: Callable) -> void:
 	_btn(box, "Qualidade gráfica: %s" % QUAL[settings.quality], func(): settings.quality = (settings.quality + 1) % 3; _apply(); show_settings(back))
 	_btn(box, "Volume: %d%%" % settings.volume, func(): settings.volume = (settings.volume + 20) % 120; _apply(); show_settings(back))
 	_btn(box, "Contador de FPS: %s" % _on(settings.fps), func(): settings.fps = not settings.fps; _apply(); show_settings(back))
+	_btn(box, "Câmera: %s" % CAMS[int(settings.get("cam", 1))], func(): settings.cam = (int(settings.get("cam", 1)) + 1) % 4; _apply(); show_settings(back))
+	_btn(box, "EDITAR HUD (posição e tamanho dos botões)", func(): open_hud_editor(back))
 	_btn(box, "VOLTAR", back)
+
+const CAMS := ["Perto", "Média", "Longe", "Primeira pessoa"]
+
+# ---------------------------------------------------------------- editor de HUD
+var _hed: Control
+var _hed_back: Callable
+var _hed_drive := false
+func open_hud_editor(back: Callable) -> void:
+	_close()
+	_hed_back = back
+	get_tree().paused = true
+	var h = main.hud
+	h.edit_mode = true
+	h.edit_sel = ""
+	_hed_flags()
+	var s := get_viewport().get_visible_rect().size
+	var p := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.07, 0.08, 0.1, 0.92)
+	sb.set_corner_radius_all(12)
+	sb.set_content_margin_all(10)
+	sb.border_color = Color(1, 0.8, 0.2, 0.8)
+	sb.set_border_width_all(2)
+	p.add_theme_stylebox_override("panel", sb)
+	add_child(p)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	p.add_child(row)
+	var mk := func(t: String, cb: Callable) -> void:
+		var b := Button.new()
+		b.text = t
+		b.custom_minimum_size = Vector2(0, 54)
+		b.add_theme_font_size_override("font_size", 20)
+		b.pressed.connect(cb)
+		row.add_child(b)
+	mk.call("A pé / Dirigindo", func(): _hed_drive = not _hed_drive; _hed_flags())
+	mk.call("  −  ", func(): h.edit_scale(0.9))
+	mk.call("  +  ", func(): h.edit_scale(1.1))
+	var tb := Button.new()
+	tb.text = "Transparência %d%%" % int(round((1.0 - h.hud_alpha) * 100.0))
+	tb.custom_minimum_size = Vector2(0, 54)
+	tb.add_theme_font_size_override("font_size", 20)
+	tb.pressed.connect(func():
+		h.hud_alpha = 1.0 if h.hud_alpha <= 0.45 else h.hud_alpha - 0.15
+		h.root.modulate.a = h.hud_alpha
+		tb.text = "Transparência %d%%" % int(round((1.0 - h.hud_alpha) * 100.0)))
+	row.add_child(tb)
+	mk.call("Restaurar", func(): h.layout_ovr = {}; h.hud_alpha = 1.0; h.root.modulate.a = 1.0; h.root.queue_redraw())
+	mk.call("SALVAR", func(): _hed_close(true))
+	mk.call("Cancelar", func(): _hed_close(false))
+	p.position = Vector2(s.x * 0.5 - 430, 8)
+	_hed = p
+	_hed_saved = [h.layout_ovr.duplicate(true), h.hud_alpha]
+	await get_tree().process_frame
+	if is_instance_valid(p):
+		p.position.x = s.x * 0.5 - p.size.x * 0.5
+		h.edit_block = Rect2(p.position, p.size)
+
+var _hed_saved := []
+## mostra todos os botões possíveis do modo escolhido (a pé ou dirigindo) para poder arrumar
+func _hed_flags() -> void:
+	var h = main.hud
+	h.driving = _hed_drive
+	h.can_enter = true
+	h.armed = _hed_drive
+	h.siren_avail = _hed_drive
+	h.rob_avail = not _hed_drive
+	h.hostage_on = false
+	h.swim_mode = false
+	h.shop_label = "LOJA"
+	h.root.queue_redraw()
+
+func _hed_close(save: bool) -> void:
+	var h = main.hud
+	if save:
+		settings["hud_layout"] = h.layout_ovr.duplicate(true)
+		settings["hud_alpha"] = h.hud_alpha
+		_apply()
+	else:
+		h.layout_ovr = _hed_saved[0]
+		h.hud_alpha = _hed_saved[1]
+		h.root.modulate.a = h.hud_alpha
+	h.edit_mode = false
+	h.edit_sel = ""
+	h.edit_block = Rect2()
+	if _hed and is_instance_valid(_hed):
+		_hed.queue_free()
+	_hed = null
+	get_tree().paused = false
+	if _hed_back.is_valid():
+		_hed_back.call()
 
 func _on(v: bool) -> String:
 	return "LIGADO" if v else "DESLIGADO"
