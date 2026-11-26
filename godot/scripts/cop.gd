@@ -178,6 +178,10 @@ func _die(imp: Vector3, src, gore: bool) -> void:
 	collision_mask = 0
 	body.ragdoll(imp, src, gore)
 	died.emit(self)
+	if kind in ["cop", "swat", "heavy"]:
+		var mn = get_tree().current_scene
+		if mn.get("cop_kills") != null and mn.wanted > 0:
+			mn.cop_kills += 1
 	get_tree().create_timer(30.0).timeout.connect(_cleanup)
 
 var _stuck_t := 0.0

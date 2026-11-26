@@ -131,6 +131,7 @@ var _mf_moved := 0.0
 var _fire_last := Vector2.ZERO
 var crosshair := false
 var input_block := false
+var tuning := false
 var map_blips: Array = []      # [{pos, col}]
 var mission_text := ""
 var mission_timer := -1.0
@@ -238,6 +239,10 @@ func _layout() -> void:
 	if shop_label != "" and (not driving or action_kind == "tune"):
 		buttons["shop"] = Rect2(s.x - b - 24, s.y * 0.38 - b - 16, b, b)
 	buttons["cam"] = Rect2(236, 30, 64, 64)
+	# na oficina: nada de sair do carro/acelerar (o painel da oficina controla tudo)
+	if tuning:
+		for k in ["enter", "gas", "brake", "fire", "missile", "siren", "shop", "weapon"]:
+			buttons.erase(k)
 	# editor de HUD: deslocamento e escala de cada botão (em volta do centro)
 	for k in buttons.keys():
 		if layout_ovr.has(k):

@@ -244,6 +244,9 @@ func _block(cx: float, cz: float) -> void:
 	if Vector2i(bi, bj) == SAFE_BLOCK:
 		_safehouse(cx, cz, inner, downtown)
 		return
+	if Vector2i(bi, bj) == GANG_BLOCK:
+		_gang_hq(cx, cz, inner, "p", PI)
+		return
 	# fileira norte: rua só de casas · fileira sul: galpões e obras
 	if bj == N - 1 and STORE_BLOCKS.get(Vector2i(bi, bj), "") == "":
 		_houses_block(cx, cz, inner)
@@ -333,6 +336,7 @@ const STORE_NAMES := {"guns": "AMMU★NATION", "cars": "CONCESSIONÁRIA", "cloth
 const STORE_COLS := {"guns": Color(0.95, 0.15, 0.1), "cars": Color(0.2, 0.75, 1.0), "clothes": Color(0.95, 0.45, 0.85), "food": Color(1.0, 0.7, 0.15), "shop24": Color(0.3, 0.9, 0.4), "shop24b": Color(0.3, 0.9, 0.4), "tuning": Color(1.0, 0.55, 0.1)}
 const POLICE_BLOCK := Vector2i(4, 2)
 const SAFE_BLOCK := Vector2i(2, 3)
+const GANG_BLOCK := Vector2i(5, 6)       # esconderijo da Gangue Rosa (o da Verde fica ao sul, x −90)
 var _store_info := {}        # tipo -> {door, counter, clerk, center, x0, x1, z0, z1}
 var station_cars: Array = []     # vagas da garagem da polícia [pos, yaw]
 var station := {}                # pontos da delegacia: cela, saída da garagem, heliponto, porta
@@ -528,6 +532,13 @@ func _props() -> void:
 				var side_i := -1
 				for p in [Vector3(cx + o, 0.15, cz - r), Vector3(cx + o, 0.15, cz + r), Vector3(cx - r, 0.15, cz + o), Vector3(cx + r, 0.15, cz + o)]:
 					side_i += 1
+					# nada na frente do portão do esconderijo das gangues
+					var gate_blocked := false
+					for gq in gang_hq.values():
+						if Vector2(p.x - gq.gate_out.x, p.z - gq.gate_out.z).length() < 11.0:
+							gate_blocked = true
+					if gate_blocked:
+						continue
 					# otimização: 1 poste por lado (no meio) e 1 árvore a cada 2 lados (antes 3 postes + 2 árvores)
 					if s == 0:
 						props.append({"type": "lamp", "pos": p, "idx": lamps.size(), "shape": _prop_shape(p, 0.15, 7.0), "alive": true})
@@ -1050,6 +1061,104 @@ func _warehouses(cx: float, cz: float, inner: float) -> void:
 		_box(Vector3(6.0, 2.6, 2.45), Vector3(cx - 12.0 + (k % 3) * 7.0, 1.5 + lvl * 2.6, cz - h + 5.0 + lvl * 0.3), M.plain(ccols[rng.randi() % ccols.size()], 0.6, 0.3), true)
 	_house_spots.append(Vector3(cx + 12.0, 0.6, cz - h + 6.0))
 
+# ---------------------------------------------------------------- esconderijo das gangues
+## Complexo murado com portão (frente = +z local), pátio com sacos de areia/barris/contêiner e um
+## bunker de concreto: sala da frente (drogas na mesa, caixas de armas) e cofre na sala dos fundos.
+## Pontos para o gangs.gd: cofre, drogas, armas, esconderijos da senha, postos dos guardas, portão.
+var gang_hq := {}
+func _gang_hq(cx: float, cz: float, inner: float, g: String, yaw: float) -> void:
+	var base := Transform3D(Basis(Vector3.UP, yaw), Vector3(cx, 0.15, cz))
+	var h := inner * 0.5
+	var gcol: Color = Color(0.15, 0.75, 0.3) if g == "g" else Color(0.95, 0.35, 0.7)
+	var wallm := M.concrete(Color(0.55, 0.54, 0.52))
+	var dark := M.concrete(Color(0.38, 0.38, 0.4))
+	var stripe := M.plain(gcol.darkened(0.15), 0.8)
+	var steel := M.plain(Color(0.3, 0.31, 0.33), 0.45, 0.7)
+	_lb(base, Vector3(inner, 0.06, inner), Vector3(0, 0.03, 0), M.concrete(Color(0.42, 0.42, 0.43)), false)
+	# muro de 2,8 m com portão de 7 m na frente, faixa na cor da gangue e arame no topo
+	var WH := 2.8
+	_lb(base, Vector3(inner, WH, 0.3), Vector3(0, WH * 0.5, -h), wallm, true)
+	for sx in [-1.0, 1.0]:
+		_lb(base, Vector3(0.3, WH, inner), Vector3(sx * h, WH * 0.5, 0), wallm, true)
+		_lb(base, Vector3(h - 3.5, WH, 0.3), Vector3(sx * (h + 3.5) * 0.5, WH * 0.5, h), wallm, true)
+		_lb(base, Vector3(0.6, WH + 0.6, 0.6), Vector3(sx * 3.8, (WH + 0.6) * 0.5, h), dark, true)
+	for side in [[Vector3(inner, 0.35, 0.34), Vector3(0, 1.6, -h)], [Vector3(0.34, 0.35, inner), Vector3(-h, 1.6, 0)], [Vector3(0.34, 0.35, inner), Vector3(h, 1.6, 0)]]:
+		_lb(base, side[0], side[1], stripe, false)
+		_lb(base, side[0] * Vector3(1, 0.3, 1), side[1] + Vector3(0, WH - 1.45, 0), M.plain(Color(0.12, 0.12, 0.12), 0.5, 0.5), false)
+	# bunker
+	var bw := 15.0
+	var bd := 11.0
+	var bz := -5.0
+	var H := 3.6
+	var t := 0.35
+	var fz := bz + bd * 0.5        # parede da frente
+	var kz := bz - bd * 0.5        # parede do fundo
+	var dx := -3.0                 # porta da frente
+	_lb(base, Vector3(bw, H, t), Vector3(0, H * 0.5, kz), dark, true)
+	for sx in [-1.0, 1.0]:
+		_lb(base, Vector3(t, H, bd), Vector3(sx * bw * 0.5, H * 0.5, bz), dark, true)
+	_lb(base, Vector3(dx - 0.9 + bw * 0.5, H, t), Vector3((-bw * 0.5 + dx - 0.9) * 0.5, H * 0.5, fz), dark, true)
+	_lb(base, Vector3(bw * 0.5 - dx - 0.9, H, t), Vector3((bw * 0.5 + dx + 0.9) * 0.5, H * 0.5, fz), dark, true)
+	_lb(base, Vector3(1.8, H - 2.3, t), Vector3(dx, H - (H - 2.3) * 0.5, fz), dark, true)
+	_lb(base, Vector3(bw + 0.6, 0.3, bd + 0.6), Vector3(0, H + 0.15, bz), dark, true)
+	_lb(base, Vector3(bw - 0.2, 0.05, bd - 0.2), Vector3(0, 0.08, bz), M.plain(Color(0.3, 0.28, 0.26), 0.9), false)
+	# batente de aço, fendas de janela gradeadas, faixa e grafite
+	for sx in [-1.0, 1.0]:
+		_lb(base, Vector3(0.12, 2.3, 0.45), Vector3(dx + sx * 0.95, 1.15, fz), steel, false)
+	for wx in [-6.0, 1.0, 4.5]:
+		_lb(base, Vector3(1.6, 0.35, 0.4), Vector3(wx, 2.4, fz), M.plain(Color(0.05, 0.05, 0.06), 0.4), false)
+	_lb(base, Vector3(bw + 0.1, 0.4, bd + 0.1), Vector3(0, H - 0.4, bz), stripe, false)
+	_lb(base, Vector3(0.05, 1.6, 4.0), Vector3(bw * 0.5 + 0.2, 1.4, bz - 1.0), M.emissive(gcol, 0.4), false)
+	# divisória: sala da frente × sala do cofre (passagem em x = +4)
+	_lb(base, Vector3(10.7, H, 0.25), Vector3(-2.15, H * 0.5, bz), dark, true)
+	_lb(base, Vector3(2.7, H, 0.25), Vector3(6.15, H * 0.5, bz), dark, true)
+	_lb(base, Vector3(1.6, H - 2.3, 0.25), Vector3(4.0, H - (H - 2.3) * 0.5, bz), dark, true)
+	# sala da frente: mesa (drogas), sofá, TV, lâmpadas; sala do cofre: prateleiras e lâmpada
+	_lb(base, Vector3(2.6, 0.08, 1.2), Vector3(-4.5, 0.9, -2.4), M.wood(), true)
+	for lx in [-5.6, -3.4]:
+		for lz in [-2.9, -1.9]:
+			_lb(base, Vector3(0.08, 0.86, 0.08), Vector3(lx, 0.43, lz), steel, false)
+	_lb(base, Vector3(3.0, 0.5, 0.9), Vector3(1.0, 0.3, -4.2), M.plain(Color(0.3, 0.12, 0.1), 0.9), true)
+	_lb(base, Vector3(3.0, 0.5, 0.25), Vector3(1.0, 0.75, -4.6), M.plain(Color(0.3, 0.12, 0.1), 0.9), false)
+	_lb(base, Vector3(1.4, 0.8, 0.08), Vector3(1.0, 1.4, 0.25), M.plain(Color(0.02, 0.02, 0.03), 0.2, 0.5), false)
+	for lp in [Vector3(-3.0, H - 0.1, -2.5), Vector3(3.0, H - 0.1, -2.5), Vector3(0.0, H - 0.1, -8.0)]:
+		_lb(base, Vector3(0.5, 0.06, 0.5), lp, M.emissive(Color(1.0, 0.85, 0.6), 1.5), false)
+	for k in 3:
+		_lb(base, Vector3(0.5, 0.06, 2.6), Vector3(-6.9, 0.6 + k * 0.7, -8.2), steel, false)
+		_lb(base, Vector3(0.4, 0.2, 2.2), Vector3(-6.9, 0.73 + k * 0.7, -8.2), M.plain(Color(0.35, 0.55, 0.3), 0.8), false)
+	_lb(base, Vector3(0.06, 2.2, 2.6), Vector3(-7.15, 1.1, -8.2), steel, true)
+	# pátio: sacos de areia no portão, barris, contêiner, pilha de caixas (sobe no telhado)
+	for sx in [-1.0, 1.0]:
+		_lb(base, Vector3(3.0, 1.0, 0.8), Vector3(sx * 6.5, 0.5, h - 4.0), M.plain(Color(0.6, 0.53, 0.38), 0.95), true)
+	for bp in [Vector3(-12.0, 0, 6.0), Vector3(-11.2, 0, 6.6), Vector3(13.0, 0, -15.5), Vector3(12.0, 0, -16.2)]:
+		_lb(base, Vector3(0.7, 1.0, 0.7), bp + Vector3(0, 0.5, 0), M.plain(Color(0.2, 0.3, 0.5) if g == "g" else Color(0.6, 0.2, 0.15), 0.6, 0.3), true)
+	_lb(base, Vector3(6.0, 2.6, 2.45), Vector3(-14.0, 1.3, 12.0), M.plain(gcol.darkened(0.45), 0.6, 0.3), true)
+	_lb(base, Vector3(1.4, 1.2, 1.4), Vector3(8.4, 0.6, -8.5), M.wood(), true)
+	_lb(base, Vector3(1.4, 2.4, 1.4), Vector3(8.4, 1.2, -9.9), M.wood(), true)
+	_lb(base, Vector3(2.4, 1.2, 2.2), Vector3(14.0, 0.6, 14.0), M.plain(Color(0.25, 0.4, 0.3), 0.7, 0.3), true)
+	# planta para o minimapa
+	var corners := PackedVector2Array()
+	for cc in [Vector3(-bw * 0.5, 0, kz), Vector3(bw * 0.5, 0, kz), Vector3(bw * 0.5, 0, fz), Vector3(-bw * 0.5, 0, fz)]:
+		var wp: Vector3 = base * cc
+		corners.append(Vector2(wp.x, wp.z))
+	map_houses.append(corners)
+	var fwd: Vector3 = base.basis * Vector3(0, 0, 1)
+	gang_hq[g] = {
+		"c": Vector3(cx, 0, cz),
+		"yaw": yaw,
+		"safe": base * Vector3(0, 0.0, kz + 0.95),
+		"drugs": base * Vector3(-4.5, 0.94, -2.4),
+		"guns": base * Vector3(4.6, 0.0, -1.2),
+		"door": base * Vector3(dx, 0.0, fz + 1.2),
+		"inside": [base * Vector3(-1.5, 0, -1.5), base * Vector3(5.5, 0, -3.0), base * Vector3(-3.0, 0, -8.0), base * Vector3(3.0, 0, -8.5)],
+		"yard": [base * Vector3(-5.0, 0, h - 5.5), base * Vector3(5.0, 0, h - 5.5), base * Vector3(-12.0, 0, 2.0), base * Vector3(12.0, 0, 3.0), base * Vector3(-13.0, 0, -14.0), base * Vector3(13.0, 0, -12.0), base * Vector3(0.0, 0, 6.0)],
+		"roof": base * Vector3(4.0, H + 0.3, -7.0),
+		"gate_out": base * Vector3(0, 0, h + 9.0),
+		"fwd": fwd,
+		"notes": [base * Vector3(-14.0, 2.62, 12.0), base * Vector3(5.5, H + 0.32, -9.5), base * Vector3(0.0, 0.0, kz - 1.0), base * Vector3(14.6, 0.0, 15.6), base * Vector3(-16.5, 0.0, -17.0)],
+		"cars": [[base * Vector3(10.0, 0.7, 8.0), yaw + PI * 0.5], [base * Vector3(-8.0, 0.7, -17.5), yaw + PI * 0.5]],
+	}
+
 # ---------------------------------------------------------------- casa segura (casa de verdade)
 ## Casa térrea com porta que abre, sala (sofá, TV, rack), cozinha (geladeira, fogão, pia, mesa),
 ## banheiro (vaso, pia, box), quarto (cama, guarda-roupa, criado-mudo) e garagem ao lado.
@@ -1084,7 +1193,7 @@ func _safehouse(cx: float, cz: float, inner: float, downtown: float) -> void:
 		_box(Vector3(1.6, 0.1, 0.2), Vector3(wx, 1.2, fz - 0.16), M.plain(Color(0.95, 0.95, 0.95), 0.6), false)
 	# telhado de duas águas
 	_roof(Transform3D(Basis(), Vector3((x0 + x1) * 0.5, 0.15, (fz + bz) * 0.5)), x1 - x0, bz - fz, H, roofm, 0.45)
-	_box(Vector3(x1 - x0 - 0.4, 0.12, bz - fz - 0.4), Vector3((x0 + x1) * 0.5, H + 0.12, (fz + bz) * 0.5), inw, false)
+	_box(Vector3(x1 - x0 - 0.4, 0.12, bz - fz - 0.4), Vector3((x0 + x1) * 0.5, H + 0.12, (fz + bz) * 0.5), inw, true)    # forro com colisão: a câmera não sai pelo teto
 	# paredes internas: sala (frente esq.), cozinha (fundo esq.), banheiro (fundo dir.), quarto (frente dir.)
 	var mx := cx - 1.0          # divisória vertical
 	var mz := fz + 5.5          # divisória horizontal
@@ -1169,7 +1278,7 @@ func _safehouse(cx: float, cz: float, inner: float, downtown: float) -> void:
 	li.light_energy = 0.9
 	li.position = Vector3((x0 + x1) * 0.5, H - 0.4, (fz + bz) * 0.5)
 	add_child(li)
-	safehouse = {"spawn": Vector3(x0 + 2.4, 0.3, mz - 1.6), "bed": bed + Vector3(-1.4, 0.1, 0.6), "door": Vector3(cx - 3.0, 0.3, fz - 1.5), "garage": [Vector3(x1 + 3.0, 0.7, fz + 4.5), PI], "door_hinge": Vector3(dx0, 0.15, fz)}
+	safehouse = {"spawn": Vector3(x0 + 2.4, 0.3, mz - 1.6), "bed": bed + Vector3(-1.4, 0.1, 0.6), "door": Vector3(cx - 3.0, 0.3, fz - 1.5), "garage": [Vector3(x1 + 3.0, 0.7, fz + 4.5), PI], "door_hinge": Vector3(dx0, 0.15, fz), "rect": [x0, x1, fz, bz, H]}
 
 # ---------------------------------------------------------------- distritos fora da grade
 ## Norte: bairro residencial (2 ruas só de casas), morros com estrada de terra até um mirante.
@@ -1287,7 +1396,7 @@ func _districts() -> void:
 	_road(Vector3(-160, 0, -330), Vector3(-160, 0, -400), 11.0)
 	_viaduct(-150.0, 160.0, -330.0, 8.0)
 	_construction(40.0, -282.0, 42.0)
-	_warehouses(-90.0, -282.0, 42.0)
+	_gang_hq(-90.0, -282.0, 42.0, "g", 0.0)
 	_warehouses(150.0, -282.0, 42.0)
 	var xx2 := -190.0
 	while xx2 < 160.0:

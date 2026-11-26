@@ -56,11 +56,60 @@ func _ready() -> void:
 	add_child(pause_btn)
 
 func _process(_dt: float) -> void:
+	_scroll_inertia(_dt)
 	var s := get_viewport().get_visible_rect().size
 	pause_btn.position = Vector2(s.x * 0.5 - 32, 38)
 	pause_btn.visible = overlay == null and wheel == null
 
 # ---------------- utilidades de interface ----------------
+## rolagem por arrasto (dedo ou mouse) nas listas: passou de 12 px na vertical = rolando; o botão
+## onde o dedo começou é "desarmado" (movimento falso fora dele) e não dispara ao soltar
+var _scrolls: Array = []
+var _sc_cur: ScrollContainer = null
+var _sc_y0 := 0.0
+var _sc_s0 := 0.0
+var _sc_drag := false
+var _sc_vel := 0.0
+var _sc_last := 0.0
+func _input(ev: InputEvent) -> void:
+	_scrolls = _scrolls.filter(func(x): return is_instance_valid(x) and x.is_visible_in_tree())
+	if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT:
+		if ev.pressed:
+			_sc_cur = null
+			_sc_drag = false
+			_sc_vel = 0.0
+			for sc in _scrolls:
+				if sc.get_global_rect().has_point(ev.position):
+					_sc_cur = sc
+					_sc_y0 = ev.position.y
+					_sc_s0 = sc.scroll_vertical
+					_sc_last = ev.position.y
+		else:
+			_sc_cur = null if not _sc_drag else _sc_cur
+			_sc_drag = false
+	elif ev is InputEventMouseMotion and _sc_cur != null and (ev.button_mask & MOUSE_BUTTON_MASK_LEFT):
+		if ev.position.x < -5000.0:
+			return                      # o nosso evento falso
+		var dy: float = ev.position.y - _sc_y0
+		if not _sc_drag and absf(dy) > 12.0:
+			_sc_drag = true
+			var fake := InputEventMouseMotion.new()
+			fake.position = Vector2(-9999, -9999)
+			fake.global_position = fake.position
+			fake.button_mask = MOUSE_BUTTON_MASK_LEFT
+			Input.parse_input_event(fake)
+		if _sc_drag and is_instance_valid(_sc_cur):
+			_sc_cur.scroll_vertical = int(_sc_s0 - dy)
+			_sc_vel = (_sc_last - ev.position.y) / maxf(get_process_delta_time(), 0.008)
+			_sc_last = ev.position.y
+			get_viewport().set_input_as_handled()
+
+func _scroll_inertia(dt: float) -> void:
+	if _sc_drag or _sc_cur == null or not is_instance_valid(_sc_cur) or absf(_sc_vel) < 20.0:
+		return
+	_sc_cur.scroll_vertical += int(_sc_vel * dt)
+	_sc_vel *= pow(0.04, dt)
+
 func _open(title: String, side := false) -> VBoxContainer:
 	_close()
 	get_tree().paused = true
@@ -91,7 +140,9 @@ func _open(title: String, side := false) -> VBoxContainer:
 	var scroll := ScrollContainer.new()
 	scroll.custom_minimum_size = Vector2(480 if side else 560, 0)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER    # rola arrastando o dedo
 	pc.add_child(scroll)
+	_scrolls.append(scroll)
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 10)
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -869,10 +920,16 @@ func show_guns(sel: String) -> void:
 	mc.add_child(hb)
 	var c = main.combat
 	# ---- lista à esquerda
+	var lsc := ScrollContainer.new()
+	lsc.custom_minimum_size = Vector2(392, 0)
+	lsc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	lsc.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	hb.add_child(lsc)
+	_scrolls.append(lsc)
 	var left := VBoxContainer.new()
 	left.custom_minimum_size = Vector2(380, 0)
 	left.add_theme_constant_override("separation", 8)
-	hb.add_child(left)
+	lsc.add_child(left)
 	var t := Label.new()
 	t.text = "AMMU★NATION"
 	t.add_theme_font_size_override("font_size", 40)

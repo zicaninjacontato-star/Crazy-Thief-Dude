@@ -26,9 +26,10 @@ func setup(m: Node3D) -> void:
 	main = m
 	rng.randomize()
 	var city = m.city
+	var hq: Dictionary = city.gang_hq
 	T = {
-		"g": {"name": "Gangue Verde", "c": Vector3(-90.0, 0, -306.0), "r": 55.0, "col": Color(0.15, 0.85, 0.3)},
-		"p": {"name": "Gangue Rosa", "c": Vector3(city._center(5), 0, city._center(6) + 8.0), "r": 52.0, "col": Color(1.0, 0.35, 0.72)},
+		"g": {"name": "Gangue Verde", "c": hq["g"].c if hq.has("g") else Vector3(-90.0, 0, -282.0), "r": 55.0, "col": Color(0.15, 0.85, 0.3)},
+		"p": {"name": "Gangue Rosa", "c": hq["p"].c if hq.has("p") else Vector3(city._center(5), 0, city._center(6)), "r": 52.0, "col": Color(1.0, 0.35, 0.72)},
 	}
 	# os raios de "ponto livre" só enxergam as colisões depois de alguns passos de física
 	for k in 3:
@@ -40,7 +41,8 @@ func setup(m: Node3D) -> void:
 
 var _phys_ok := false
 var _pending_pop := false
-## repovoa (início e depois de morrer/ser preso)
+## repovoa (início e depois de morrer/ser preso): guardas dentro do bunker, no pátio, no portão
+## e no telhado; dois carros da gangue no pátio
 func populate() -> void:
 	if not _phys_ok:
 		_pending_pop = true
@@ -48,19 +50,27 @@ func populate() -> void:
 	_pending_pop = false
 	clear()
 	for g in T:
-		var c: Vector3 = T[g].c
-		for k in 3:
-			var gp: Vector3 = _free_spot(c, T[g].r * 0.15, T[g].r * 0.6)
-			var n := rng.randi_range(2, 4)
-			for i in n:
-				_spawn_member(g, _free_spot(gp, 0.0, 2.5) + Vector3(0, 0.3, 0), "pistol", true)
-		# carros da gangue estacionados
-		for k in 2:
-			var pc = main._spawn_car(_free_spot(c, T[g].r * 0.3, T[g].r * 0.6, 3.0) + Vector3(0, 0.7, 0), rng.randf() * TAU, T[g].col.darkened(0.1), false, ["sedan", "suv", "pickup"][k % 3])
+		var hq: Dictionary = main.city.gang_hq.get(g, {})
+		if hq.is_empty():
+			continue
+		for p in _posts(g):
+			_spawn_member(g, p + Vector3(0, 0.3, 0), "pistol", true)
+		for cs in hq.cars:
+			var pc = main._spawn_car(cs[0], cs[1], T[g].col.darkened(0.1), false, ["sedan", "suv", "pickup"][rng.randi() % 3])
 			pc.parked = true
 			pc.set_meta("gang", g)
 	skulls = 0
 	hunter = ""
+	wave_n = 0
+
+## postos dos guardas: 3 dentro do bunker, 5 no pátio/portão, 1 no telhado
+func _posts(g: String) -> Array:
+	var hq: Dictionary = main.city.gang_hq[g]
+	var out: Array = []
+	out.append_array(hq.inside.slice(0, 3))
+	out.append_array(hq.yard.slice(0, 5))
+	out.append(hq.roof)
+	return out
 
 func clear() -> void:
 	for g in members:
@@ -76,6 +86,7 @@ func clear() -> void:
 	skulls = 0
 	hunter = ""
 	warn_t = 0.0
+	wave_n = 0
 
 func alive() -> Array:
 	var out := []
@@ -124,91 +135,285 @@ func _spawn_member(g: String, pos: Vector3, weapon: String, idle: bool):
 	members[g].append(q)
 	return q
 
-# ---------------------------------------------------------------- cofres, drogas e armas
+# ---------------------------------------------------------------- cofre, drogas, armas e senha
+## O cofre fica no bunker (sala dos fundos) e nunca some: abre com a senha (bilhete escondido em
+## algum canto da área) ou com explosivo (granada plantada, granada/foguete perto). O dinheiro
+## volta em 10 min, com a porta fechada e senha nova escondida em outro lugar.
+var safes := {}      # g -> {node, door, cash_node, open, cash, cd, charge, code, known, note}
 func _build_loot() -> void:
-	var kinds := [["safe", "COFRE", Color(0.22, 0.23, 0.25), Vector3(0.9, 1.1, 0.8)], ["drugs", "DROGAS", Color(0.45, 0.32, 0.18), Vector3(1.0, 0.6, 0.7)], ["guns", "ARMAS", Color(0.28, 0.33, 0.2), Vector3(1.4, 0.55, 0.6)]]
 	for g in T:
-		var c: Vector3 = T[g].c
-		for i in kinds.size():
-			var kd: Array = kinds[i]
-			var pos: Vector3 = _free_spot(c, T[g].r * 0.15, T[g].r * 0.45, 1.5)
-			var n := StaticBody3D.new()
-			main.add_child(n)
-			n.global_position = pos
-			var mi := MeshInstance3D.new()
-			var bm := BoxMesh.new()
-			bm.size = kd[3]
-			mi.mesh = bm
-			mi.material_override = M.plain(kd[2], 0.6, 0.3 if kd[0] == "safe" else 0.0)
-			mi.position.y = kd[3].y * 0.5
-			n.add_child(mi)
-			var cs := CollisionShape3D.new()
-			var sh := BoxShape3D.new()
-			sh.size = kd[3]
-			cs.shape = sh
-			cs.position.y = kd[3].y * 0.5
-			n.add_child(cs)
-			if kd[0] == "safe":
-				var dial := MeshInstance3D.new()
-				var cy := CylinderMesh.new()
-				cy.top_radius = 0.12
-				cy.bottom_radius = 0.12
-				cy.height = 0.05
-				dial.mesh = cy
-				dial.material_override = M.plain(Color(0.75, 0.75, 0.78), 0.3, 0.8)
-				dial.rotation.x = PI * 0.5
-				dial.position = Vector3(0, 0.6, kd[3].z * 0.5 + 0.02)
-				n.add_child(dial)
-			var lb := Label3D.new()
-			lb.text = kd[1]
-			lb.font_size = 48
-			lb.pixel_size = 0.005
-			lb.modulate = T[g].col
-			lb.outline_size = 8
-			lb.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-			lb.position.y = kd[3].y + 0.45
-			lb.visibility_range_end = 30.0
-			n.add_child(lb)
-			loots.append({"gang": g, "kind": kd[0], "pos": pos, "node": n, "cd": 0.0})
+		var hq: Dictionary = main.city.gang_hq.get(g, {})
+		if hq.is_empty():
+			continue
+		var fwd: Vector3 = hq.fwd
+		var yaw: float = hq.yaw
+		# --- cofre (fixo)
+		var sn := StaticBody3D.new()
+		main.add_child(sn)
+		sn.global_position = hq.safe
+		sn.rotation.y = yaw
+		var steel := M.plain(Color(0.2, 0.21, 0.23), 0.35, 0.8)
+		_mesh(sn, Vector3(1.6, 2.0, 1.2), Vector3(0, 1.0, 0), steel)
+		var cs := CollisionShape3D.new()
+		var sh := BoxShape3D.new()
+		sh.size = Vector3(1.6, 2.0, 1.2)
+		cs.shape = sh
+		cs.position = Vector3(0, 1.0, 0)
+		sn.add_child(cs)
+		_mesh(sn, Vector3(1.3, 1.7, 0.05), Vector3(0, 1.0, 0.58), M.plain(Color(0.05, 0.05, 0.05), 0.9))
+		var cash := Node3D.new()
+		sn.add_child(cash)
+		for k in 6:
+			_mesh(cash, Vector3(0.34, 0.16, 0.5), Vector3(-0.35 + (k % 3) * 0.35, 0.5 + float(k / 3) * 0.55, 0.25), M.plain(Color(0.25, 0.55, 0.25), 0.8))
+		var door := Node3D.new()        # dobradiça no canto esquerdo da frente
+		sn.add_child(door)
+		door.position = Vector3(-0.8, 0, 0.62)
+		_mesh(door, Vector3(1.6, 2.0, 0.12), Vector3(0.8, 1.0, 0), steel)
+		var dial := MeshInstance3D.new()
+		var cy := CylinderMesh.new()
+		cy.top_radius = 0.18
+		cy.bottom_radius = 0.18
+		cy.height = 0.06
+		dial.mesh = cy
+		dial.material_override = M.plain(Color(0.8, 0.8, 0.82), 0.3, 0.9)
+		dial.rotation.x = PI * 0.5
+		dial.position = Vector3(0.8, 1.1, 0.09)
+		door.add_child(dial)
+		_mesh(door, Vector3(0.36, 0.26, 0.04), Vector3(1.25, 1.55, 0.08), M.emissive(Color(0.2, 0.9, 0.35), 0.8))
+		_mesh(door, Vector3(0.08, 0.5, 0.08), Vector3(1.3, 1.0, 0.12), M.plain(Color(0.8, 0.8, 0.82), 0.3, 0.9))
+		var lb := _label(sn, "COFRE", T[g].col, 2.45)
+		var st := {"node": sn, "door": door, "cash_node": cash, "label": lb, "open": false, "open_k": 0.0, "cash": 0, "cd": 0.0, "charge": -1.0, "code": "", "known": false, "note": null}
+		safes[g] = st
+		_refill(g)
+		loots.append({"gang": g, "kind": "safe", "pos": hq.safe + fwd * 1.25, "node": sn, "cd": 0.0})
+		# --- drogas (na mesa) e armas (caixas) dentro do bunker
+		var dn := Node3D.new()
+		main.add_child(dn)
+		dn.global_position = hq.drugs
+		dn.rotation.y = yaw
+		for k in 8:
+			_mesh(dn, Vector3(0.3, 0.12, 0.2), Vector3(-0.9 + (k % 4) * 0.6, 0.06 + float(k / 4) * 0.12, -0.2 + float(k % 2) * 0.35), M.plain(Color(0.93, 0.92, 0.88) if k % 3 else Color(0.55, 0.4, 0.22), 0.8))
+		_label(dn, "DROGAS", T[g].col, 0.6)
+		loots.append({"gang": g, "kind": "drugs", "pos": hq.drugs, "node": dn, "cd": 0.0})
+		var gn := StaticBody3D.new()
+		main.add_child(gn)
+		gn.global_position = hq.guns
+		gn.rotation.y = yaw
+		for k in 2:
+			_mesh(gn, Vector3(1.4, 0.55, 0.6), Vector3(0, 0.28 + k * 0.56, 0), M.plain(Color(0.28, 0.33, 0.2), 0.7))
+		var gs := CollisionShape3D.new()
+		var gsh := BoxShape3D.new()
+		gsh.size = Vector3(1.4, 1.1, 0.6)
+		gs.shape = gsh
+		gs.position.y = 0.55
+		gn.add_child(gs)
+		_label(gn, "ARMAS", T[g].col, 1.55)
+		loots.append({"gang": g, "kind": "guns", "pos": hq.guns, "node": gn, "cd": 0.0})
+		# --- bilhete com a senha, escondido num dos cantos da área
+		var nt := Node3D.new()
+		main.add_child(nt)
+		_mesh(nt, Vector3(0.26, 0.02, 0.18), Vector3(0, 0.03, 0), M.emissive(Color(0.95, 0.93, 0.8), 0.35))
+		_mesh(nt, Vector3(0.18, 0.025, 0.02), Vector3(0, 0.04, -0.03), M.plain(Color(0.1, 0.1, 0.4), 0.6))
+		var nl := {"gang": g, "kind": "note", "pos": Vector3.ZERO, "node": nt, "cd": 0.0}
+		st.note = nl
+		loots.append(nl)
+		_place_note(g)
+
+func _mesh(parent: Node3D, size: Vector3, pos: Vector3, mat: Material) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = size
+	mi.mesh = bm
+	mi.material_override = mat
+	mi.position = pos
+	parent.add_child(mi)
+	return mi
+
+func _label(parent: Node3D, txt: String, col: Color, y: float) -> Label3D:
+	var lb := Label3D.new()
+	lb.text = txt
+	lb.font_size = 48
+	lb.pixel_size = 0.005
+	lb.modulate = col
+	lb.outline_size = 8
+	lb.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	lb.position.y = y
+	lb.visibility_range_end = 22.0
+	parent.add_child(lb)
+	return lb
+
+## cofre fecha, enche de novo e ganha senha nova, escondida em outro canto
+func _refill(g: String) -> void:
+	var st: Dictionary = safes[g]
+	st.open = false
+	st.cash = rng.randi_range(2500, 6000)
+	st.code = "%04d" % rng.randi_range(0, 9999)
+	st.known = false
+	st.charge = -1.0
+	if st.note != null:
+		_place_note(g)
+
+func _place_note(g: String) -> void:
+	var st: Dictionary = safes[g]
+	var spots: Array = main.city.gang_hq[g].notes
+	var p: Vector3 = spots[rng.randi() % spots.size()]
+	st.note.pos = p
+	st.note.cd = 0.0
+	st.note.node.global_position = p
+	st.note.node.rotation.y = rng.randf() * TAU
+	st.note.node.visible = true
 
 func loot_near(pp: Vector3):
 	for l in loots:
-		if l.cd <= 0.0 and Vector2(l.pos.x - pp.x, l.pos.z - pp.z).length() < 1.9:
+		if l.cd <= 0.0 and Vector2(l.pos.x - pp.x, l.pos.z - pp.z).length() < (1.9 if l.kind != "note" else 1.5) and absf(l.pos.y - pp.y) < 1.7:
+			if l.kind == "note" and safes[l.gang].known:
+				continue
 			return l
 	return null
 
-## pega o que estava guardado: dinheiro, drogas (vendidas na hora) ou armas/munição
+## texto do botão e da dica para o que está perto
+func loot_label(l: Dictionary) -> String:
+	if l.kind != "safe":
+		return "PEGAR"
+	var st: Dictionary = safes[l.gang]
+	if st.open:
+		return "PEGAR" if st.cash > 0 else ""
+	if st.charge >= 0.0:
+		return ""
+	if st.known:
+		return "SENHA"
+	if _explosives() > 0:
+		return "EXPLODIR"
+	return ""
+
+func loot_hint(l: Dictionary) -> String:
+	var g: String = l.gang
+	match l.kind:
+		"drugs": return "Drogas da gangue · toque em PEGAR"
+		"guns": return "Armas da gangue · toque em PEGAR"
+		"note": return "Um bilhete escondido... · toque em PEGAR"
+	var st: Dictionary = safes[g]
+	if st.open:
+		return ("Cofre aberto: $%d · toque em PEGAR" % st.cash) if st.cash > 0 else "Cofre vazio · enche de novo em %d min" % ceili(st.cd / 60.0)
+	if st.charge >= 0.0:
+		return "Explosivo armado! Afaste-se!"
+	if st.known:
+		return "Cofre trancado · você sabe a senha (%s) · toque em SENHA" % st.code
+	if _explosives() > 0:
+		return "Cofre trancado · ache a senha escondida na área ou EXPLODA (gasta 1 granada)"
+	return "Cofre trancado · ache a senha escondida na área ou traga explosivo (granada/bazuca)"
+
+func _explosives() -> int:
+	var c = main.combat
+	return c.ammo.get("grenade", 0) if c.owned.get("grenade", false) else 0
+
+## pega o que estava guardado: dinheiro, drogas (vendidas na hora), armas/munição ou a senha
 func take_loot(l: Dictionary) -> void:
-	l.cd = 600.0
-	l.node.visible = false
+	var g: String = l.gang
 	var c = main.combat
 	match l.kind:
 		"safe":
-			var v := rng.randi_range(900, 2200)
-			main.money += v
-			main._msg("Cofre arrombado: +$%d" % v)
+			var st: Dictionary = safes[g]
+			if st.open:
+				if st.cash <= 0:
+					return
+				main.money += st.cash
+				main._msg("Cofre da %s: +$%d (o cofre fica; enche de novo em 10 min)" % [T[g].name, st.cash])
+				st.cash = 0
+				st.cd = 600.0
+				main.audio.play("cash", null, 0.0)
+			elif st.known:
+				_open_safe(g, "Senha %s digitada: o cofre abriu!" % st.code)
+				main.audio.play("click", null, 0.0)
+			elif _explosives() > 0 and st.charge < 0.0:
+				c.ammo["grenade"] -= 1
+				st.charge = 4.0
+				main._msg("Explosivo plantado no cofre! Afaste-se (4 s)")
+				main.audio.play("click", null, 0.0)
+			else:
+				main._msg("Cofre trancado: ache a senha escondida na área ou use explosivo")
+				return
+			_hostile(g, maxi(skulls if hunter == g else 0, 2))
+			return
+		"note":
+			safes[g].known = true
+			l.node.visible = false
+			l.cd = 1e9
+			main._msg("Bilhete achado! Senha do cofre da %s: %s" % [T[g].name, safes[g].code])
+			main.audio.play("click", null, 0.0)
+			return
 		"drugs":
+			l.cd = 600.0
+			l.node.visible = false
 			var v2 := rng.randi_range(400, 900)
 			main.money += v2
 			main._msg("Drogas vendidas: +$%d" % v2)
 		"guns":
+			l.cd = 600.0
+			l.node.visible = false
 			for w in ["smg", "shotgun", "pistol"]:
 				c.owned[w] = true
 				c.add_ammo(w, 60 if w != "shotgun" else 16)
-			main._msg("Caixa de armas: submetralhadora, escopeta e munição")
+			c.owned["grenade"] = true
+			c.add_ammo("grenade", 2)
+			main._msg("Caixa de armas: submetralhadora, escopeta, granadas e munição")
 	main.audio.play("cash", null, 0.0)
-	# roubar com a gangue por perto = guerra
-	var g: String = l.gang
-	if _near_count(g, main.player.global_position, 70.0) > 0:
-		_hostile(g, maxi(skulls if hunter == g else 0, 2))
+	# roubar a gangue = guerra (eles defendem o esconderijo em ondas)
+	_hostile(g, maxi(skulls if hunter == g else 0, 2))
+
+func _open_safe(g: String, msg: String) -> void:
+	var st: Dictionary = safes[g]
+	st.open = true
+	st.charge = -1.0
+	st.known = true
+	if st.note != null:
+		st.note.node.visible = false
+		st.note.cd = 1e9
+	main._msg(msg)
+
+## explosão (granada, foguete, carga plantada) perto do cofre: a porta estoura
+func on_explosion(pos: Vector3) -> void:
+	for g in safes:
+		var st: Dictionary = safes[g]
+		if not st.open and is_instance_valid(st.node) and pos.distance_to(st.node.global_position + Vector3(0, 1.0, 0)) < 4.5:
+			_open_safe(g, "A explosão arrombou o cofre da %s!" % T[g].name)
+			_hostile(g, maxi(skulls if hunter == g else 0, 3))
+
+func _safes_tick(dt: float) -> void:
+	for g in safes:
+		var st: Dictionary = safes[g]
+		if not is_instance_valid(st.node):
+			continue
+		if st.charge >= 0.0:
+			st.charge -= dt
+			if int(st.charge * 2.0) != int((st.charge + dt) * 2.0):
+				main.audio.play("click", st.node.global_position, -4.0)
+			if st.charge < 0.0:
+				var fp: Vector3 = st.node.global_position + st.node.global_transform.basis.z * 0.9 + Vector3(0, 1.0, 0)
+				main.explode_at(fp, 3.5, 45.0)
+				_open_safe(g, "BUM! O cofre da %s foi arrombado!" % T[g].name)
+		if st.cash <= 0 and st.cd > 0.0:
+			st.cd -= dt
+			if st.cd <= 0.0 and main.player.global_position.distance_to(st.node.global_position) > 40.0:
+				_refill(g)
+			elif st.cd <= 0.0:
+				st.cd = 5.0
+		st.open_k = move_toward(st.open_k, 1.0 if st.open else 0.0, dt * 1.2)
+		st.door.rotation.y = -st.open_k * 1.9
+		st.cash_node.visible = st.cash > 0 and st.open_k > 0.05
 
 # ---------------------------------------------------------------- comportamento
 func tick(dt: float) -> void:
 	for l in loots:
-		if l.cd > 0.0:
+		if l.cd > 0.0 and l.kind in ["drugs", "guns"]:
 			l.cd -= dt
 			if l.cd <= 0.0 and is_instance_valid(l.node):
 				l.node.visible = true
+	_safes_tick(dt)
+	_restock_t -= dt
+	if _restock_t <= 0.0:
+		_restock_t = 4.0
+		_restock()
 	if main.combat.dead or main.interior != "":
 		return
 	var pp: Vector3 = main.player.global_position
@@ -218,6 +423,7 @@ func tick(dt: float) -> void:
 		_warn_tick(dt, pp)
 	else:
 		_hunt_tick(dt, pp)
+		_wave_tick(dt, pp)
 	_hunters_tick(dt, pp)
 
 func _near_count(g: String, pp: Vector3, r: float) -> int:
@@ -394,7 +600,78 @@ func zones() -> Array:
 
 func blips() -> Array:
 	var out := []
-	for l in loots:
-		if l.cd <= 0.0:
-			out.append({"pos": l.pos, "col": T[l.gang].col, "icon": "loot"})
+	for g in T:
+		out.append({"pos": T[g].c, "col": T[g].col, "icon": "loot"})
 	return out
+
+
+# ---------------------------------------------------------------- defesa do esconderijo em ondas
+## Em guerra e com o jogador dentro do território: quando o bando de defesa quase acaba, chega a
+## próxima onda pelo portão (cada uma maior; a partir da 3ª também de carro). Só para quando
+## você sai da área e a gangue desiste.
+var wave_n := 0
+var _wave_t := 0.0
+func _wave_tick(dt: float, pp: Vector3) -> void:
+	var g := hunter
+	if g == "" or not main.city.gang_hq.has(g):
+		return
+	var c: Vector3 = T[g].c
+	if Vector2(pp.x - c.x, pp.z - c.z).length() > T[g].r + 15.0:
+		_wave_t = minf(_wave_t, 6.0)
+		return
+	var defenders := 0
+	for q in members[g]:
+		if is_instance_valid(q) and not q.down and q.global_position.distance_to(c) < T[g].r + 40.0:
+			defenders += 1
+	if defenders > 1:
+		_wave_t = maxf(_wave_t, 5.0)
+		return
+	_wave_t -= dt
+	if _wave_t > 0.0:
+		return
+	wave_n += 1
+	_wave_t = 9.0
+	if wave_n >= 2 and skulls < 4:
+		skulls = mini(4, skulls + 1)
+	var n := mini(3 + wave_n, 8)
+	var hq: Dictionary = main.city.gang_hq[g]
+	var gate: Vector3 = hq.gate_out
+	var side: Vector3 = hq.fwd.cross(Vector3.UP)
+	for k in n:
+		var sp: Vector3 = gate + side * ((k % 4) - 1.5) * 1.6 + hq.fwd * float(k / 4) * 1.6 + Vector3(0, 0.3, 0)
+		var q = _spawn_member(g, sp, _weapon_for(k), false)
+		q.accuracy = 0.28 + skulls * 0.05
+	if wave_n >= 3 and hunters.size() < 2:
+		_spawn_hunter(g, "car", pp)
+	_arm_all()
+	main._msg("%s: onda %d de reforços chegando para defender o esconderijo!" % [T[g].name, wave_n])
+
+## em paz e com o jogador longe: a gangue repõe os guardas mortos (um a cada 4 s)
+var _restock_t := 6.0
+func _restock() -> void:
+	if skulls > 0:
+		return
+	var pp: Vector3 = main.player.global_position
+	for g in T:
+		if not main.city.gang_hq.has(g) or pp.distance_to(T[g].c) < 110.0:
+			continue
+		var posts := _posts(g)
+		var alive_n := 0
+		for q in members[g]:
+			if is_instance_valid(q) and not q.down:
+				alive_n += 1
+		if alive_n >= posts.size():
+			continue
+		# posto vago: o mais longe de qualquer membro vivo
+		var best: Vector3 = posts[0]
+		var bd := -1.0
+		for p in posts:
+			var dmin := 1e9
+			for q in members[g]:
+				if is_instance_valid(q) and not q.down:
+					dmin = minf(dmin, q.global_position.distance_to(p))
+			if dmin > bd:
+				bd = dmin
+				best = p
+		_spawn_member(g, best + Vector3(0, 0.3, 0), "pistol", true)
+		wave_n = 0

@@ -453,7 +453,9 @@ func _visibility(dt: float, s: int, pp: Vector3) -> void:
 		if unseen > (7.0 + s * 2.0) * (0.5 if out_zone else 1.0):
 			unseen = 0.0
 			main.wanted -= 1
+			main.heat = main.HEAT[main.wanted]
 			if main.wanted == 0:
+				main.cop_kills = 0
 				main._msg("Você despistou a polícia!")
 
 ## 1★: o policial pula em cima (a pé) ou abre a porta e puxa você do carro parado → PRESO.
