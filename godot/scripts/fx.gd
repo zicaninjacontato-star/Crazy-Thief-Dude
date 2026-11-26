@@ -356,3 +356,77 @@ static func splash(world: Node, pos: Vector3, size := 1.0) -> void:
 	p.global_position = pos
 	p.emitting = true
 	p.get_tree().create_timer(1.6).timeout.connect(p.queue_free)
+
+
+## apaga fogo e fumaça de um veículo (caiu na água)
+static func extinguish(node: Node) -> void:
+	for p in node.find_children("*", "CPUParticles3D", true, false):
+		p.emitting = false
+	for p in node.find_children("*", "GPUParticles3D", true, false):
+		p.emitting = false
+
+## marca de bala: furo escuro com borda clara, preso ao que foi atingido (carro leva junto)
+static var _hole_mesh: QuadMesh
+static var _hole_mat: StandardMaterial3D
+static var _wound_mat: StandardMaterial3D
+static func bullet_hole(world: Node, pos: Vector3, normal: Vector3, parent: Node3D = null, size := 0.11) -> void:
+	if _hole_mesh == null:
+		_hole_mesh = QuadMesh.new()
+		_hole_mesh.size = Vector2(1, 1)
+		var img := Image.create(32, 32, false, Image.FORMAT_RGBA8)
+		for y in 32:
+			for x in 32:
+				var d := Vector2(x - 15.5, y - 15.5).length() / 16.0
+				var a := 0.0
+				var c := Color(0.03, 0.03, 0.03)
+				if d < 0.35:
+					a = 1.0
+				elif d < 0.75:
+					a = 0.75 * (1.0 - (d - 0.35) / 0.4)
+					c = Color(0.25, 0.23, 0.2)
+				img.set_pixel(x, y, Color(c.r, c.g, c.b, a))
+		_hole_mat = StandardMaterial3D.new()
+		_hole_mat.albedo_texture = ImageTexture.create_from_image(img)
+		_hole_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_hole_mat.roughness = 1.0
+	var n := MeshInstance3D.new()
+	n.mesh = _hole_mesh
+	n.material_override = _hole_mat
+	n.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	n.scale = Vector3.ONE * size
+	n.visibility_range_end = 45.0
+	var nn := normal.normalized() if normal.length() > 0.1 else Vector3.UP
+	var up := Vector3.UP if absf(nn.y) < 0.95 else Vector3.RIGHT
+	var xf := Transform3D(Basis.looking_at(-nn, up), pos + nn * 0.012)
+	if parent and is_instance_valid(parent):
+		parent.add_child(n)
+		n.global_transform = xf
+		n.scale = Vector3.ONE * size
+	else:
+		world.add_child(n)
+		n.global_transform = xf
+		n.scale = Vector3.ONE * size
+	_capped("hole", n, 70)
+
+## ferimento visível (mancha de sangue) colado na parte do corpo atingida
+static func wound(part: Node3D, world_pos: Vector3, normal: Vector3, size := 0.09) -> void:
+	if not blood_on or part == null or not is_instance_valid(part):
+		return
+	if _wound_mat == null:
+		_wound_mat = StandardMaterial3D.new()
+		_wound_mat.albedo_color = Color(0.38, 0.02, 0.02)
+		_wound_mat.roughness = 0.35
+	var n := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 0.5
+	sm.height = 0.35
+	sm.radial_segments = 8
+	sm.rings = 4
+	n.mesh = sm
+	n.material_override = _wound_mat
+	n.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	part.add_child(n)
+	var nn := normal.normalized() if normal.length() > 0.1 else Vector3.UP
+	var up := Vector3.UP if absf(nn.y) < 0.95 else Vector3.RIGHT
+	n.global_transform = Transform3D(Basis.looking_at(-nn, up).scaled(Vector3(size, size, size * 0.5)), world_pos)
+	n.add_to_group("wound")

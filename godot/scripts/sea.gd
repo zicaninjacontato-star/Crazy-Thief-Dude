@@ -99,6 +99,7 @@ func _fish_tick(dt: float, pp: Vector3, w2) -> void:
 		mm.set_instance_transform(i, Transform3D(b, p))
 
 # ---------------------------------------------------------------- baleia
+var _wspl := 0.0
 func _whale_tick(dt: float, pp: Vector3, w2) -> void:
 	var veh = main.player.vehicle
 	var boat = veh if veh and veh.kind == "boat" else null
@@ -124,6 +125,11 @@ func _whale_tick(dt: float, pp: Vector3, w2) -> void:
 	# sobe para o ataque, depois mergulha
 	var y_goal := -0.8 if to.length() < 25.0 else -4.0
 	whale.global_position.y = lerpf(whale.global_position.y, y_goal, dt * 1.2)
+	# perto da superfície: respingos e esguicho
+	_wspl -= dt
+	if whale.global_position.y > -2.5 and _wspl <= 0.0:
+		_wspl = 0.5
+		FX.splash(main, Vector3(whale.global_position.x, w2.WATER_Y, whale.global_position.z), 1.2)
 	if boat and to.length() < 7.0:
 		boat.take_damage(45.0)
 		boat.model_root.rotation.z += 0.6

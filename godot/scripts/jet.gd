@@ -58,6 +58,20 @@ func start_from(p: Vector3) -> void:
 	_dir = Vector3(pp.x - p.x, 0, pp.z - p.z).normalized()
 	main.audio.play("jet", global_position, 10.0)
 
+var _loop: AudioStreamPlayer3D
+var _pass_cd := 0.0
+## turbina contínua (antes só havia um som curto lá longe, quase inaudível)
+func _sound_tick(dt: float) -> void:
+	if _loop == null or not is_instance_valid(_loop):
+		_loop = main.audio.attach_loop(self, "jet_loop", 14.0, 700.0)
+	elif dead:
+		_loop.volume_db = lerpf(_loop.volume_db, -40.0, dt * 0.6)
+	# rasante: estrondo quando passa perto do jogador
+	_pass_cd -= dt
+	if _pass_cd <= 0.0 and not dead and global_position.distance_to(main.player.global_position) < 90.0:
+		_pass_cd = 6.0
+		main.audio.play("jet", global_position, 14.0)
+
 func take_damage(d: float) -> void:
 	if dead:
 		return
@@ -68,6 +82,7 @@ func take_damage(d: float) -> void:
 		FX.smoke_emitter(self, Vector3.ZERO)
 
 func _physics_process(dt: float) -> void:
+	_sound_tick(dt)
 	_missile_tick(dt)
 	if main == null:
 		return

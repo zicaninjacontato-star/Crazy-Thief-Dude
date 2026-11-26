@@ -54,6 +54,7 @@ func _ready() -> void:
 	sounds["door"] = _noise_burst(0.18, 0.003, 260.0, 1.3)
 	sounds["explosion"] = _boom()
 	sounds["splash"] = _noise_burst(0.7, 0.02, 2500.0, 0.8)
+	sounds["bones"] = _bones()
 	sounds["rocket"] = _noise_burst(0.9, 0.05, 1200.0, 0.6)
 	sounds["swoosh"] = _noise_burst(0.15, 0.04, 2200.0, 0.4)
 	sounds["kick"] = [_punch(4), _punch(5)]
@@ -82,6 +83,7 @@ func _ready() -> void:
 	_pending.append(["squid", _monster])
 	_pending.append(["tank", _tank_shot])
 	_pending.append(["jet", _jet])
+	_pending.append(["jet_loop", _jet_loop])
 
 func _gen_player() -> AudioStreamPlayer:
 	var p := AudioStreamPlayer.new()
@@ -189,6 +191,25 @@ func _wav(samples: PackedFloat32Array) -> AudioStreamWAV:
 	w.stereo = false
 	w.data = data
 	return w
+
+## ossos quebrando: estalos secos em sequência + baque surdo
+func _bones() -> AudioStreamWAV:
+	var n := int(0.55 * RATE)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	var cracks := [0.0, 0.05, 0.09, 0.16, 0.2, 0.31]
+	for c in cracks:
+		var i0 := int(c * RATE)
+		var amp := randf_range(0.6, 1.0)
+		for i in int(0.018 * RATE):
+			if i0 + i < n:
+				var e := exp(-i / (0.0035 * RATE))
+				out[i0 + i] += (randf() * 2.0 - 1.0) * amp * e
+	var y := 0.0
+	for i in int(0.25 * RATE):
+		y += 0.04 * ((randf() * 2.0 - 1.0) - y)
+		out[i] += y * 3.0 * exp(-i / (0.07 * RATE))
+	return _wav(out)
 
 func _noise_burst(dur: float, attack: float, lp_hz: float, gain: float) -> AudioStreamWAV:
 	var n := int(dur * RATE)
@@ -502,6 +523,46 @@ func _jet() -> AudioStreamWAV:
 		var env := 1.0 / (1.0 + u * u * 6.0)
 		out[i] = (y * 0.7 + y2 * 4.0) * env * 0.8
 	return _wav(out)
+
+## turbina contínua (loop sem emenda) para os caças do exército
+func _jet_loop() -> AudioStreamWAV:
+	var dur := 2.0
+	var n := int(dur * RATE)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	var y := 0.0
+	var y2 := 0.0
+	for i in n:
+		var t := i / RATE
+		var w := randf() * 2.0 - 1.0
+		y += 0.3 * (w - y)
+		y2 += 0.025 * (w - y2)
+		var whine := sin(TAU * 1850.0 * t) * 0.05 + sin(TAU * 2770.0 * t) * 0.03
+		out[i] = y * 0.55 + y2 * 3.6 + whine
+	# emenda suave: o fim cruza com o começo
+	var fade := int(0.1 * RATE)
+	for i in fade:
+		var k := float(i) / fade
+		out[n - fade + i] = out[n - fade + i] * (1.0 - k) + out[i] * k
+	var w := _wav(out)
+	w.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	w.loop_begin = fade
+	w.loop_end = n
+	return w
+
+## som contínuo preso a um nó (turbina, motor): devolve o player para ajustar volume/tom
+func attach_loop(node: Node3D, name: String, vol_db := 0.0, max_d := 600.0) -> AudioStreamPlayer3D:
+	if not sounds.has(name):
+		return null
+	var p3 := AudioStreamPlayer3D.new()
+	p3.stream = sounds[name]
+	p3.volume_db = vol_db
+	p3.unit_size = 45.0
+	p3.max_distance = max_d
+	p3.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
+	node.add_child(p3)
+	p3.play()
+	return p3
 
 ## rugido grave do tubarão gigante
 func _monster() -> AudioStreamWAV:

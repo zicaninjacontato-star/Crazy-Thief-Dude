@@ -166,7 +166,7 @@ func new_game() -> void:
 	combat.weapon = "fist"
 	tod = 10.0
 	player.outfit = player.OUTFIT0.duplicate()
-	player.rebuild_body()
+	player.rebuild_body(false)
 	combat._equip()
 	for c in _owned_nodes():
 		cars.erase(c)
@@ -202,7 +202,7 @@ func load_game() -> void:
 		if of.has(k): of[k] = od2[k]
 	of.hat = int(of.hat)
 	player.outfit = of
-	player.rebuild_body()
+	player.rebuild_body(false)
 	combat._equip()
 	for c in _owned_nodes():
 		cars.erase(c)
@@ -276,6 +276,11 @@ func _spawn_car(pos: Vector3, yaw: float, paint: Color, police := false, kind :=
 	c.crashed.connect(_on_crash)
 	c.destroyed.connect(_on_vehicle_destroyed)
 	c.engine_died.connect(func(cc): if cc == player.vehicle: _msg("Motor quebrado! O carro não anda mais"))
+	c.wheelie_fall.connect(func(cc):
+		if cc == player.vehicle:
+			var v: Vector3 = cc.linear_velocity
+			eject_player(Vector3.ZERO)
+			combat.knockdown(v * 0.6 - cc.global_transform.basis.z * 3.0 + Vector3(0, 3.0, 0), 2.6))
 	c.unlocked = rng.randf() < 0.3 and not police
 	cars.append(c)
 	return c
@@ -299,33 +304,6 @@ func _spawn_extras() -> void:
 	traffic_sys = Traffic.new()
 	add_child(traffic_sys)
 	traffic_sys.setup(self)
-	# pescadores nos deques do costão
-	for fs in world2.fish_spots:
-		var fh := Humanoid.new()
-		fh.build(Color.from_hsv(rng.randf(), 0.4, 0.6), Color(0.25, 0.3, 0.2), Color(0.78, 0.56, 0.38), Color(0.15, 0.1, 0.06), {"hat": 1, "hat_c": Color(0.85, 0.8, 0.6)})
-		add_child(fh)
-		fh.global_position = fs[0] + Vector3(0, -0.2, 0)
-		fh.rotation.y = fs[1]
-		fh.sitting = rng.randf() < 0.5
-		if fh.sitting:
-			fh.global_position.y -= 0.45
-		fh.animate(0, 0)
-		var rod := MeshInstance3D.new()
-		var rb := BoxMesh.new()
-		rb.size = Vector3(0.03, 0.03, 3.2)
-		rod.mesh = rb
-		rod.material_override = M.plain(Color(0.15, 0.12, 0.1), 0.5)
-		rod.position = Vector3(0, 1.25, 1.3)
-		rod.rotation.x = -0.55
-		fh.add_child(rod)
-		var line := MeshInstance3D.new()
-		var lb := BoxMesh.new()
-		lb.size = Vector3(0.008, 3.6, 0.008)
-		line.mesh = lb
-		line.material_override = M.plain(Color(0.9, 0.9, 0.9), 0.5)
-		line.position = Vector3(0, 0.7, 2.75)
-		fh.add_child(line)
-		fh.set_far(80.0)
 	sea = Sea.new()
 	add_child(sea)
 	sea.setup(self)
@@ -341,6 +319,8 @@ func _on_crash(c, dv: float) -> void:
 		FX.debris(self, pv + Vector3(0, 0.9, 0), c.paint_c, c.linear_velocity * 0.4 + Vector3(randf_range(-3, 3), 4, randf_range(-3, 3)))
 	if c.kind == "moto" and dv > 6.0 and traffic_sys.is_agent(c):
 		traffic_sys.eject_rider(c, false)
+	elif dv > 6.0 and player.vehicle and c != player.vehicle and traffic_sys.is_agent(c) and not c.has_meta("crash_react") and c.global_position.distance_to(player.vehicle.global_position) < 10.0:
+		_crash_reaction(c, dv)
 	if c == player.vehicle:
 		hp -= maxf(0.0, dv - 8.0) * (2.4 if c.kind == "moto" else 0.9)
 		hud.flash = 0.2
@@ -351,9 +331,34 @@ func _on_crash(c, dv: float) -> void:
 			combat.knockdown(vel + Vector3(0, 3.0, 0), 3.0)
 			c.fall_over()
 
+## você bateu no carro de um NPC: ele pode morrer, sair e brigar/atirar, sair e correr, fugir com o
+## carro, te perseguir — ou o carro quebra e fica parado
+func _crash_reaction(c, dv: float) -> void:
+	c.set_meta("crash_react", true)
+	var r := rng.randf()
+	if dv > 17.0 and r < 0.6:
+		traffic_sys.kill_driver(c)              # morreu na batida
+		return
+	if r < 0.16:
+		c.engine_hp = 0.0                        # carro quebrou e ficou parado
+		c.engine_died.emit(c)
+		var cc = c
+		get_tree().create_timer(1.6).timeout.connect(func(): combat.npc_out(cc, "flee" if rng.randf() < 0.5 else "brawl"))
+	elif r < 0.36:
+		get_tree().create_timer(0.8).timeout.connect(func(): combat.npc_out(c, "shoot" if rng.randf() < 0.35 else "brawl"))   # sai hostil
+	elif r < 0.52:
+		get_tree().create_timer(0.6).timeout.connect(func(): combat.npc_out(c, "flee"))      # sai e corre
+	elif r < 0.76:
+		traffic_sys.crash_mode(c, "flee", 9.0)     # foge com o carro
+	else:
+		traffic_sys.crash_mode(c, "chase", 14.0)   # persegue você
+		audio.play("horn", c.global_position, 2.0)
+
 ## explosão: efeito + dano em área + empurrão
 func explode_at(pos: Vector3, radius: float, dmg: float) -> void:
 	FX.explosion(self, pos, clampf(radius / 6.0, 0.7, 1.6))
+	if world2.is_water(pos.x, pos.z) and pos.y < world2.WATER_Y + 3.0:
+		FX.splash(self, Vector3(pos.x, world2.WATER_Y, pos.z), 2.4)     # granada/foguete na água
 	audio.play("explosion", pos, 6.0)
 	for q in peds.duplicate():
 		if is_instance_valid(q) and not q.down:
@@ -389,6 +394,29 @@ func explode_at(pos: Vector3, radius: float, dmg: float) -> void:
 	hud.flash = maxf(hud.flash, clampf(0.4 - pd / 100.0, 0.0, 0.4))
 	if wanted == 0 and pos.distance_to(player.global_position) < 60.0:
 		_add_wanted(1)
+
+## marca de bala: furo na parede/lataria, vidro de carro quebra; na água vira respingo
+func bullet_mark(pos: Vector3, normal: Vector3, col = null) -> void:
+	if col != null and is_instance_valid(col) and col.has_method("break_glass"):
+		var lp: Vector3 = col.global_transform.affine_inverse() * pos
+		if lp.y > col.body_size.y * 0.6 and col.break_glass():
+			return
+		FX.bullet_hole(self, pos, normal, col)
+		FX.sparks(self, pos)
+		return
+	if col is RigidBody3D and col.collision_layer == 4:
+		return      # parte de ragdoll: o ferimento já aparece no corpo
+	FX.bullet_hole(self, pos, normal, col if col is AnimatableBody3D else null)
+	FX.sparks(self, pos)
+
+## ponto onde o segmento a→b atravessa a superfície do mar (ou INF)
+func water_cross(a: Vector3, b: Vector3) -> Vector3:
+	var wy: float = world2.WATER_Y
+	if (a.y - wy) * (b.y - wy) >= 0.0:
+		return Vector3.INF
+	var t := (a.y - wy) / (a.y - b.y)
+	var p := a.lerp(b, t)
+	return p if world2.is_water(p.x, p.z) else Vector3.INF
 
 func splash_at(pos: Vector3) -> void:
 	FX.splash(self, Vector3(pos.x, world2.WATER_Y, pos.z), 1.0)
@@ -491,6 +519,7 @@ func _water_tick(dt: float) -> void:
 			# boia alguns segundos e vai afundando devagar (quem fica dentro se afoga)
 			c.set_meta("sinking", true)
 			c.set_meta("sink_t", 0.0)
+			FX.extinguish(c)
 			FX.splash(self, c.global_position + Vector3(0, 0.8, 0), 1.6)
 			audio.play("splash", c.global_position, 4.0)
 			c.dead = true
@@ -531,8 +560,14 @@ func _water_tick(dt: float) -> void:
 		world_env.fog_light_color = Color(0.05, 0.25, 0.32) if uw else world_env.fog_light_color
 		if not uw:
 			daynight.apply(0.0, true)
+	if uw:
+		# quanto mais fundo, mais escuro (superfície azul-esverdeada clara → fundo quase preto)
+		var dep := clampf((world2.WATER_Y - cam.global_position.y) / 13.0, 0.0, 1.0)
+		world_env.fog_light_color = Color(0.1, 0.36, 0.42).lerp(Color(0.01, 0.05, 0.08), dep)
+		world_env.fog_density = lerpf(0.045, 0.12, dep)
 	_shark_tick(dt)
 
+var _shk_spl := 0.0
 ## tubarão no fim do mar: ataca o barco até destruir (ou pula nele e come o jogador); quem está nadando é mordido
 func _shark_tick(dt: float) -> void:
 	var pp: Vector3 = player.global_position
@@ -562,6 +597,11 @@ func _shark_tick(dt: float) -> void:
 					player.vehicle.take_damage(60.0)
 				combat.kill_now()
 		return
+	# nadadeira cortando a água
+	_shk_spl -= dt
+	if _shk_spl <= 0.0 and shark.global_position.distance_to(cam.global_position) < 80.0:
+		_shk_spl = 0.4
+		FX.splash(self, Vector3(shark.global_position.x, world2.WATER_Y, shark.global_position.z), 0.35)
 	var target: Vector3 = boat.global_position if boat else pp
 	var to: Vector3 = target - shark.global_position
 	to.y = 0
@@ -730,6 +770,7 @@ func _toggle_car() -> void:
 
 ## chamado pela animação quando o jogador chega à porta: ele passa a "estar" no veículo
 func finish_enter(best) -> Node3D:
+	player.ride = null
 	player.vehicle = best
 	player.visible = false
 	player.collision_layer = 0
@@ -812,7 +853,9 @@ func eject_player(_impulse: Vector3) -> void:
 func _unhandled_input(e: InputEvent) -> void:
 	if e.is_action_pressed("enter"): _toggle_car()
 	if e.is_action_pressed("jump"): player.jump()
-	if e.is_action_pressed("fire"): combat.fire_held = true
+	if e.is_action_pressed("fire"):
+		combat.fire_held = true
+		combat.pending_shot = 0.4
 	if e.is_action_released("fire"): combat.fire_held = false
 	if e.is_action_pressed("weapon"): combat.cycle()
 	if e.is_action_pressed("shop"): _shop_action()
@@ -830,7 +873,7 @@ func _physics_process(dt: float) -> void:
 		player.move_input = Vector2(mv.x, mv.y)
 		player.cam_yaw = cam_yaw + PI
 		player.sprint = hud.sprint or Input.is_action_pressed("sprint")
-	elif not shot_view in ["drive", "motoride", "planefly", "helifly", "jetfly", "attackheli", "boatride", "busride", "motocrash", "props"]:
+	elif not shot_view in ["drive", "motoride", "planefly", "helifly", "jetfly", "attackheli", "wheelie", "crashreact", "boatride", "busride", "motocrash", "props"]:
 		var c = player.vehicle
 		var g := 1.0 if hud.gas else 0.0
 		var b := 1.0 if hud.brk else 0.0
@@ -842,8 +885,13 @@ func _physics_process(dt: float) -> void:
 		c.handbrake = Input.is_action_pressed("jump")
 		if "stick" in c:
 			c.stick = mv
+		if "wheelie_key" in c:
+			c.wheelie_key = Input.is_action_pressed("sprint")
 	if player.vehicle:
 		player.global_position = player.vehicle.global_position
+	if hud.fire_tap:
+		hud.fire_tap = false
+		combat.pending_shot = 0.4
 	if hud.fire:
 		combat.fire_held = true
 	elif not Input.is_action_pressed("fire"):
@@ -1010,12 +1058,14 @@ func _car_vs_player() -> void:
 	if player.vehicle != null or combat.dead or combat.down_t > 0.0 or vehanim.busy():
 		return
 	for c in cars:
-		if not is_instance_valid(c) or c.global_position.distance_squared_to(player.global_position) > 64.0 or c.kind in ["plane", "heli", "boat"]:
+		if not is_instance_valid(c) or c.global_position.distance_squared_to(player.global_position) > 64.0 or c.kind in ["plane", "heli", "boat"] or c == player.ride:
 			continue
 		var lp: Vector3 = c.global_transform.affine_inverse() * player.global_position
 		var hs: Vector3 = c.body_size * 0.5
 		if absf(lp.x) > hs.x + 0.45 or absf(lp.z) > hs.z + 0.45 or lp.y > 2.0:
 			continue
+		if lp.y > c.body_size.y * 0.4 and absf(lp.x) < hs.x and absf(lp.z) < hs.z:
+			continue      # em cima do carro (teto/caçamba): é carona, não atropelamento
 		var spd: float = c.linear_velocity.length()
 		if spd > 3.5:
 			hp -= spd * 2.2
@@ -1299,10 +1349,6 @@ func _process(dt: float) -> void:
 		if msg_t <= 0: hud.hint.text = ""
 	elif shop_action in ["enter", "exit", "buy", "eat", "rob", "snack", "sleep", "tune"]:
 		hud.hint.text = {"guns": "AMMU★NATION", "cars": "Concessionária", "clothes": "Loja de roupas", "food": "Lanchonete · lanche $12 (+50 de vida)", "shop24": "Loja 24h" + (" · ASSALTE o caixa" if shop_action == "rob" else " · salgadinho $5 (+15 de vida)"), "shop24b": "Loja 24h" + (" · ASSALTE o caixa" if shop_action == "rob" else " · salgadinho $5 (+15 de vida)"), "safe": "Casa segura · dormir salva o jogo", "tuning": "Oficina tuning"}.get(shop_near, "") + " · toque em " + hud.shop_label
-	elif player.swimming and player.underwater:
-		hud.hint.text = "Debaixo d'água · segure ⬆ (SUBIR) para voltar"
-	elif player.swimming:
-		hud.hint.text = "Nadando"
 	else:
 		hud.hint.text = ""
 	if shot != "":
@@ -2037,6 +2083,92 @@ func _test_views() -> void:
 				vc.parked = true
 			cam_yaw = PI
 			cam_pitch = -0.2
+	if v == "helicrew":
+		if frames == 4:
+			player.global_position = Vector3(city._center(3), 0.3, -0.5 * city.CELL)
+			wanted = 4
+			police.on_crime()
+		var hh = police.heli
+		if frames % 10 == 0:
+			print("HEL ", frames, " heli=", hh != null and is_instance_valid(hh), " gunners=", hh.gunners.size() if hh and is_instance_valid(hh) else -1, " crew_dead=", hh.crew_dead if hh and is_instance_valid(hh) else false, " mode=", hh.ai_mode if hh and is_instance_valid(hh) else "", " fall=", hh._fall if hh and is_instance_valid(hh) else false, " hp=", snappedf(hp, 1), " cd=", snappedf(police.heli_cd, 1))
+		if frames == 40 and hh and is_instance_valid(hh):
+			for g in hh.gunners.duplicate():
+				hh.hit_at(g.h.global_position + Vector3(0, 0.95, 0), 200.0)
+	if v == "helipilot":
+		if frames == 4:
+			player.global_position = Vector3(city._center(3), 0.3, -0.5 * city.CELL)
+			wanted = 4
+			police.on_crime()
+		var hh2 = police.heli
+		if frames == 40 and hh2 and is_instance_valid(hh2):
+			for k in 6:
+				hh2.hit_at(hh2.global_transform * Vector3(0, 1.7, 1.6), 40.0)
+		if frames % 10 == 0 and hh2 and is_instance_valid(hh2):
+			print("HPL ", frames, " pilot=", hh2.pilot_hp, " fall=", hh2._fall, " dead=", hh2.dead, " y=", snappedf(hh2.global_position.y, 0.1))
+	if v == "wheelie":
+		if frames == 4:
+			var mc = _spawn_car(Vector3(city._center(3), 0.7, -0.5 * city.CELL + 2.6), PI * 0.5, Color.RED, false, "sportbike")
+			player.global_position = mc.global_position
+			vehanim.cancel()
+			finish_enter(mc)
+		if player.vehicle and frames > 6:
+			player.vehicle.throttle = 1.0
+			player.vehicle.stick = Vector2(0, (-0.7 if frames < 50 else -1.0) if frames > 14 else 0.0)
+		if frames % 4 == 0 and frames < 80:
+			print("WHL ", frames, " w=", snappedf(player.vehicle.wheelie, 0.01) if player.vehicle else -1.0, " veh=", player.vehicle != null, " rag=", player.body.ragdolled, " spd=", snappedf(player.vehicle.forward_speed(), 0.1) if player.vehicle else 0.0)
+	if v == "ride":
+		if frames == 4:
+			var rc = _spawn_car(Vector3(city._center(3), 0.7, -0.5 * city.CELL - 2.6), -PI * 0.5, Color.WHITE, false, "pickup")
+			rc.unlocked = false
+			player.global_position = rc.global_transform * Vector3(0, 2.0, -1.4)
+			set_meta("rc", rc)
+		var rcc = get_meta("rc", null)
+		if frames > 20 and rcc:
+			rcc.throttle = 0.5
+		if frames % 6 == 0 and frames < 90 and rcc:
+			print("RIDE ", frames, " ride=", player.ride != null, " rel=", (rcc.global_transform.affine_inverse() * player.global_position).snapped(Vector3.ONE * 0.1), " carv=", snappedf(rcc.linear_velocity.length(), 0.1), " down=", snappedf(combat.down_t, 0.1))
+	if v == "crashreact":
+		if frames == 4:
+			var pc = _spawn_car(Vector3(city._center(3) - 30.0, 0.7, -0.5 * city.CELL + 2.6), PI * 0.5, Color.BLUE, false, "sedan")
+			player.global_position = pc.global_position
+			vehanim.cancel()
+			finish_enter(pc)
+		if frames == 8:
+			var tot := {}
+			for k in 40:
+				var r := rng.randf()
+				var key: String = "die" if r < 0.0 else ("break" if r < 0.16 else ("hostile" if r < 0.36 else ("run" if r < 0.52 else ("flee_car" if r < 0.76 else "chase"))))
+				tot[key] = tot.get(key, 0) + 1
+			# batida real: o carro do trânsito mais perto leva a batida
+			var best = null
+			for a in traffic_sys.agents:
+				if is_instance_valid(a.car) and (best == null or a.car.global_position.distance_to(player.global_position) < best.global_position.distance_to(player.global_position)):
+					best = a.car
+			if best:
+				player.vehicle.global_position = best.global_position + Vector3(0, 0, 6)
+				for k in 6:
+					var cc = traffic_sys.agents[k].car
+					cc.remove_meta("crash_react") if cc.has_meta("crash_react") else null
+					_crash_reaction(cc, 12.0)
+				print("CRR started tally=", tot)
+		if frames == 40:
+			var modes := []
+			for a in traffic_sys.agents.slice(0, 6):
+				modes.append(a.get("mode", "-"))
+			print("CRR modes=", modes, " thugs=", missions.thugs.size(), " peds=", peds.size())
+	if v == "fallrag":
+		if frames == 4:
+			player.global_position = Vector3(city._center(3), 30.0, -0.5 * city.CELL)
+			cam_pitch = -0.5
+		if frames % 6 == 0 and frames < 90:
+			print("FALL ", frames, " y=", snappedf(player.global_position.y, 0.1), " rag=", player.body.ragdolled, " down=", snappedf(combat.down_t, 0.1), " hp=", snappedf(hp, 0.1), " pose=", player.body.pose, " wounds=", player.body.wounds)
+	if v == "deathui":
+		if frames == 6:
+			hp = 0.0
+		if frames % 8 == 0 and frames < 120:
+			print("DTH ", frames, " ms=", Time.get_ticks_msec() - combat._dead_ms, " dead=", combat.dead, " ts=", snappedf(Engine.time_scale, 0.01), " btn=", ui._resp != null, " load=", ui._load != null)
+		if frames == 40 and ui._resp:
+			ui._resp.pressed.emit()
 	if v == "safedoor":
 		var hg: Vector3 = city.safehouse.door_hinge
 		var outd := -signf(city.safehouse.spawn.z - hg.z)
@@ -2544,8 +2676,12 @@ var _pop_peds := 36
 var _upkeep_t := 0.0
 
 ## carros estacionados, trânsito, ônibus, barcos, aviões, helicóptero, viaturas da delegacia e pedestres
-func _spawn_population() -> void:
-	rng.seed = 7
+func _spawn_population(first := true) -> void:
+	# 1ª vez: mapa fixo; depois de morrer/ser preso: tudo sorteado de novo (carros, cores, posições)
+	if first:
+		rng.seed = 7
+	else:
+		rng.randomize()
 	# carro do jogador na garagem da casa segura; motos na calçada em frente
 	var sh: Dictionary = city.safehouse
 	my_car = _spawn_car(sh.garage[0], sh.garage[1], Color(0.06, 0.2, 0.55), false, "sport")
@@ -2566,7 +2702,7 @@ func _spawn_population() -> void:
 		var mid: float = city._center(rng.randi_range(0, city.N - 1)) + rng.randf_range(-12.0, 12.0)
 		var side: float = 1.0 if rng.randf() < 0.5 else -1.0
 		var pos := Vector3(road + 5.9 * side, 0.6, mid) if k % 2 == 0 else Vector3(mid, 0.6, road + 5.9 * side)
-		if pos.distance_to(spawn_point()) < 14.0:
+		if pos.distance_to(spawn_point()) < 14.0 or pos.distance_to(player.global_position) < 18.0:
 			continue
 		var yaw: float = (0.0 if side > 0 else PI) if k % 2 == 0 else (PI * 0.5 if side > 0 else -PI * 0.5)
 		var pc = _spawn_car(pos, yaw, palette[k % palette.size()])
@@ -2676,6 +2812,7 @@ func _spawn_vehicles2() -> void:
 		cp.patrol = loopw
 		police.patrol_cops.append(cp)
 	_spawn_clerks()
+	_spawn_fishers()
 	_pop_agents = traffic_sys.agents.size()
 	for i in owned_cars.size():
 		var oc: Dictionary = owned_cars[i]
@@ -2718,7 +2855,7 @@ func reset_world() -> void:
 	act_target = null
 	wanted = 0
 	breath = 100.0
-	_spawn_population()
+	_spawn_population(false)
 
 ## manutenção (a cada 2 s): tira referências mortas, apaga o fogo e depois a carcaça dos veículos
 ## destruídos (longe e fora da tela) e repõe trânsito e pedestres que sumiram, sempre fora da vista
@@ -2848,6 +2985,40 @@ func _spawn_clerks() -> void:
 		q.died.connect(_on_ped_died)
 		peds.append(q)
 		clerks[sh.type] = q
+
+## pescadores nos deques do costão: pedestres de verdade (morrem, fogem com tiro)
+func _spawn_fishers() -> void:
+	for fs in world2.fish_spots:
+		var q := Ped.new()
+		add_child(q)
+		var c: Vector3 = fs[0] + Vector3(0, 0.1, 0)
+		q.setup([c, c, c, c], 0, rng)
+		q._cols[0] = Color.from_hsv(rng.randf(), 0.4, 0.6)
+		q._cols[1] = Color(0.25, 0.3, 0.2)
+		q.body.queue_free()
+		q._make_body()
+		q.global_position = c
+		q.mode = "fish"
+		q.body.rotation.y = fs[1]
+		q.body.set_far(80.0)
+		var rod := MeshInstance3D.new()
+		var rb := BoxMesh.new()
+		rb.size = Vector3(0.03, 0.03, 3.2)
+		rod.mesh = rb
+		rod.material_override = M.plain(Color(0.15, 0.12, 0.1), 0.5)
+		rod.position = Vector3(0, 1.25, 1.3)
+		rod.rotation.x = -0.55
+		rod.name = "vara"
+		q.body.add_child(rod)
+		var line := MeshInstance3D.new()
+		var lb := BoxMesh.new()
+		lb.size = Vector3(0.008, 3.6, 0.008)
+		line.mesh = lb
+		line.material_override = M.plain(Color(0.9, 0.9, 0.9), 0.5)
+		line.position = Vector3(0, -1.6, 1.5)
+		rod.add_child(line)
+		q.died.connect(_on_ped_died)
+		peds.append(q)
 
 ## assalto ao caixa: reação sorteada do atendente
 var _rob_cds := {}

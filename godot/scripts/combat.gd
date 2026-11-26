@@ -17,6 +17,7 @@ var ammo := {"pistol": 60, "smg": 240, "shotgun": 30}
 var cool := 0.0
 var aim_t := 0.0
 var fire_held := false
+var pending_shot := 0.0      # toque no ATIRAR guardado até a arma poder disparar
 var aim := false             # mira manual ligada (botão MIRA)
 var cash: Array = []
 var dead := false
@@ -121,9 +122,14 @@ func _process(dt: float) -> void:
 	_projectiles(dt)
 	_threat_tick(dt)
 	if dead:
-		dead_t += dt
-		if dead_t > 5.0:
-			_respawn(main.city.hospital_pos, "Você acordou no hospital (-$100)")
+		# morte em câmera lenta; depois de 1,4 s (tempo real) aparece RENASCER (sozinho após 12 s)
+		var real := (Time.get_ticks_msec() - _dead_ms) / 1000.0
+		Engine.time_scale = lerpf(0.28, 0.6, clampf(real / 4.0, 0.0, 1.0))
+		if real > 1.4 and not _respawn_btn:
+			_respawn_btn = true
+			main.ui.show_respawn("RENASCER NO HOSPITAL", func(): request_respawn())
+		if real > 12.0:
+			request_respawn()
 		return
 	if main.hp <= 0.0:
 		_die()
@@ -141,6 +147,11 @@ func _process(dt: float) -> void:
 				main.hp -= (-fall_peak - 13.0) * 8.0
 				main.audio.play("hit", p.body.parts[0].global_position, 4.0)
 				FX.blood_burst(main, p.body.parts[0].global_position, Vector3.UP, 12)
+				if fall_peak < -16.5:
+					# impacto forte: ossos quebrando + ferimentos
+					main.audio.play("bones", p.body.parts[0].global_position, 6.0)
+					for k in 3:
+						p.body.add_wound("any", Vector3.DOWN, true)
 				fall_peak = 0.0
 		if down_t <= 0.0:
 			_get_up()
@@ -148,6 +159,10 @@ func _process(dt: float) -> void:
 	if p.vehicle != null:
 		_vy = 0.0
 		_vehicle_weapons(dt)
+		return
+	# queda livre de um lugar alto: vira ragdoll ainda no ar (antes caía duro e só amolecia no chão)
+	if not p.is_on_floor() and not p.swimming and p.pk_t < 0.0 and p.velocity.y < -13.0 and not main.vehanim.busy():
+		knockdown(p.velocity, 3.2)
 		return
 	# queda: dano ao bater no chão rápido demais
 	if p.is_on_floor():
@@ -160,8 +175,10 @@ func _process(dt: float) -> void:
 		_vy = 0.0
 	else:
 		_vy = p.velocity.y
-	if fire_held and cool <= 0.0 and not p.swimming and carrying == null:
+	pending_shot -= dt
+	if (fire_held or pending_shot > 0.0) and cool <= 0.0 and not p.swimming and carrying == null:
 		var auto: bool = W.DATA[weapon].auto
+		pending_shot = 0.0
 		shoot()
 		if not auto:
 			fire_held = false
@@ -216,6 +233,7 @@ func shoot() -> void:
 			dir = (t.global_position + Vector3(0, 1.2, 0) - muzzle).normalized()
 			_face(t.global_position)
 	muzzle += Vector3(dir.x, 0, dir.z).normalized() * 0.65
+	var tip: Vector3 = p.body.muzzle_pos(muzzle) if p.body and p.body.has_method("muzzle_pos") else muzzle
 	if d.get("rocket", false):
 		_fire_rocket(muzzle, dir)
 		return
@@ -229,16 +247,21 @@ func shoot() -> void:
 				end = t.global_position + Vector3(rng.randf_range(-0.2, 0.2), rng.randf_range(0.9, 1.5), rng.randf_range(-0.2, 0.2))
 				var rz := rng.randf()
 				_damage(t, d.dmg, sd, "torso" if rz < 0.55 else ("leg" if rz < 0.75 else ("arm" if rz < 0.9 else "head")))
-				W.tracer(main, muzzle, end)
+				W.tracer(main, tip, end)
 				continue
 		var h := _ray_hit(muzzle, sd, d.range)
 		var vh := _vehicle_parts(muzzle, sd, muzzle.distance_to(h.pos) + 0.3)
 		if not vh.is_empty():
 			end = vh.pos
 			_hit_vehicle_part(vh, d.dmg)
-			W.tracer(main, muzzle, end)
+			W.tracer(main, tip, end)
 			continue
 		end = h.pos
+		var wc: Vector3 = main.water_cross(muzzle, end)
+		if wc != Vector3.INF:
+			FX.splash(main, wc, 0.25)       # tiro na água: respingo
+			W.tracer(main, tip, wc)
+			continue
 		if h.car != null and h.car.has_method("burst_tire"):
 			var lp: Vector3 = h.car.global_transform.affine_inverse() * end
 			if lp.y > 0.95:
@@ -246,11 +269,12 @@ func shoot() -> void:
 		if h.who != null:
 			_damage(h.who, d.dmg, sd, h.get("zone", "torso"))
 		elif h.car != null:
-			h.car.take_damage(d.dmg * 0.35)
-			FX.sparks(main, end)
+			var part: String = h.car.hit_at(end, d.dmg) if h.car.has_method("hit_at") else ""
+			h.car.take_damage(d.dmg * (0.1 if part == "gunner" else 0.35))
+			main.bullet_mark(end, h.get("normal", -sd), h.car)
 		elif h.hit:
-			FX.sparks(main, end)
-		W.tracer(main, muzzle, end)
+			main.bullet_mark(end, h.get("normal", -sd), h.get("col"))
+		W.tracer(main, tip, end)
 	# tiros assustam quem está perto
 	for q in main.peds:
 		if is_instance_valid(q) and q.global_position.distance_to(p.global_position) < 28.0:
@@ -337,7 +361,7 @@ func _ray_hit(from: Vector3, dir: Vector3, length: float) -> Dictionary:
 		if rd < best_t:
 			var col = r.collider
 			var car = col if col != null and col.has_method("take_damage") else null
-			return {"pos": r.position, "who": null, "car": car, "hit": true}
+			return {"pos": r.position, "who": null, "car": car, "hit": true, "normal": r.normal, "col": col}
 	return {"pos": from + dir * best_t, "who": who, "car": null, "hit": who != null, "head": head, "zone": zone}
 
 # ---------------------------------------------------------------- soco em combo
@@ -452,6 +476,8 @@ func _vehicle_weapons(dt: float) -> void:
 		if h.who != null:
 			_damage(h.who, 60.0, sd, "torso")
 		elif h.car != null and h.car != c:
+			if h.car.has_method("hit_at"):
+				h.car.hit_at(h.pos, 30.0)
 			h.car.take_damage(22.0)
 			FX.sparks(main, h.pos)
 		elif h.hit:
@@ -558,6 +584,8 @@ func _target(fwd: Vector3, rng_max: float, cone: float):
 func _damage(t, dmg: float, dir: Vector3, zone := "torso") -> void:
 	var was_cop: bool = t in cops
 	var hostile: bool = t in main.missions.hostiles()
+	if t.get("body") and t.body.has_method("add_wound") and dmg >= 8.0:
+		t.body.add_wound(zone, dir, dmg > 60.0)
 	if t.damage(dmg, dir, main.gore, null, zone):
 		if not hostile:
 			main._add_wanted(2 if was_cop else 1)
@@ -611,6 +639,10 @@ func _on_cop_shot(dmg: float, _from: Vector3) -> void:
 		d -= a
 	main.hp -= d
 	main.hud.flash = 0.25
+	var pb = main.player.body
+	if main.player.vehicle == null and pb and is_instance_valid(pb):
+		var zr := rng.randf()
+		pb.add_wound("torso" if zr < 0.55 else ("arm" if zr < 0.75 else ("leg" if zr < 0.93 else "head")), (main.player.global_position - _from).normalized())
 
 func clear_police() -> void:
 	main.police.clear()
@@ -627,7 +659,12 @@ func knockdown(impulse: Vector3, dur := 2.4) -> void:
 	if dead or down_t > 0.0 or p.body.ragdolled:
 		return
 	fall_peak = minf(0.0, impulse.y)
+	p.ride = null
 	drop_body()
+	# entrando/saindo de um veículo: a explosão interrompe a animação (antes o jogador voava e depois
+	# era teleportado para dentro do carro)
+	if main.vehanim.busy():
+		main.vehanim.cancel()
 	if p.vehicle != null:
 		main.eject_player(impulse)
 	p.collision_layer = 0
@@ -643,15 +680,40 @@ func _get_up() -> void:
 	var hips: Vector3 = p.global_position
 	if p.body.parts.size() > 0 and is_instance_valid(p.body.parts[0]):
 		hips = p.body.parts[0].global_position
+	var fd: bool = p.body.rag_face_down()
+	var yaw: float = p.body.rotation.y
+	if p.body.parts.size() > 1 and is_instance_valid(p.body.parts[1]):
+		var upv: Vector3 = p.body.parts[1].global_transform.basis.y
+		yaw = atan2(-upv.x, -upv.z) if not fd else atan2(upv.x, upv.z)
 	for part in p.body.parts:
 		if is_instance_valid(part):
 			part.queue_free()
 	p.rebuild_body()
 	_equip()
+	p.body.rotation.y = yaw
+	p.body.start_getup(fd)
 	p.global_position = Vector3(hips.x, maxf(hips.y - 0.9, p.global_position.y if p.global_position.y > 0.5 else 0.05), hips.z)
 	p.velocity = Vector3.ZERO
 	p.collision_layer = 2
 	p.collision_mask = 1
+
+var _dead_ms := 0
+var _respawn_btn := false
+var _respawning := false
+## botão RENASCER: tela de carregamento enquanto o mundo é refeito (antes a tela travava)
+func request_respawn() -> void:
+	if _respawning or not dead:
+		return
+	_respawning = true
+	main.ui.hide_respawn()
+	Engine.time_scale = 1.0
+	main.ui.loading(true, "Indo para o hospital...")
+	await main.get_tree().process_frame
+	await main.get_tree().process_frame
+	_respawn(main.city.hospital_pos, "Você acordou no hospital (-$100)")
+	await main.get_tree().process_frame
+	main.ui.loading(false)
+	_respawning = false
 
 func _die() -> void:
 	force_dead = false
@@ -670,6 +732,8 @@ func _die() -> void:
 	main.hud.wasted = "CPF CANCELADO"
 	main.audio.play("scream", p.global_position)
 	main.missions.fail("Você morreu")
+	_dead_ms = Time.get_ticks_msec()
+	_respawn_btn = false
 
 ## preso: tela "PRESO" por 3 s, perde as armas e 10% do dinheiro (mín. $100), sai da delegacia
 var busted_t := 0.0
@@ -685,7 +749,13 @@ func busted() -> void:
 		main.eject_player(Vector3.ZERO)
 	p.collision_layer = 0
 	p.collision_mask = 0
-	main.get_tree().create_timer(3.0).timeout.connect(_busted_end)
+	main.get_tree().create_timer(2.2).timeout.connect(func():
+		main.ui.loading(true, "Levando para a delegacia...")
+		await main.get_tree().process_frame
+		await main.get_tree().process_frame
+		_busted_end()
+		await main.get_tree().process_frame
+		main.ui.loading(false))
 
 func _busted_end() -> void:
 	busted_t = 0.0
@@ -767,6 +837,8 @@ func trunk_action(car) -> void:
 
 func _respawn(pos: Vector3, text: String) -> void:
 	var p = main.player
+	Engine.time_scale = 1.0
+	main.ui.hide_respawn()
 	dead = false
 	down_t = 0.0
 	if main.hud.wasted == "CPF CANCELADO":
@@ -777,8 +849,8 @@ func _respawn(pos: Vector3, text: String) -> void:
 		for part in p.body.parts:
 			if is_instance_valid(part):
 				part.get_tree().create_timer(20.0).timeout.connect(part.queue_free)
-		p.rebuild_body()
-		_equip()
+	p.rebuild_body(false)      # acorda curado: sem ferimentos
+	_equip()
 	main.leave_interior()
 	p.swimming = false
 	p.global_position = pos
@@ -904,6 +976,39 @@ func release_hostage() -> void:
 		hostage.flee = 12.0
 	hostage = null
 	main.hud.hostage_on = false
+
+## motorista sai do carro com um comportamento: "brawl" (parte para a briga), "shoot" (saca uma
+## arma — vira um bandido que atira), "flee" (corre)
+func npc_out(car, how: String) -> void:
+	if not is_instance_valid(car) or car.dead or car == main.player.vehicle or not main.traffic_sys.is_agent(car):
+		return
+	if how == "shoot":
+		var info: Dictionary = main.traffic_sys.release(car)
+		if info.is_empty() or not is_instance_valid(info.get("drv")):
+			return
+		info.drv.queue_free()
+		var Cop := preload("res://scripts/cop.gd")
+		var t = Cop.new()
+		main.add_child(t)
+		t.setup(rng.randi(), "thug")
+		t.global_position = car.door_world() + car.global_transform.basis.x * 0.8
+		t.target = main.player
+		t.shot_player.connect(_on_cop_shot)
+		main.missions.thugs.append(t)
+		car.set_door(1.0)
+		main.audio.play("door", car.global_position)
+		return
+	_driver_out(car)
+	# _driver_out deixa o NPC rendido; troca para o comportamento pedido
+	var q = main.peds[-1] if main.peds.size() > 0 else null
+	if q == null or not is_instance_valid(q) or q.mode != "handsup":
+		return
+	q.body.arm_pose = ""
+	q.mode = ""
+	if how == "brawl" and q.has_method("start_brawl"):
+		q.start_brawl()
+	else:
+		q.scare()
 
 func _driver_out(car) -> void:
 	if not is_instance_valid(car) or car.dead or car == main.player.vehicle:

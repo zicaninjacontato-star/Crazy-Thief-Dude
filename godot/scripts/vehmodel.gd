@@ -135,6 +135,15 @@ static func _moto(paint: Color) -> Dictionary:
 		"spin": [front_w, rear_w], "fork": fork, "lean": lean, "moto": true}
 
 # ---------------------------------------------------------------- ônibus
+## caixa subdividida (~0,45 m): lataria grande que amassa de verdade na batida (box comum só tem 8 cantos)
+static func _sbox(st: SurfaceTool, size: Vector3, pos: Vector3, col: Color) -> void:
+	var b := BoxMesh.new()
+	b.size = size
+	b.subdivide_width = clampi(int(size.x / 0.45), 0, 12)
+	b.subdivide_height = clampi(int(size.y / 0.45), 0, 8)
+	b.subdivide_depth = clampi(int(size.z / 0.45), 0, 30)
+	CM._prim(st, b, Transform3D(Basis(), pos), col)
+
 static func _bus(paint: Color) -> Dictionary:
 	var root := Node3D.new()
 	var L := 11.0
@@ -149,14 +158,24 @@ static func _bus(paint: Color) -> Dictionary:
 	var hz := L * 0.5
 	# saia (cor da linha), faixa de janelas, teto branco
 	# lataria com recorte nas rodas: faixa de cima inteira, faixa de baixo em 3 trechos
-	CM._box(body, Vector3(W, 0.44, L), Vector3(0, 1.2, 0), paint)
-	for seg in [[-hz, -3.8], [-2.2, 2.8], [4.4, hz]]:
-		var zl: float = seg[1] - seg[0]
-		CM._box(body, Vector3(W, 0.55, zl), Vector3(0, 0.73, (seg[0] + seg[1]) * 0.5), paint)
+	for s in [-1.0, 1.0]:
+		_sbox(body, Vector3(0.06, 0.44, L), Vector3((W * 0.5 - 0.03) * s, 1.2, 0), paint)
+		for seg in [[-hz, -3.8], [-2.2, 2.8], [4.4, hz]]:
+			var zl: float = seg[1] - seg[0]
+			_sbox(body, Vector3(0.06, 0.55, zl), Vector3((W * 0.5 - 0.03) * s, 0.73, (seg[0] + seg[1]) * 0.5), paint)
+		_sbox(body, Vector3(0.06, 0.12, L - 0.02), Vector3((W * 0.5 - 0.04) * s, 1.48, 0), white)
+	# frente e traseira (chapas), chassi escuro por baixo e piso de borracha cinza por dentro
+	_sbox(body, Vector3(W, 1.15, 0.08), Vector3(0, 0.95, hz - 0.04), paint)
+	_sbox(body, Vector3(W, 1.15, 0.08), Vector3(0, 0.95, -hz + 0.04), paint)
+	CM._box(body, Vector3(W - 0.2, 0.3, L - 0.4), Vector3(0, 0.6, 0), dark)
+	CM._box(body, Vector3(W - 0.12, 0.06, L - 0.2), Vector3(0, 1.36, 0), Color(0.24, 0.25, 0.27))
 	for wz in [3.6, -3.0]:
 		CM._box(body, Vector3(W - 0.75, 0.6, 1.6), Vector3(0, 0.72, wz), dark)   # interior da caixa de roda
-	CM._box(body, Vector3(W - 0.02, 0.12, L - 0.02), Vector3(0, 1.48, 0), white)
-	CM._box(body, Vector3(W, 0.32, L), Vector3(0, H - 0.16, 0), white)
+	# paredes internas (painéis claros) abaixo das janelas e forro do teto
+	for s in [-1.0, 1.0]:
+		CM._box(body, Vector3(0.03, 0.2, L - 0.3), Vector3((W * 0.5 - 0.09) * s, 1.48, 0), Color(0.78, 0.78, 0.75))
+	_sbox(body, Vector3(W, 0.32, L), Vector3(0, H - 0.16, 0), white)
+	CM._box(body, Vector3(W - 0.14, 0.03, L - 0.2), Vector3(0, H - 0.33, 0), Color(0.86, 0.86, 0.84))
 	CM._box(body, Vector3(W - 0.3, 0.12, L - 1.6), Vector3(0, H + 0.06, -0.3), Color(0.75, 0.76, 0.78))   # ar-condicionado
 	# colunas entre as janelas
 	var n := 8
@@ -183,14 +202,25 @@ static func _bus(paint: Color) -> Dictionary:
 		CM._box(body, Vector3(0.05, 0.4, 0.05), Vector3(1.32 * s, 2.3, hz + 0.15), dark)   # retrovisores
 		CM._box(body, Vector3(0.12, 0.3, 0.2), Vector3(1.36 * s, 2.0, hz + 0.18), dark)
 	# interior: bancos aos pares, motorista, barras
+	# bancos aos pares sobre o piso (y 1,39), corredor no meio, pés de metal e alças
 	var seat_c := Color(0.15, 0.22, 0.45)
+	var metal := Color(0.7, 0.7, 0.72)
 	for i in 8:
 		var z := lerpf(hz - 2.6, -hz + 0.9, float(i) / 7.0)
 		for s in [-1.0, 1.0]:
-			CM._box(body, Vector3(0.85, 0.12, 0.45), Vector3(0.72 * s, 0.95, z), seat_c)
-			CM._box(body, Vector3(0.85, 0.6, 0.1), Vector3(0.72 * s, 1.25, z - 0.22), seat_c)
-	CM._box(body, Vector3(0.5, 0.12, 0.5), Vector3(0.7, 1.0, hz - 1.3), Color(0.1, 0.1, 0.1))
-	CM._box(body, Vector3(W - 0.2, 0.4, 0.5), Vector3(0, 1.45, hz - 0.35), Color(0.12, 0.12, 0.13))
+			CM._box(body, Vector3(0.86, 0.1, 0.44), Vector3(0.68 * s, 1.84, z), seat_c)
+			CM._box(body, Vector3(0.86, 0.58, 0.09), Vector3(0.68 * s, 2.15, z - 0.24), seat_c)
+			CM._box(body, Vector3(0.86, 0.06, 0.1), Vector3(0.68 * s, 2.46, z - 0.24), metal)
+			CM._box(body, Vector3(0.05, 0.42, 0.05), Vector3(0.4 * s, 1.6, z), metal)
+	# motorista: banco, painel e volante (na altura do piso)
+	CM._box(body, Vector3(0.5, 0.1, 0.5), Vector3(0.7, 1.84, hz - 1.3), Color(0.1, 0.1, 0.1))
+	CM._box(body, Vector3(0.5, 0.6, 0.1), Vector3(0.7, 2.15, hz - 1.55), Color(0.1, 0.1, 0.1))
+	CM._box(body, Vector3(W - 0.2, 0.5, 0.5), Vector3(0, 1.75, hz - 0.35), Color(0.12, 0.12, 0.13))
+	CM._prim(body, _cyl(0.2, 0.04, 14), Transform3D(Basis(Vector3.RIGHT, 1.0), Vector3(0.7, 2.1, hz - 0.85)), Color(0.08, 0.08, 0.08))
+	# catraca, barras verticais e corrimão no teto
+	CM._box(body, Vector3(0.6, 0.9, 0.08), Vector3(-0.5, 1.85, hz - 2.2), metal)
+	for i in 5:
+		CM._prim(body, _cyl(0.025, H - 1.7, 6), Transform3D(Basis(), Vector3(0.22, 1.39 + (H - 1.7) * 0.5, hz - 2.0 - i * 2.0)), Color(0.85, 0.75, 0.15))
 	CM._prim(body, _cyl(0.025, L - 2.0, 6), Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, 2.6, -0.6)), Color(0.75, 0.75, 0.2))
 	var bm := MeshInstance3D.new()
 	bm.mesh = body.commit()
@@ -225,7 +255,7 @@ static func _bus(paint: Color) -> Dictionary:
 				dual.position = Vector3(-0.3 * s, 0, 0)
 				mi.add_child(dual)
 			wheels.append({"node": mi, "pos": Vector3((W * 0.5 - 0.14) * s, wr, wz), "front": wz > 0})
-	return {"root": root, "wheels": wheels, "wr": wr, "seat": Vector3(0.7, 1.05, hz - 1.3), "size": Vector3(W, H, L)}
+	return {"root": root, "wheels": wheels, "wr": wr, "seat": Vector3(0.7, 1.9, hz - 1.3), "size": Vector3(W, H, L)}
 
 # ---------------------------------------------------------------- bicicleta
 static func _bike(paint: Color) -> Dictionary:
@@ -298,8 +328,8 @@ static func _truck(paint: Color) -> Dictionary:
 	var dark := Color(0.08, 0.08, 0.09)
 	var hz := L * 0.5
 	# cabine na frente (cor do caminhão), para-brisa, grade, para-choque
-	CM._box(body, Vector3(W, 1.5, 2.2), Vector3(0, 1.35, hz - 1.1), paint)
-	CM._box(body, Vector3(W, 1.05, 1.7), Vector3(0, 2.6, hz - 1.35), paint)
+	_sbox(body, Vector3(W, 1.5, 2.2), Vector3(0, 1.35, hz - 1.1), paint)
+	_sbox(body, Vector3(W, 1.05, 1.7), Vector3(0, 2.6, hz - 1.35), paint)
 	CM._box(body, Vector3(W - 0.1, 0.5, 0.06), Vector3(0, 1.25, hz + 0.01), dark)
 	CM._box(body, Vector3(W + 0.1, 0.35, 0.25), Vector3(0, 0.6, hz + 0.05), Color(0.6, 0.6, 0.62))
 	CM._box(glass, Vector3(W - 0.2, 0.85, 0.04), Vector3(0, 2.6, hz - 0.48), Color(0.1, 0.14, 0.18))
@@ -314,7 +344,7 @@ static func _truck(paint: Color) -> Dictionary:
 	CM._box(body, Vector3(W - 0.3, 0.5, 0.4), Vector3(0, 2.2, hz - 0.7), Color(0.1, 0.1, 0.1))
 	# chassi e baú de carga
 	CM._box(body, Vector3(W - 0.6, 0.35, L - 1.0), Vector3(0, 0.75, -0.3), dark)
-	CM._box(body, Vector3(W + 0.05, 2.9, L - 2.6), Vector3(0, 2.4, -1.25), Color(0.92, 0.92, 0.9))
+	_sbox(body, Vector3(W + 0.05, 2.9, L - 2.6), Vector3(0, 2.4, -1.25), Color(0.92, 0.92, 0.9))
 	CM._box(body, Vector3(W + 0.07, 0.35, L - 2.6), Vector3(0, 1.1, -1.25), paint)
 	CM._box(body, Vector3(0.04, 2.6, 0.06), Vector3(0, 2.4, -hz + 0.02), dark)
 	var bm := MeshInstance3D.new()

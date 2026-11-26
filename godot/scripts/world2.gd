@@ -239,8 +239,9 @@ func _beach() -> void:
 	var bpm := PlaneMesh.new()
 	bpm.size = Vector2(7000.0, 7000.0)
 	bed.mesh = bpm
-	bed.material_override = M.sand()
-	bed.position = Vector3(0, SEA_FLOOR, 0)
+	# um pouco abaixo do fim das rampas (antes ficava no mesmo plano: z-fighting piscando preto/amarelo)
+	bed.material_override = M.plain(Color(0.36, 0.34, 0.27), 0.95)
+	bed.position = Vector3(0, SEA_FLOOR - 0.25, 0)
 	add_child(bed)
 	_water_mesh()
 	# guarda-sóis, toalhas, posto de salva-vidas, coqueiros

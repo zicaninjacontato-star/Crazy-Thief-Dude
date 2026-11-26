@@ -103,12 +103,22 @@ func _get_up() -> void:
 	var hips := global_position
 	if body.parts.size() > 0 and is_instance_valid(body.parts[0]):
 		hips = body.parts[0].global_position
+	var fd: bool = body.rag_face_down()
+	var yaw := body.rotation.y
+	if body.parts.size() > 1 and is_instance_valid(body.parts[1]):
+		var up: Vector3 = body.parts[1].global_transform.basis.y      # cabeça → pés virados para onde o corpo caiu
+		yaw = atan2(-up.x, -up.z) if not fd else atan2(up.x, up.z)
+	var wd: Array = body.wound_data.duplicate()
 	for p in body.parts:
 		if is_instance_valid(p):
 			p.queue_free()
 	body.queue_free()
 	global_position = Vector3(hips.x, global_position.y, hips.z)
 	_make_body()
+	body.rotation.y = yaw
+	body.apply_wounds(wd)
+	body.start_getup(fd)
+	knocked = -body.GETUP_T
 	_rag = []
 	flee = 6.0
 	cross_to = Vector3.INF
@@ -160,6 +170,10 @@ func scare() -> void:
 		flee = 6.0
 
 func _end_mode() -> void:
+	if mode == "fish" and body:
+		var rod = body.get_node_or_null("vara")
+		if rod:
+			rod.queue_free()      # larga a vara e foge
 	mode = ""
 	blocking = false
 	if body:
@@ -207,6 +221,9 @@ func react_aim() -> void:
 func _mode_tick(dt: float) -> void:
 	var main := get_tree().current_scene
 	var pl = main.player
+	if mode == "fish":
+		body.animate(0.0, dt)
+		return
 	if mode == "clerk":
 		# atendente atrás do balcão: olha para o cliente quando ele chega perto
 		var tp: Vector3 = pl.global_position - global_position
@@ -305,6 +322,11 @@ func _ped_tick(dt: float) -> void:
 		knocked -= dt
 		if knocked <= 0.0:
 			_get_up()
+		return
+	if knocked < 0.0:
+		# animação de levantar
+		knocked = minf(0.0, knocked + dt)
+		body.animate(0.0, dt)
 		return
 	if mode != "" and stagger <= 0.0:
 		_mode_tick(dt)

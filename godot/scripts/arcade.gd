@@ -53,6 +53,7 @@ var pitch := 0.0
 var roll := 0.0
 var vy := 0.0
 
+var _spl_t := 0.0
 var armed := false           # caça / helicóptero de ataque: metralhadora + mísseis
 var subkind := ""           # boat / jetski / ship (todos usam a física de barco)
 var ai_path: Array = []      # patrulha em volta da ilha (barcos com piloto NPC)
@@ -154,9 +155,87 @@ func _sink() -> void:
 	engine_on = false
 	FX.splash(get_tree().current_scene, global_position + Vector3(0, 0.8, 0), 2.0)
 	destroyed_water.emit(self)
+	FX.extinguish(self)
 	get_tree().create_timer(40.0).timeout.connect(queue_free)
 
 signal destroyed_water(car)
+
+# ---------------------------------------------------------------- helicóptero da polícia: atiradores, piloto e hélices
+var gunners: Array = []       # [{h: Humanoid, hp, side, cool}]
+var pilot_hp := 110.0
+var rotor_hp := 140.0
+var crew_dead := false
+func add_gunners() -> void:
+	var Hum := preload("res://scripts/humanoid.gd")
+	var Wp := preload("res://scripts/weapons.gd")
+	for side in [-1.0, 1.0]:
+		var h = Hum.new()
+		h.build(Color(0.1, 0.1, 0.12), Color(0.08, 0.08, 0.1), Color(0.78, 0.56, 0.38), Color(0.05, 0.05, 0.06), {"hat": 2, "hat_c": Color(0.08, 0.08, 0.1), "glasses": true, "jacket": Color(0.12, 0.13, 0.15)})
+		model_root.add_child(h)
+		h.sitting = true
+		h.scale = Vector3.ONE * 0.85
+		h.position = Vector3(1.0 * side, 0.55 - 0.98 * 0.85 + 0.4, 0.2)
+		h.rotation.y = PI * 0.5 * side         # virado para fora (porta aberta)
+		h.give_gun(Wp.gun_mesh("rifle"))
+		h.gun_kind = "rifle"
+		h.aiming = true
+		h.animate(0, 0)
+		gunners.append({"h": h, "hp": 90.0, "side": side, "cool": randf_range(0.5, 1.5)})
+	# hélice com colisão (tiro na hélice derruba)
+	var rs := CollisionShape3D.new()
+	var cyl := CylinderShape3D.new()
+	cyl.radius = 4.6
+	cyl.height = 0.35
+	rs.shape = cyl
+	rs.position = Vector3(0, 2.85, 0.2)
+	add_child(rs)
+	var cab := CollisionShape3D.new()
+	var cb := BoxShape3D.new()
+	cb.size = Vector3(2.2, 1.2, 3.0)
+	cab.shape = cb
+	cab.position = Vector3(0, 1.9, 0.6)
+	add_child(cab)
+
+## tiro acertou o helicóptero em pos: atirador da porta, piloto (pelo vidro) ou hélice
+func hit_at(pos: Vector3, dmg: float) -> String:
+	var lp: Vector3 = global_transform.affine_inverse() * pos
+	for g in gunners:
+		if g.hp > 0.0 and is_instance_valid(g.h) and lp.distance_to(g.h.position + Vector3(0, 0.95, 0)) < 0.75:
+			g.hp -= dmg
+			if g.hp <= 0.0:
+				_gunner_down(g)
+			return "gunner"
+	if lp.y > 2.55 and kind == "heli":
+		rotor_hp -= dmg
+		if rotor_hp <= 0.0 and not _fall:
+			_fall = true
+			FX.sparks(get_tree().current_scene, pos)
+		return "rotor"
+	if kind == "heli" and driver == null and lp.z > 0.6 and lp.y > 1.0:
+		pilot_hp -= dmg * 0.55
+		if pilot_hp <= 0.0 and not _fall:
+			_fall = true                 # piloto atingido: perde o controle, cai e explode
+			ai_mode = ""
+			FX.blood_burst(get_tree().current_scene, pos, Vector3.UP, 16)
+		return "pilot"
+	return ""
+
+func _gunner_down(g: Dictionary) -> void:
+	var h = g.h
+	var gp: Vector3 = h.global_position
+	var sc := get_tree().current_scene
+	FX.blood_burst(sc, gp + Vector3(0, 1.0, 0), Vector3.UP, 18)
+	sc.audio.play("scream", gp, 0.0)
+	model_root.remove_child(h)
+	sc.add_child(h)
+	h.global_position = gp
+	h.scale = Vector3.ONE
+	h.sitting = false
+	h.add_to_group("tmp")
+	h.ragdoll(global_transform.basis.x * g.side * 4.0 + velocity, null, false)
+	gunners.erase(g)
+	if gunners.is_empty():
+		crew_dead = true
 
 func explode() -> void:
 	if dead:
@@ -213,6 +292,15 @@ func _physics_process(dt: float) -> void:
 		"plane": _plane_phys(dt)
 		"heli": _heli_phys(dt)
 	linear_velocity = velocity
+	# barco/jet-ski andando: respingos na popa e nas laterais
+	if kind == "boat" and not sinking and absf(v) > 4.0:
+		_spl_t -= dt
+		if _spl_t <= 0.0:
+			_spl_t = 0.22 if subkind == "jetski" else 0.32
+			var sc := get_tree().current_scene
+			if sc.cam.global_position.distance_to(global_position) < 70.0:
+				var back := -global_transform.basis.z * body_size.z * 0.45
+				FX.splash(sc, Vector3(global_position.x, WATER_Y, global_position.z) + back, 0.2 + absf(v) / 70.0)
 	# batida em parede/prédio
 	if get_slide_collision_count() > 0:
 		var dv := (before - velocity).length()

@@ -40,11 +40,16 @@ func _ready() -> void:
 const OUTFIT0 := {"shirt": "216b42", "pants": "1f2945", "hair": "291a0f", "jacket": "", "hat": 0, "hat_c": "1a1a1f", "glasses": false}
 var outfit: Dictionary = OUTFIT0.duplicate()
 
-func rebuild_body() -> void:
+func rebuild_body(keep_wounds := true) -> void:
+	var wd: Array = []
 	if body and is_instance_valid(body):
+		if keep_wounds:
+			wd = body.wound_data.duplicate()
 		body.queue_free()
 	body = make_body()
 	add_child(body)
+	if not wd.is_empty():
+		body.apply_wounds(wd)
 
 ## corpo com a roupa atual (também usado para o jogador sentado no veículo)
 func make_body():
@@ -55,6 +60,9 @@ func make_body():
 	return h
 
 func jump() -> void:
+	if ride != null:
+		jump_off_ride()
+		return
 	if is_on_floor() and not swimming:
 		velocity.y = jump_v
 
@@ -63,6 +71,15 @@ func _physics_process(dt: float) -> void:
 		return
 	if pk_t >= 0.0:
 		_parkour_tick(dt)
+		return
+	if ride != null:
+		_ride_tick(dt)
+		return
+	if body.pose == "getup":
+		# levantando: fica parado até terminar a animação
+		velocity = Vector3(0, velocity.y - gravity * dt if not is_on_floor() else 0.0, 0)
+		move_and_slide()
+		body.animate(0.0, dt)
 		return
 	var f := Vector3(sin(cam_yaw), 0, cos(cam_yaw))
 	var r := Vector3(-f.z, 0, f.x)
@@ -106,6 +123,8 @@ func _physics_process(dt: float) -> void:
 	elif not is_on_floor():
 		velocity.y -= gravity * dt
 	move_and_slide()
+	_step_up(tv)
+	_check_ride()
 	if hv.length() > 0.2:
 		var ang := atan2(hv.x, hv.z)
 		body.rotation.y = lerp_angle(body.rotation.y, ang, minf(1.0, dt * 10.0))
@@ -116,6 +135,89 @@ func _physics_process(dt: float) -> void:
 	if is_on_floor() and not swimming and hv.length() > 3.2 and mag > 0.6:
 		_try_parkour(hv.normalized())
 
+
+# ---------------------------------------------------------------- carona em cima de veículos
+## pisou no teto/caçamba de um carro: passa a andar junto com ele (posição local no carro)
+var ride = null
+var ride_local := Vector3.ZERO
+var _ride_yaw := 0.0
+var _ride_v := Vector3.ZERO
+var _ride_acc := Vector3.ZERO
+func _check_ride() -> void:
+	for i in get_slide_collision_count():
+		var col := get_slide_collision(i)
+		var o = col.get_collider()
+		if col.get_normal().y > 0.7 and o is VehicleBody3D and o.get("kind") != "moto":
+			ride = o
+			ride_local = o.global_transform.affine_inverse() * global_position
+			_ride_yaw = o.global_rotation.y
+			_ride_v = o.linear_velocity
+			_ride_acc = Vector3.ZERO
+			return
+
+func _ride_tick(dt: float) -> void:
+	var c = ride
+	if not is_instance_valid(c) or c.get("dead") == true and c.linear_velocity.length() < 0.5:
+		ride = null
+		return
+	var half: Vector3 = c.body_size * 0.5
+	# anda sobre o carro com o joystick (direção da câmera, convertida para o espaço do carro)
+	var f := Vector3(sin(cam_yaw), 0, cos(cam_yaw))
+	var r := Vector3(-f.z, 0, f.x)
+	var want := (f * move_input.y + r * move_input.x)
+	var lw: Vector3 = c.global_transform.basis.inverse() * want
+	lw.y = 0
+	ride_local += lw.limit_length(1.0) * walk_speed * 0.9 * dt
+	global_position = c.global_transform * ride_local
+	velocity = c.linear_velocity
+	# a câmera gira junto com o carro
+	var dyaw: float = angle_difference(_ride_yaw, c.global_rotation.y)
+	_ride_yaw = c.global_rotation.y
+	body.rotation.y += dyaw
+	if want.length() > 0.1:
+		body.rotation.y = lerp_angle(body.rotation.y, atan2(want.x, want.z), minf(1.0, dt * 8.0))
+	body.animate(want.length() * walk_speed * 0.9, dt)
+	# freada/batida forte joga o jogador para fora; saiu da borda = cai
+	# só a aceleração horizontal, suavizada (o carro assentando na suspensão não derruba)
+	var acc: Vector3 = (c.linear_velocity - _ride_v) / maxf(dt, 0.001)
+	acc.y = 0.0
+	_ride_v = c.linear_velocity
+	_ride_acc = _ride_acc.lerp(acc, minf(1.0, dt * 6.0))
+	var main := get_tree().current_scene
+	if _ride_acc.length() > 20.0:
+		ride = null
+		main.combat.knockdown(c.linear_velocity * 0.9 - acc * 0.12 + Vector3(0, 2.5, 0), 2.4)
+		return
+	if absf(ride_local.x) > half.x + 0.15 or absf(ride_local.z) > half.z + 0.15:
+		ride = null
+		velocity = c.linear_velocity
+		return
+
+func jump_off_ride() -> void:
+	if ride != null:
+		var v: Vector3 = ride.linear_velocity
+		ride = null
+		velocity = v + Vector3(0, jump_v, 0)
+
+## degrau automático: meio-fio/calçada (até 0,4 m) é subido andando, sem pular
+func _step_up(tv: Vector3) -> void:
+	if swimming or tv.length() < 0.3 or not (is_on_floor() or velocity.y <= 0.1):
+		return
+	var fwd := tv.normalized()
+	var p := global_position
+	var low := _ray(p + Vector3(0, 0.05, 0), p + Vector3(0, 0.05, 0) + fwd * 0.55)
+	if low.is_empty() or absf(low.normal.y) > 0.6:
+		return
+	if not _ray(p + Vector3(0, 0.45, 0), p + Vector3(0, 0.45, 0) + fwd * 0.6).is_empty():
+		return
+	var probe: Vector3 = low.position + fwd * 0.12
+	var top := _ray(Vector3(probe.x, p.y + 0.5, probe.z), Vector3(probe.x, p.y - 0.05, probe.z))
+	if top.is_empty():
+		return
+	var dh: float = top.position.y - p.y
+	if dh > 0.02 and dh < 0.42:
+		global_position = Vector3(p.x, top.position.y + 0.02, p.z) + fwd * 0.06
+		velocity.y = 0.0
 
 func _ray(a: Vector3, b: Vector3) -> Dictionary:
 	var q := PhysicsRayQueryParameters3D.create(a, b, 1)
@@ -131,13 +233,13 @@ func _try_parkour(fwd: Vector3) -> void:
 	if absf(n.y) > 0.5:
 		return
 	var wallp: Vector3 = hit.position
-	var probe := wallp + fwd * 0.35
+	var probe := wallp + fwd * 0.18      # muros finos (0,3–0,5 m) também contam
 	var top_hit := _ray(probe + Vector3(0, 3.0, 0), probe + Vector3(0, 0.3, 0))
 	if top_hit.is_empty():
 		return
 	var top: float = top_hit.position.y
 	var h := top - p.y
-	if h < 0.35 or h > 2.6:
+	if h < 0.35 or h > 3.1:
 		return
 	# precisa de espaço em cima do obstáculo
 	if not _ray(Vector3(probe.x, top + 0.15, probe.z), Vector3(probe.x, top + 1.9, probe.z)).is_empty():

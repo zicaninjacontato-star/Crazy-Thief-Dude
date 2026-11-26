@@ -33,7 +33,7 @@ func node_pos(n: Vector2i) -> Vector3:
 	return Vector3(R(n.x), 0, R(n.y))
 
 func _off(d: Vector2i) -> Vector3:
-	return Vector3(d.y * 2.6, 0, -d.x * 2.6)
+	return Vector3(-d.y * 2.6, 0, d.x * 2.6)     # mão direita (Brasil): faixa à direita do sentido
 
 func _d3(d: Vector2i) -> Vector3:
 	return Vector3(d.x, 0, d.y)
@@ -260,8 +260,9 @@ func _physics_process(dt: float) -> void:
 			continue
 		if c == main.player.vehicle:
 			continue
-		if (i + _tick) % 2 == 0 or a.get("mode", "") == "ram":
-			_drive(a, dt if a.get("mode", "") == "ram" else dt * 2.0)
+		var fast: bool = a.get("mode", "") in ["ram", "chase", "flee"]
+		if (i + _tick) % 2 == 0 or fast:
+			_drive(a, dt if fast else dt * 2.0)
 
 func _drive(a: Dictionary, dt: float) -> void:
 	var c = a.car
@@ -284,6 +285,25 @@ func _drive(a: Dictionary, dt: float) -> void:
 		c.throttle = 0.0
 		c.brake_in = 1.0
 		return
+	elif md == "chase" or md == "flee":
+		# batida: o motorista persegue (tenta bater de volta) ou foge a toda
+		a.mode_t -= dt
+		var tgt: Vector3 = main.player.vehicle.global_position if main.player.vehicle else main.player.global_position
+		if a.mode_t <= 0.0 or pos.distance_to(tgt) > (90.0 if md == "chase" else 140.0):
+			a.mode = ""
+			c.max_engine = a.get("eng0", c.max_engine)
+		else:
+			c.ai_target = null
+			var loc: Vector3 = c.global_transform.affine_inverse() * tgt
+			var ang := atan2(loc.x, loc.z)
+			if md == "flee":
+				ang = atan2(-loc.x, -loc.z)
+			c.steer_in = clampf(ang * 1.6, -1.0, 1.0)
+			c.throttle = 1.0 if absf(ang) < 2.2 or c.forward_speed() > 4.0 else -0.6
+			c.brake_in = 0.0
+			if int(a.mode_t * 2.0) % 5 == 0 and md == "chase":
+				main.audio.play("horn", pos, 0.0)
+			return
 	# vigia: carro que não sai do lugar por muito tempo
 	a.wd_t = a.get("wd_t", 0.0) + dt
 	if a.wd_t > 10.0:
@@ -609,6 +629,17 @@ func _in_view(p: Vector3) -> bool:
 	return not cam.is_position_behind(p) and p.distance_to(cam.global_position) < 120.0
 
 ## arma apontada para o motorista: 50% acelera para atropelar, 50% para e sai com as mãos para cima
+## reação a uma batida do jogador: "chase" persegue, "flee" foge com o carro
+func crash_mode(car, md: String, t: float) -> bool:
+	var a := _agent_of(car)
+	if a.is_empty() or a.bus:
+		return false
+	a.mode = md
+	a.mode_t = t
+	a.eng0 = car.max_engine
+	car.max_engine *= 1.35
+	return true
+
 func aim_reaction(car) -> String:
 	var a := _agent_of(car)
 	if a.is_empty() or a.get("reacted", false) or a.bus:

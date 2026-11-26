@@ -61,6 +61,10 @@ const VMAX := {"hatch": 150.0, "sedan": 165.0, "suv": 155.0, "pickup": 150.0, "s
 	"van": 140.0, "bike": 38.0, "sportbike": 215.0, "offroad": 150.0, "super": 265.0, "truck": 105.0}
 
 ## kind: sedan, hatch, suv, pickup, sport ou police (modelo gerado por carmodel.gd).
+var stick := Vector2.ZERO    # joystick do jogador (moto: puxar para trás + acelerar = empinar)
+var wheelie_key := false
+var wheelie := 0.0            # ângulo do empinado (rad)
+signal wheelie_fall(car)
 var mods := {}             # oficina tuning (tuning.gd)
 var eng_mult := 1.0
 var vmax_mult := 1.0
@@ -198,9 +202,45 @@ func repaint(c: Color) -> void:
 				n.material_override = nm
 	paint_c = c
 
+## tiro no vidro: 1º trinca (branco leitoso), 2º estilhaça (some) — devolve true se acertou vidro
+var _glass_hits := 0
+func break_glass() -> bool:
+	var gl: Array = []
+	for mi in model_root.find_children("*", "MeshInstance3D", true, false):
+		var m = mi.material_override
+		if m is StandardMaterial3D and m.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED and not m.vertex_color_use_as_albedo and mi.visible and mi.name != "mods":
+			gl.append(mi)
+	if gl.is_empty():
+		return false
+	_glass_hits += 1
+	unlocked = true
+	var sc := get_tree().current_scene
+	if _glass_hits == 1:
+		var cr := StandardMaterial3D.new()
+		cr.albedo_color = Color(0.82, 0.86, 0.88, 0.72)
+		cr.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		cr.roughness = 0.6
+		for mi in gl:
+			if not mi.has_meta("glass_orig"):
+				mi.set_meta("glass_orig", mi.material_override)
+			mi.material_override = cr
+		sc.audio.play("glass" if sc.audio.sounds.has("glass") else "hit", global_position, -4.0)
+	else:
+		for mi in gl:
+			mi.visible = false
+		sc.audio.play("glass" if sc.audio.sounds.has("glass") else "hit", global_position, 2.0)
+		FX.sparks(sc, global_position + Vector3(0, body_size.y * 0.75, 0))
+	return true
+
 ## oficina: conserto (vida, motor, fumaça/fogo e pneus)
 func repair() -> void:
 	hp = 100.0
+	_glass_hits = 0
+	for mi in model_root.find_children("*", "MeshInstance3D", true, false):
+		if mi.has_meta("glass_orig"):
+			mi.material_override = mi.get_meta("glass_orig")
+			mi.remove_meta("glass_orig")
+			mi.visible = true
 	engine_hp = 100.0
 	if _smoke and is_instance_valid(_smoke):
 		_smoke.queue_free()
@@ -361,6 +401,7 @@ func _on_body_entered(other: Node) -> void:
 	var sev := rel * (0.6 + my_share * 0.8)
 	_impact_at(local, sev)
 	take_damage(maxf(0.0, sev - 6.0) * 2.6)
+	set_meta("last_crash", sev)
 	crashed.emit(self, sev)
 
 ## deforma a lataria de verdade: vértices perto do ponto de impacto afundam para dentro
@@ -376,7 +417,8 @@ func _impact_at(local_dir: Vector3, sev: float) -> void:
 	var k := 1.0 / maxf(absf(ld.x) / hx, absf(ld.z) / hz)
 	var pt := ld * k + Vector3(0, 0.75, 0)
 	var depth := clampf((sev - 7.0) * 0.028, 0.03, 0.5)
-	_deform(model_root, pt, ld, depth, 0.75 + depth)
+	var big: float = 1.7 if body_size.z > 6.5 else 1.0      # ônibus/caminhão: amassado maior
+	_deform(model_root, pt, ld, depth * (1.3 if big > 1.0 else 1.0), (0.75 + depth) * big)
 	# batida de frente estraga o motor
 	if ld.z > 0.6:
 		engine_hp -= (sev - 7.0) * 5.5
@@ -491,6 +533,7 @@ func _physics_process(dt: float) -> void:
 		_crash_cd = 0.35
 		take_damage((dvv - 9.0) * (0.9 if kind == "bus" else 2.3))
 		_impact(dvv)
+		set_meta("last_crash", dvv)
 		crashed.emit(self, dvv)
 	_lastv_prev = linear_velocity
 	if _fire_t > 0.0 and not dead:
@@ -545,9 +588,38 @@ func _physics_process(dt: float) -> void:
 			fork.rotation.y = steering * 1.1
 		if lean:
 			lean.rotation.z = lerpf(lean.rotation.z, -steering * clampf(absf(fs) / 12.0, 0.0, 1.0) * 0.9, minf(1.0, dt * 5.0))
+			_wheelie_tick(dt, fs)
 	for w in wheels:
 		if w.use_as_traction and not (w in broken_wheels) and not (w in burst):
 			w.wheel_friction_slip = 1.6 if handbrake else 2.6
+
+## empinar: acelerando e puxando o joystick para trás a roda da frente sobe; passou do ponto = cai
+var _lean_z := 0.0
+func _wheelie_tick(dt: float, fs: float) -> void:
+	var want := driver != null and throttle > 0.5 and fs > 3.0 and (stick.y < -0.35 or wheelie_key) and not down
+	if want:
+		# puxar um pouco = equilibra num ângulo; puxar tudo (ou segurar a tecla) = continua subindo e cai
+		var pull := clampf((-stick.y - 0.35) / 0.5, 0.0, 1.0)
+		var goal: float = 1.35 if (stick.y < -0.9 or wheelie_key) else lerpf(0.2, 0.75, pull)
+		wheelie = move_toward(wheelie, goal, dt * 0.7)
+	else:
+		wheelie = maxf(0.0, wheelie - dt * 1.8)
+		if wheelie > 0.0 and wheelie < 0.04:
+			wheelie = 0.0
+	# segurando o equilíbrio: perto de 0,85 rad ainda dá para voltar; passou de 1,15 = tomba para trás
+	if wheelie > 1.15:
+		wheelie = 0.0
+		fall_over()
+		apply_central_impulse(-global_transform.basis.z * mass * 1.5 + Vector3(0, mass * 2.0, 0))
+		wheelie_fall.emit(self)
+	# gira o conjunto (moto + piloto) em volta do eixo da roda traseira
+	var zr := -body_size.z * 0.3
+	var piv := Vector3(0, 0.05, zr)
+	var rz: float = lean.rotation.z
+	var b := Basis(Vector3.RIGHT, -wheelie) * Basis(Vector3.FORWARD, -rz)
+	lean.transform = Transform3D(b, piv - b * piv)
+	if wheelie > 0.05:
+		engine_force *= 1.08
 
 func _ai(dt: float) -> void:
 	var to := ai_target.global_position - global_position

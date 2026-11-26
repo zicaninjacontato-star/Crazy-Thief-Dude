@@ -19,6 +19,7 @@ var units: Array = []       # {car, kind, out, crew}
 var cops: Array = []
 var heli = null
 var heli_cool := 1.0
+var heli_cd := 0.0        # depois que os atiradores morrem, outro helicóptero só vem um tempo depois
 var unseen := 0.0
 var seen := true
 var spawn_cd := 0.0
@@ -135,7 +136,8 @@ func tick(dt: float) -> void:
 		_spawn_boat(pp)
 		boat_cd = 6.0
 	boat_cd -= dt
-	if s >= 4 and (heli == null or not is_instance_valid(heli) or heli.dead):
+	heli_cd -= dt
+	if s >= 4 and heli_cd <= 0.0 and (heli == null or not is_instance_valid(heli) or heli.dead):
 		if heli == null or not is_instance_valid(heli):
 			_spawn_heli(pp)
 	if heli and is_instance_valid(heli):
@@ -214,6 +216,7 @@ func _spawn_heli(pp: Vector3) -> void:
 	h.ai_mode = "follow"
 	h.ai_target = main.player
 	h.world2 = main.world2
+	h.add_gunners()
 	h.destroyed.connect(main._on_vehicle_destroyed)
 	main.cars.append(h)
 	heli = h
@@ -224,6 +227,12 @@ func _units_tick(dt: float, s: int, p: Node3D, pp: Vector3) -> void:
 		var c = u.car
 		if c == main.player.vehicle:
 			continue
+		# moto da polícia: batida forte, tiro ou moto tombada → o policial voa (ragdoll)
+		if u.kind == "moto" and not u.out and not u.get("fell", false) and is_instance_valid(c):
+			var hit_hard: bool = c.get_meta("last_crash", 0.0) > 7.0
+			if hit_hard or c.hp < 72.0 or c.down or c.dead:
+				_moto_fall(u, c)
+				continue
 		var d: float = c.global_position.distance_to(pp)
 		var on_foot: bool = main.player.vehicle == null
 		if not u.out:
@@ -271,6 +280,36 @@ func _units_tick(dt: float, s: int, p: Node3D, pp: Vector3) -> void:
 						cops.erase(cp)
 				u.out = false
 				c.brake_in = 0.0
+
+## policial cai da moto: corpo em ragdoll com a velocidade da moto; levanta depois e continua a pé
+func _moto_fall(u: Dictionary, c) -> void:
+	u.fell = true
+	u.out = true
+	var vel: Vector3 = c.linear_velocity
+	var pos: Vector3 = c.global_position + Vector3(0, 1.1, 0)
+	if c.has_meta("drv_node"):
+		var dn = c.get_meta("drv_node")
+		if is_instance_valid(dn):
+			dn.queue_free()
+		c.remove_meta("drv_node")
+	c.throttle = 0.0
+	c.ai_target = null
+	if c.has_method("fall_over"):
+		c.fall_over()
+	var cp := Cop.new()
+	main.add_child(cp)
+	cp.setup(rng.randi(), "cop")
+	cp.global_position = pos
+	cp.unit = null
+	cp.shot_player.connect(main.combat._on_cop_shot)
+	cp.died.connect(_on_cop_down)
+	cops.append(cp)
+	var sev := vel.length()
+	main.audio.play("hit", pos, 2.0)
+	if sev > 15.0:
+		cp.hit(null, vel * 1.1 + Vector3(0, 3.0, 0), main.gore)      # rápido demais: morre na queda
+	else:
+		cp.knock(vel * 1.05 + Vector3(0, 2.5, 0))
 
 func _crew_out(u: Dictionary, s: int) -> void:
 	u.out = true
@@ -322,16 +361,39 @@ func _cops_tick(dt: float, s: int, p: Node3D) -> void:
 func _heli_tick(dt: float, s: int, p: Node3D) -> void:
 	if heli == null or not is_instance_valid(heli) or heli.dead:
 		return
+	# os 2 atiradores mortos: o helicóptero vai embora e outro vem depois de um tempo
+	if heli.crew_dead:
+		if heli.ai_mode != "leave":
+			heli.ai_mode = "leave"
+			heli_cd = 45.0
+			main._msg("Atiradores abatidos! O helicóptero recuou")
+		if heli.global_position.distance_to(p.global_position) > 260.0:
+			main.cars.erase(heli)
+			heli.queue_free()
+			heli = null
+		return
+	if heli._fall:
+		return
 	heli.ai_target = p
-	heli_cool -= dt
 	var d: float = heli.global_position.distance_to(p.global_position)
-	if heli_cool <= 0.0 and d < 70.0:
-		heli_cool = rng.randf_range(0.7, 1.3)
-		var from: Vector3 = heli.global_position + Vector3(0, 0.5, 0)
-		var hitp := rng.randf() < 0.3
+	# quem atira são os atiradores nas portas (com linha de visão de verdade)
+	for g in heli.gunners:
+		g.cool -= dt
+		if g.cool > 0.0 or d > 75.0 or not is_instance_valid(g.h):
+			continue
+		g.cool = rng.randf_range(0.8, 1.5)
+		var from: Vector3 = g.h.muzzle_pos(g.h.global_position + Vector3(0, 1.0, 0))
+		var hitp := rng.randf() < 0.28 + s * 0.02
 		var aim: Vector3 = p.global_position + Vector3(0, 1.0, 0)
 		if not hitp:
 			aim += Vector3(rng.randf_range(-3, 3), 0, rng.randf_range(-3, 3))
+		var q := PhysicsRayQueryParameters3D.create(from, aim + (aim - from).normalized() * 0.5, 1)
+		q.exclude = [heli.get_rid()]
+		var r := main.get_world_3d().direct_space_state.intersect_ray(q)
+		if not r.is_empty() and r.collider != main.player.vehicle:
+			W.tracer(main, from, r.position)
+			main.bullet_mark(r.position, r.normal, r.collider)
+			continue
 		W.tracer(main, from, aim)
 		main.combat._on_cop_shot(9.0 if hitp else 0.0, from)
 

@@ -49,37 +49,45 @@ func setup(seed: int, kind := "cop") -> void:
 	cs.shape = cap
 	cs.position.y = 0.88
 	add_child(cs)
+	_skin = [Color(0.92, 0.75, 0.6), Color(0.55, 0.36, 0.22), Color(0.78, 0.56, 0.38)][rng.randi() % 3]
+	_rebuild_body(true)
+	cool = rng.randf_range(0.8, 1.8)
+	pref = rng.randf_range(7.0, 14.0)
+	_strafe = 1.0 if rng.randf() < 0.5 else -1.0
+
+var _skin := Color.WHITE
+func _rebuild_body(first := false) -> void:
 	body = Humanoid.new()
-	var skin: Color = [Color(0.92, 0.75, 0.6), Color(0.55, 0.36, 0.22), Color(0.78, 0.56, 0.38)][rng.randi() % 3]
+	var skin := _skin
 	match kind:
 		"swat":
 			body.build(Color(0.1, 0.1, 0.12), Color(0.08, 0.08, 0.1), skin, Color(0.05, 0.05, 0.06), {"hat": 2, "hat_c": Color(0.08, 0.08, 0.1), "glasses": true, "jacket": Color(0.12, 0.13, 0.15)})
-			hp = 240.0
-			weapon = "rifle"
-			dmg = 9.0
-			rate = 0.55
+			if first:
+				hp = 240.0
+				weapon = "rifle"
+				dmg = 9.0
+				rate = 0.55
 		"heavy":
 			# policial de armadura (5 estrelas): colete pesado, capacete, fuzil potente, aguenta muito
 			body.build(Color(0.16, 0.17, 0.14), Color(0.1, 0.1, 0.09), skin, Color(0.05, 0.05, 0.05), {"hat": 2, "hat_c": Color(0.12, 0.13, 0.11), "glasses": true, "jacket": Color(0.22, 0.24, 0.18)})
 			body.scale = Vector3(1.1, 1.06, 1.15)
-			hp = 420.0
-			weapon = "rifle"
-			dmg = 13.0
-			rate = 0.38
+			if first:
+				hp = 420.0
+				weapon = "rifle"
+				dmg = 13.0
+				rate = 0.38
 		"thug":
 			body.build(Color(0.15, 0.15, 0.15), Color(0.1, 0.1, 0.32), skin, Color(0.05, 0.04, 0.03), {"hat": 1, "hat_c": Color(0.7, 0.1, 0.1), "jacket": Color(0.6, 0.05, 0.05)})
-			weapon = "smg" if rng.randf() < 0.5 else "pistol"
-			rate = 0.5 if weapon == "smg" else 1.1
-			dmg = 6.0 if weapon == "smg" else 8.0
+			if first:
+				weapon = "smg" if rng.randf() < 0.5 else "pistol"
+				rate = 0.5 if weapon == "smg" else 1.1
+				dmg = 6.0 if weapon == "smg" else 8.0
 		_:
 			body.build(Color(0.12, 0.2, 0.42), Color(0.08, 0.1, 0.2), skin, Color(0.05, 0.06, 0.12), {"hat": 1, "hat_c": Color(0.08, 0.1, 0.22)})
 	add_child(body)
 	body.set_far(80.0)
 	body.give_gun(W.gun_mesh(weapon))
 	body.gun_kind = weapon
-	cool = rng.randf_range(0.8, 1.8)
-	pref = rng.randf_range(7.0, 14.0)
-	_strafe = 1.0 if rng.randf() < 0.5 else -1.0
 
 ## polícia aguenta mais (hp maior), mas também sente: perna = manca e anda devagar, braço = mira
 ## pior por um tempo, tronco = cambaleia e para de atirar um instante, cabeça = muito dano
@@ -115,6 +123,34 @@ func hit(from_body: PhysicsBody3D, vel: Vector3, gore: bool) -> void:
 		return
 	FX.blood_burst(get_tree().current_scene, global_position + Vector3(0, 1.2, 0), vel.normalized(), 24)
 	_die(vel * 0.85 + Vector3(0, 2.5 + vel.length() * 0.18, 0), from_body, gore)
+
+## derrubado (queda da moto, empurrão): ragdoll e levanta com animação depois de ~3 s
+var knocked := 0.0
+func knock(vel: Vector3) -> void:
+	if down or knocked > 0.0:
+		return
+	knocked = 3.0
+	collision_mask = 0
+	body.rag_alive = true
+	body.ragdoll(vel, null, false)
+
+func _get_up() -> void:
+	var hips := global_position
+	if body.parts.size() > 0 and is_instance_valid(body.parts[0]):
+		hips = body.parts[0].global_position
+	var fd: bool = body.rag_face_down()
+	var wd: Array = body.wound_data.duplicate()
+	var col_parts: Array = body.parts.duplicate()
+	for p in col_parts:
+		if is_instance_valid(p):
+			p.queue_free()
+	body.queue_free()
+	global_position = Vector3(hips.x, maxf(hips.y - 0.9, 0.05), hips.z)
+	_rebuild_body()
+	body.apply_wounds(wd)
+	body.start_getup(fd)
+	collision_mask = 1
+	knocked = -body.GETUP_T
 
 func _die(imp: Vector3, src, gore: bool) -> void:
 	down = true
@@ -238,6 +274,15 @@ func _cleanup() -> void:
 
 func _physics_process(dt: float) -> void:
 	if down:
+		return
+	if knocked > 0.0:
+		knocked -= dt
+		if knocked <= 0.0:
+			_get_up()
+		return
+	if knocked < 0.0:
+		knocked = minf(0.0, knocked + dt)
+		body.animate(0.0, dt)
 		return
 	_t += dt
 	if _base_speed < 0.0:
@@ -364,9 +409,24 @@ func _physics_process(dt: float) -> void:
 	if cool <= 0.0 and d < 34.0 and _los:
 		cool = rng.randf_range(rate * 0.7, rate * 1.3)
 		var muzzle := global_position + Vector3(0, 1.4, 0) + dirv * 0.6
+		if body and body.has_method("muzzle_pos"):
+			muzzle = body.muzzle_pos(muzzle)
 		var hitp: bool = rng.randf() < clampf(accuracy * (0.45 if arm_t > 0.0 else 1.0) - d * 0.01, 0.06, 0.85)
 		var aim := tp + Vector3(0, 1.2, 0)
 		if not hitp:
 			aim += Vector3(rng.randf_range(-1.5, 1.5), rng.randf_range(-0.5, 1.0), rng.randf_range(-1.5, 1.5))
-		W.tracer(get_tree().current_scene, muzzle, aim)
-		shot_player.emit(dmg if hitp else 0.0, global_position)
+		# bala com física: parede/carro no caminho segura o tiro (antes atravessava)
+		var sc := get_tree().current_scene
+		var q := PhysicsRayQueryParameters3D.create(muzzle, aim + (aim - muzzle).normalized() * 0.5, 1)
+		q.exclude = [get_rid()]
+		var pv = sc.player.vehicle
+		var r := get_world_3d().direct_space_state.intersect_ray(q)
+		if not r.is_empty() and r.collider != pv:
+			var col = r.collider
+			W.tracer(sc, muzzle, r.position)
+			if col != null and col.has_method("take_damage"):
+				col.take_damage(dmg * 0.3)
+			sc.bullet_mark(r.position, r.normal, col)
+		else:
+			W.tracer(sc, muzzle, aim)
+			shot_player.emit(dmg if hitp else 0.0, global_position)

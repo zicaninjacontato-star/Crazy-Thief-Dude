@@ -81,6 +81,11 @@ func take_damage(d: float) -> void:
 			n.material_override.albedo_color = Color(0.15, 0.13, 0.12)
 		get_tree().create_timer(30.0).timeout.connect(queue_free)
 
+var _chk_t := 0.0
+var _last_p := Vector3.ZERO
+var _stuck := 0
+var _rev_t := 0.0
+var _rev_side := 1.0
 func _physics_process(dt: float) -> void:
 	_shell_tick(dt)
 	if dead or main == null:
@@ -110,6 +115,31 @@ func _physics_process(dt: float) -> void:
 	to.y = 0
 	var spd := 7.5 if d > 28.0 else 0.0
 	var yaw := atan2(to.x, to.z)
+	# preso (prédio, avião, hangar): dá ré girando; preso por muito tempo e fora da vista = reaparece na rua
+	_chk_t += dt
+	if _chk_t > 2.0:
+		_chk_t = 0.0
+		var moved := global_position.distance_to(_last_p)
+		_last_p = global_position
+		if spd > 0.0 and moved < 1.5:
+			_stuck += 1
+			_rev_t = 1.6
+			_rev_side = 1.0 if rng.randf() < 0.5 else -1.0
+		else:
+			_stuck = 0
+		if _stuck >= 4:
+			var cam: Camera3D = main.cam
+			var away: bool = cam.is_position_behind(global_position) or global_position.distance_to(cam.global_position) > 90.0
+			if away and _path.size() > 1:
+				global_position = _path[1] + Vector3(0, 0.6, 0)
+				_stuck = 0
+	if _rev_t > 0.0:
+		_rev_t -= dt
+		rotation.y += _rev_side * dt * 0.9
+		var bk := -Vector3(sin(rotation.y), 0, cos(rotation.y)) * 4.0
+		velocity = Vector3(bk.x, velocity.y - 18.0 * dt, bk.z)
+		move_and_slide()
+		return
 	rotation.y = lerp_angle(rotation.y, yaw, minf(1.0, dt * 1.2))
 	var f := Vector3(sin(rotation.y), 0, cos(rotation.y))
 	var hv := f * spd * clampf(1.0 - absf(angle_difference(rotation.y, yaw)) / 1.2, 0.15, 1.0)

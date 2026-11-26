@@ -4,7 +4,7 @@ extends Node
 ## 1 dia do jogo = DAY_LEN segundos reais.
 
 const M := preload("res://scripts/mats.gd")
-const DAY_LEN := 720.0
+const DAY_LEN := 1800.0     # 1 dia = 30 min (antes 12 min)
 
 var main: Node3D
 var sky: ProceduralSkyMaterial

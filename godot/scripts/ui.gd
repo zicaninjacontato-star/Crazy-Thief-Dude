@@ -240,6 +240,61 @@ func cinematic(title: String, sub: String, mid: Callable) -> void:
 	tw.tween_property(_cine, "modulate:a", 0.0, 0.5)
 	tw.tween_callback(func(): _cine.queue_free(); _cine = null; main.hud.input_block = false)
 
+## botão de renascer (tela de morte)
+var _resp: Control
+func show_respawn(text: String, cb: Callable) -> void:
+	hide_respawn()
+	var s := get_viewport().get_visible_rect().size
+	var b := Button.new()
+	b.text = text
+	b.add_theme_font_size_override("font_size", 30)
+	b.custom_minimum_size = Vector2(420, 80)
+	b.position = Vector2(s.x * 0.5 - 210, s.y * 0.66)
+	b.pressed.connect(cb)
+	b.modulate.a = 0.0
+	add_child(b)
+	_resp = b
+	var tw := create_tween()
+	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tw.tween_property(b, "modulate:a", 1.0, 0.5)
+
+func hide_respawn() -> void:
+	if _resp and is_instance_valid(_resp):
+		_resp.queue_free()
+	_resp = null
+
+## tela de carregamento (morte, prisão): esconde o mundo sendo refeito
+var _load: Control
+func loading(on: bool, text := "Carregando...") -> void:
+	if _load and is_instance_valid(_load):
+		_load.queue_free()
+		_load = null
+	if not on:
+		return
+	var s := get_viewport().get_visible_rect().size
+	var bg := ColorRect.new()
+	bg.color = Color(0.03, 0.03, 0.04)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(bg)
+	var t := Label.new()
+	t.text = text
+	t.add_theme_font_size_override("font_size", 34)
+	t.add_theme_color_override("font_color", Color(1, 0.85, 0.3))
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	t.size = Vector2(s.x, 60)
+	t.position = Vector2(0, s.y * 0.44)
+	bg.add_child(t)
+	var tip := Label.new()
+	tip.text = ["Dica: policiais de moto caem se você acertar a moto", "Dica: a oficina tuning blinda seu carro", "Dica: suba na caçamba de uma picape para pegar carona", "Dica: gangues avisam antes de atacar — saia da área", "Dica: segure o acelerador e puxe para trás para empinar a moto"][randi() % 5]
+	tip.add_theme_font_size_override("font_size", 20)
+	tip.add_theme_color_override("font_color", Color(0.7, 0.7, 0.72))
+	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tip.size = Vector2(s.x, 40)
+	tip.position = Vector2(0, s.y * 0.44 + 70)
+	bg.add_child(tip)
+	_load = bg
+
 ## faixas pretas de cinema (sem escurecer a tela) com um título
 var _lb: Control
 func letterbox(on: bool, title := "") -> void:

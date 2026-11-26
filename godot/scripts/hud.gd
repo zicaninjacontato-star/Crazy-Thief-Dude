@@ -14,6 +14,7 @@ var gas := false
 var brk := false
 var sprint := false
 var fire := false
+var fire_tap := false
 var flash := 0.0
 var wasted := ""
 var weapon_text := ""
@@ -225,7 +226,9 @@ func _press(k: String, on: bool) -> void:
 		"gas": gas = on
 		"brake": brk = on
 		"sprint": sprint = on
-		"fire": fire = on
+		"fire":
+			fire = on
+			if on: fire_tap = true     # toque rápido (aperta e solta no mesmo quadro) não se perde
 		"missile": missile = on
 		"aim":
 			if on: aim = not aim
@@ -514,12 +517,17 @@ func _draw_minimap() -> void:
 			var h := sqrt(rw * rw - d * d)
 			var a: Vector3
 			var b: Vector3
+			# só dentro da grade da cidade (antes as ruas continuavam como linhas retas pelo mar)
 			if axis == 0:
-				a = Vector3(c, 0, map_player.z - h)
-				b = Vector3(c, 0, map_player.z + h)
+				a = Vector3(c, 0, maxf(map_player.z - h, -map_ext))
+				b = Vector3(c, 0, minf(map_player.z + h, map_ext))
+				if a.z >= b.z:
+					continue
 			else:
-				a = Vector3(map_player.x - h, 0, c)
-				b = Vector3(map_player.x + h, 0, c)
+				a = Vector3(maxf(map_player.x - h, -map_ext), 0, c)
+				b = Vector3(minf(map_player.x + h, map_ext), 0, c)
+				if a.x >= b.x:
+					continue
 			root.draw_line(tr.call(a), tr.call(b), Color(0.16, 0.16, 0.18), map_roadw * sc)
 	for er in map_extra:
 		var ea: Vector2 = tr.call(er[0])

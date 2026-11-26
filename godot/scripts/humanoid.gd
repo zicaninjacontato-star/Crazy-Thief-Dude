@@ -4,6 +4,7 @@ extends Node3D
 ## Animação procedural de andar/correr/sentar e ragdoll físico de verdade (RigidBody3D + juntas).
 
 const M := preload("res://scripts/mats.gd")
+const FXW := preload("res://scripts/fx.gd")
 
 static var _mat: StandardMaterial3D
 
@@ -39,6 +40,14 @@ var reload_dur := 1.0
 var gun: Node3D
 
 ## arma na mão direita (apontando para frente quando o braço está esticado)
+## ponta do cano da arma na mão (o tiro sai daqui); fallback = peito
+func muzzle_pos(fallback: Vector3) -> Vector3:
+	if gun == null or not is_instance_valid(gun) or not gun.visible or gun_kind in ["", "fist", "grenade"]:
+		return fallback
+	var L: float = {"pistol": 0.22, "smg": 0.42, "rifle": 0.85, "sniper": 0.85, "shotgun": 0.75, "rpg": 0.65}.get(gun_kind, 0.3)
+	var tip: Vector3 = gun.global_transform * Vector3(0, -L + 0.04, 0.03)
+	return tip if tip.distance_to(fallback) < 1.6 else fallback
+
 func give_gun(g: Node3D) -> void:
 	if gun:
 		gun.queue_free()
@@ -218,6 +227,11 @@ func animate(speed: float, dt: float) -> void:
 	_run = lerpf(_run, clampf((speed - 2.6) / 3.0, 0.0, 1.0), minf(1.0, dt * 5.0))
 	if speed > 0.05:
 		phase += dt * lerpf(5.4, 9.2, _run) * clampf(speed / 1.2, 0.6, 1.4)
+	if pose == "getup":
+		_gu += dt
+		pose_t = clampf(_gu / GETUP_T, 0.0, 1.0)
+		if _gu >= GETUP_T:
+			pose = ""
 	if pose != "":
 		_pose(dt, th, sh, up, fo)
 		return
@@ -445,6 +459,71 @@ func _swim(speed: float, dt: float, th: Array, sh: Array, up: Array, fo: Array) 
 			up[k].rotation = Vector3(-0.35, sg * sin(phase * 1.6) * 0.45, sg * 1.25)
 			fo[k].rotation.x = -0.35
 
+## levantar do chão depois do ragdoll (de costas: senta → ajoelha → em pé; de bruços: empurra → ajoelha → em pé)
+const GETUP_T := 1.35
+var _gu := 0.0
+var _gu_down := false
+func start_getup(face_down: bool) -> void:
+	pose = "getup"
+	_gu = 0.0
+	pose_t = 0.0
+	_gu_down = face_down
+
+func _getup_pose(k: float, th: Array, sh: Array, up: Array, fo: Array) -> void:
+	var e := func(a: float, b: float, x: float) -> float: return smoothstep(a, b, x)
+	if k < 0.38:
+		var a: float = e.call(0.0, 0.38, k)
+		bones.hips.position.y = lerpf(0.16, 0.24, a)
+		if _gu_down:
+			# de bruços → empurra o chão com os braços e recolhe as pernas
+			bones.hips.rotation.x = lerpf(1.45, 0.9, a)
+			bones.chest.rotation.x = lerpf(0.0, -0.5, a)
+			for i in 2:
+				up[i].rotation.x = lerpf(-1.4, -0.6, a)
+				fo[i].rotation.x = lerpf(-1.2, -0.2, a)
+				th[i].rotation.x = lerpf(0.0, -1.3, a) * (1.0 if i == 0 else 0.6)
+				sh[i].rotation.x = lerpf(0.0, 1.9, a)
+		else:
+			# de costas → senta, mãos apoiadas atrás
+			bones.hips.rotation.x = lerpf(-1.45, 0.0, a)
+			bones.chest.rotation.x = lerpf(0.0, 0.25, a)
+			for i in 2:
+				th[i].rotation.x = lerpf(0.0, -1.45, a)
+				sh[i].rotation.x = lerpf(0.0, 0.5 + i * 0.6, a)
+				up[i].rotation = Vector3(lerpf(0.0, 0.7, a), 0, (0.25 if i == 0 else -0.25) * a)
+				fo[i].rotation.x = -0.2 * a
+	elif k < 0.7:
+		# ajoelhado numa perna, mão no joelho
+		var a: float = e.call(0.38, 0.7, k)
+		bones.hips.position.y = lerpf(0.24, 0.55, a)
+		bones.hips.rotation.x = lerpf(0.9 if _gu_down else 0.0, 0.15, a)
+		bones.chest.rotation.x = lerpf(-0.5 if _gu_down else 0.25, 0.45, a)
+		th[0].rotation.x = lerpf(-1.3 if _gu_down else -1.45, -1.45, a)
+		sh[0].rotation.x = lerpf(1.9 if _gu_down else 0.5, 1.5, a)
+		th[1].rotation.x = lerpf(-0.8, 0.05, a)
+		sh[1].rotation.x = lerpf(1.9 if _gu_down else 1.1, 1.65, a)
+		up[0].rotation.x = -0.9
+		fo[0].rotation.x = -0.6
+		up[1].rotation.x = lerpf(0.4, -0.3, a)
+	else:
+		# levanta empurrando o joelho
+		var a: float = e.call(0.7, 1.0, k)
+		bones.hips.position.y = lerpf(0.55, 0.98, a)
+		bones.hips.rotation.x = lerpf(0.15, 0.0, a)
+		bones.chest.rotation.x = lerpf(0.45, 0.0, a)
+		th[0].rotation.x = lerpf(-1.45, 0.0, a)
+		sh[0].rotation.x = lerpf(1.5, 0.0, a)
+		th[1].rotation.x = lerpf(0.05, 0.0, a)
+		sh[1].rotation.x = lerpf(1.65, 0.0, a)
+		up[0].rotation.x = lerpf(-0.9, 0.0, a)
+		fo[0].rotation.x = lerpf(-0.6, 0.0, a)
+
+## o ragdoll terminou de bruços? (peito virado para baixo)
+func rag_face_down() -> bool:
+	if parts.size() > 1 and is_instance_valid(parts[1]):
+		return parts[1].global_transform.basis.z.y < 0.0
+	return false
+
 ## poses especiais (parkour, carregar/arrastar corpo, derrubar, puxar da porta, quebrar vidro, mixa, cobertura)
 func _pose(dt: float, th: Array, sh: Array, up: Array, fo: Array) -> void:
 	var k := pose_t
@@ -490,6 +569,8 @@ func _pose(dt: float, th: Array, sh: Array, up: Array, fo: Array) -> void:
 				fo[i].rotation.x = -0.25
 				th[i].rotation.x = -0.5 - sin(phase + i * PI) * 0.35 * _w
 				sh[i].rotation.x = 0.7
+		"getup":
+			_getup_pose(k, th, sh, up, fo)
 		"exit":
 			# saindo do carro: começa agachado/encolhido e se levanta
 			var ke := 1.0 - k
@@ -634,3 +715,53 @@ func ragdoll(impulse: Vector3, ignore: PhysicsBody3D = null, gore := false) -> A
 	mu.add_to_group("tmp")
 	rag_alive = false
 	return [rbs, torn]
+
+## ferimento visível na parte do corpo (tiro, queda, explosão): mancha de sangue presa ao osso
+## (no ragdoll, ao corpo rígido daquele osso); wound_data guarda tudo para o corpo novo ao levantar
+const RAG_ORDER := ["hips", "chest", "head", "thighL", "thighR", "shinL", "shinR", "upperL", "upperR", "foreL", "foreR"]
+var wounds := 0
+var wound_data: Array = []     # [{bn, xf (local ao osso), big}]
+func _wound_host(bn: String) -> Node3D:
+	if ragdolled:
+		var i := RAG_ORDER.find(bn)
+		if i >= 0 and i < parts.size() and is_instance_valid(parts[i]):
+			return parts[i]
+		return null
+	return bones.get(bn)
+
+func add_wound(zone: String, dir: Vector3, big := false) -> void:
+	if wounds >= 14 or not FXW.blood_on:
+		return
+	var opts: Array = {"head": ["head"], "torso": ["chest", "chest", "hips"], "leg": ["thighL", "thighR", "shinL", "shinR"], "arm": ["upperL", "upperR", "foreL", "foreR"], "any": ["chest", "hips", "thighL", "thighR", "upperL", "upperR", "head", "shinL", "foreR"]}.get(zone, ["chest"])
+	var bn: String = opts[randi() % opts.size()]
+	if not spec.has(bn):
+		return
+	var host := _wound_host(bn)
+	if host == null:
+		return
+	var sp: Dictionary = spec[bn]
+	var down := -1.0 if not (bn in ["chest", "head", "hips"]) else 1.0
+	var along: float = sp.len * randf_range(0.25, 0.75) * down
+	var center: Vector3 = host.global_transform * Vector3(0, along, 0)
+	var out := -dir
+	out.y *= 0.3
+	if out.length() < 0.1:
+		out = host.global_transform.basis.z
+	out = out.normalized()
+	var surf: Vector3 = center + out * float(sp.rad) * 0.92
+	FXW.wound(host, surf, out, 0.07 if not big else 0.12)
+	var w: Node3D = host.get_child(host.get_child_count() - 1)
+	wound_data.append({"bn": bn, "xf": host.global_transform.affine_inverse() * w.global_transform})
+	wounds += 1
+
+## recria os ferimentos num corpo novo (levantou do ragdoll / trocou de roupa)
+func apply_wounds(data: Array) -> void:
+	for d in data:
+		var host := _wound_host(d.bn)
+		if host == null:
+			continue
+		FXW.wound(host, Vector3.ZERO, Vector3.FORWARD)
+		var w: Node3D = host.get_child(host.get_child_count() - 1)
+		w.transform = d.xf
+		wound_data.append(d)
+		wounds += 1
