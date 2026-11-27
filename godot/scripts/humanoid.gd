@@ -22,6 +22,7 @@ var swimming := false
 var moto_pose := false
 var pedal := -1.0        # bicicleta: fase do pedal (<0 = não pedala)
 var guard := false       # guarda alta (modo luta)
+var hide_gun := false     # celular na mão (câmera do celular): arma guardada
 var arm_pose := ""       # só os braços: "handsup" (rendido), "phone" (ligando para a polícia)
 var hurt_t := 0.0        # reação a um soco (cabeça e tronco jogados para trás)
 var hurt_side := 1.0
@@ -257,7 +258,7 @@ func animate(speed: float, dt: float) -> void:
 	bones.hips.rotation = Vector3.ZERO
 	bones.hips.position.y = 0.98
 	if gun and is_instance_valid(gun):
-		gun.visible = not swimming
+		gun.visible = not swimming and not hide_gun
 		if not aiming or swimming:
 			gun.basis = Basis()
 	if swimming:
@@ -371,6 +372,53 @@ func _upper(dt: float, up: Array, fo: Array) -> void:
 			fo[k3].rotation.x = -0.35 + sin(_t * 9.0 + k3) * 0.05
 		bones.head.rotation.x = 0.15
 		return
+	# poses para foto (câmera do celular)
+	match arm_pose:
+		"selfie":     # braço direito esticado segurando o celular
+			up[1].rotation = Vector3(-1.75, 0, -0.35)
+			fo[1].rotation.x = -0.25
+			up[0].rotation = Vector3(-0.1, 0, 0.08)
+			fo[0].rotation.x = -0.3
+			bones.head.rotation.x = 0.05
+			return
+		"peace":      # paz e amor perto do rosto + celular
+			up[1].rotation = Vector3(-1.75, 0, -0.35)
+			fo[1].rotation.x = -0.25
+			up[0].rotation = Vector3(-2.3, 0, 0.55)
+			fo[0].rotation.x = -1.5
+			bones.head.rotation.z = 0.18
+			return
+		"flex":       # mostrando o muque
+			for k3 in 2:
+				up[k3].rotation = Vector3(-0.15, 0, 1.45 if k3 == 0 else -1.45)
+				fo[k3].rotation.x = -2.0
+			bones.chest.rotation.x = -0.12
+			return
+		"wave":       # tchauzinho
+			up[1].rotation = Vector3(-2.55, 0, -0.55)
+			fo[1].rotation.x = -0.7 + sin(_t * 9.0) * 0.45
+			up[0].rotation = Vector3(-0.1, 0, 0.08)
+			fo[0].rotation.x = -0.3
+			return
+		"point":      # apontando para a câmera
+			up[1].rotation = Vector3(-1.55, 0, 0.05)
+			fo[1].rotation.x = -0.05
+			up[0].rotation = Vector3(-0.1, 0, 0.08)
+			fo[0].rotation.x = -0.4
+			bones.head.rotation.x = -0.1
+			return
+		"crossed":    # braços cruzados
+			for k3 in 2:
+				up[k3].rotation = Vector3(-0.55, 0, 0.2 if k3 == 0 else -0.2)
+				fo[k3].rotation = Vector3(-1.75, 0.8 if k3 == 0 else -0.8, 0)
+			bones.head.rotation.x = -0.12
+			return
+		"cheer":      # comemorando, dois braços para cima
+			for k3 in 2:
+				up[k3].rotation = Vector3(-2.9, 0, 0.6 if k3 == 0 else -0.6)
+				fo[k3].rotation.x = -0.3 + sin(_t * 7.0 + k3 * 2.0) * 0.25
+			bones.head.rotation.x = -0.2
+			return
 	if arm_pose == "phone":
 		up[1].rotation = Vector3(-0.35, 0, -0.75)
 		fo[1].rotation.x = -2.35

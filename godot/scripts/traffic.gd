@@ -334,7 +334,10 @@ func _drive(a: Dictionary, dt: float) -> void:
 			c.steer_in = clampf(ang * 1.6, -1.0, 1.0)
 			c.throttle = 1.0 if absf(ang) < 2.2 or c.forward_speed() > 4.0 else -0.6
 			c.brake_in = 0.0
-			if int(a.mode_t * 2.0) % 5 == 0 and md == "chase":
+			# buzina de vez em quando (antes tocava em todo quadro por meio segundo = zumbido)
+			a.horn_t = a.get("horn_t", 0.0) - get_physics_process_delta_time()
+			if md == "chase" and a.horn_t <= 0.0:
+				a.horn_t = rng.randf_range(2.2, 4.0)
 				main.audio.play("horn", pos, 0.0)
 			return
 	# vigia: carro que não sai do lugar por muito tempo

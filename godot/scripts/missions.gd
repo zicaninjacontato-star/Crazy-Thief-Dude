@@ -38,16 +38,25 @@ var job_car = null             # veículo do trabalho/aluguel (some no fim)
 var drops: Array = []
 var drop_i := 0
 var job_gang := ""
+var near_giver := {}          # marcador de missão em que o jogador está (botão INICIAR)
+var rent_i := -1              # carro alugado no racha (-1 = veículo próprio)
 
 const INFO := {
-	"delivery": {"name": "ENTREGA QUENTE", "reward": 900, "label": "M"},
-	"hit": {"name": "ACERTO DE CONTAS", "reward": 1200, "label": "M"},
-	"race": {"name": "CORRIDA DE RUA", "reward": 1000, "label": "CORRIDA"},
-	"truck": {"name": "TRANSPORTADORA", "reward": 0, "label": "CAMINHÃO"},
-	"motojob": {"name": "ENTREGAS DE MOTO", "reward": 0, "label": "ENTREGAS"},
-	"gang_g": {"name": "SERVIÇO DA GANGUE VERDE", "reward": 1100, "label": "GANGUE"},
-	"gang_p": {"name": "SERVIÇO DA GANGUE ROSA", "reward": 1100, "label": "GANGUE"},
+	"delivery": {"name": "ROUBO DE CARRO", "reward": 900, "icon": "m_steal", "desc": "Roube o esportivo vermelho estacionado e leve até a garagem antes do tempo. O alarme chama a polícia."},
+	"hit": {"name": "ACERTO DE CONTAS", "reward": 1200, "icon": "m_hit", "desc": "Elimine o alvo protegido por capangas armados."},
+	"race": {"name": "RACHA", "reward": 1000, "icon": "m_race", "desc": "Corrida de 2 voltas contra 3 pilotos. Prêmio: 1º $1.000 · 2º $450 · 3º $150."},
+	"truck": {"name": "TRANSPORTADORA", "reward": 0, "icon": "m_truck", "desc": "Leve a carga do caminhão da empresa a 3 endereços. $380 por entrega + $400 no fim."},
+	"motojob": {"name": "ENTREGAS DE MOTO", "reward": 0, "icon": "m_moto", "desc": "4 pedidos com tempo. Quanto mais rápido, maior a gorjeta; atrasou, o cliente cancela."},
+	"gang_g": {"name": "SERVIÇO DA GANGUE VERDE", "reward": 1100, "icon": "m_gang", "desc": "A gangue tem um serviço: eliminar alguém, roubar um carro ou espalhar a droga."},
+	"gang_p": {"name": "SERVIÇO DA GANGUE ROSA", "reward": 1100, "icon": "m_gang", "desc": "A gangue tem um serviço: eliminar alguém, roubar um carro ou espalhar a droga."},
 }
+## carros para alugar no racha: cada um mais rápido, mas nenhum mais rápido que os adversários
+const RENT := [
+	{"name": "Hatch preparado", "kind": "hatch", "price": 100, "eng": 1.25, "vmax": 1.0, "mods": {"wheels": 2, "sticker": 1, "spoiler": 1}},
+	{"name": "Sedã envenenado", "kind": "sedan", "price": 220, "eng": 1.35, "vmax": 1.05, "mods": {"wheels": 1, "sticker": 4, "spoiler": 2, "fbumper": 1}},
+	{"name": "Esportivo", "kind": "sport", "price": 400, "eng": 1.3, "vmax": 1.03, "mods": {"wheels": 3, "sticker": 1, "spoiler": 2, "fbumper": 1, "rbumper": 1}},
+	{"name": "Supercarro", "kind": "super", "price": 750, "eng": 1.0, "vmax": 0.95, "mods": {"wheels": 5, "sticker": 3, "spoiler": 3}},
+]
 const RACE_FEE := 150
 const RACE_LAPS := 2
 ## trajetos da corrida: cruzamentos da grade (índice da rua 0..7), em laço fechado
@@ -67,15 +76,14 @@ func setup(m: Node3D) -> void:
 	var spots := {
 		"delivery": [Vector3(c._center(0) + sw, 0.15, c._center(0)), Vector3.INF, 0.0],
 		"hit": [Vector3(c._center(4) - sw, 0.15, c._center(1)), Vector3.INF, 0.0],
-		"race": [Vector3(c._center(1), 0.15, c._center(4) - sw), Vector3(c._center(1), 0.8, c._center(4) - half + 2.6), -PI * 0.5],
+		"race": [c.race_lot.giver, c.race_lot.rent, PI * 0.5],
 		"truck": [Vector3(c._center(3), 0.15, c._center(0) + sw), Vector3(c._center(3) + 6.0, 0.9, c._center(0) + half - 2.6), PI * 0.5],
 		"motojob": [Vector3(c._center(1) + 8.0, 0.15, c._center(3) + sw), Vector3(c._center(1) + 12.0, 0.8, c._center(3) + half - 2.6), PI * 0.5],
 	}
 	var hq: Dictionary = c.gang_hq
 	for g in ["g", "p"]:
 		if hq.has(g):
-			var side: Vector3 = hq[g].fwd.cross(Vector3.UP)
-			var gp: Vector3 = hq[g].gate_out + side * 8.0
+			var gp: Vector3 = hq[g].alley          # viela ao lado do esconderijo
 			spots["gang_" + g] = [Vector3(gp.x, 0.15, gp.z), Vector3.INF, 0.0]
 	for id in spots:
 		var pos: Vector3 = spots[id][0]
@@ -85,18 +93,74 @@ func setup(m: Node3D) -> void:
 		elif id == "gang_p":
 			col = Color(1.0, 0.4, 0.75)
 		var mk := W2.marker(main, pos, col, 0.9)
-		var lb := Label3D.new()
-		lb.text = INFO[id].label
-		lb.font_size = 160 if INFO[id].label == "M" else 72
-		lb.pixel_size = 0.01
-		lb.modulate = col
-		lb.outline_size = 14
+		# placa flutuante com o símbolo da missão (bandeira, carro com cadeado, mira, caminhão...)
+		var lb := Sprite3D.new()
+		lb.texture = icon_tex(INFO[id].icon, col)
+		lb.pixel_size = 0.016
 		lb.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		lb.shaded = false
+		lb.no_depth_test = false
 		main.add_child(lb)
-		lb.global_position = pos + Vector3(0, 3.2, 0)
-		givers.append({"id": id, "pos": pos, "node": mk, "label": lb, "car_pos": spots[id][1], "car_yaw": spots[id][2], "col": col})
+		lb.global_position = pos + Vector3(0, 3.0, 0)
+		givers.append({"id": id, "pos": pos, "node": mk, "label": lb, "car_pos": spots[id][1], "car_yaw": spots[id][2], "col": col, "icon": INFO[id].icon})
 	garage = Vector3(c._center(4) + c.CELL * 0.5 + 2.6, 0.15, c._center(4))
+
+## símbolo de cada missão (placa flutuante): desenhado em uma Image 64×64
+static var _icons := {}
+static func icon_tex(kind: String, col: Color) -> Texture2D:
+	var key := kind + col.to_html()
+	if _icons.has(key):
+		return _icons[key]
+	var n := 64
+	var im := Image.create(n, n, false, Image.FORMAT_RGBA8)
+	im.fill(Color(0, 0, 0, 0))
+	var bg := Color(0.06, 0.06, 0.08, 0.92)
+	var w := Color(1, 1, 1)
+	for y in n:
+		for x in n:
+			var d := Vector2(x - 31.5, y - 31.5).length()
+			if d < 30.5:
+				im.set_pixel(x, y, col if d > 27.0 else bg)
+	var R := func(x0: int, y0: int, x1: int, y1: int, c: Color):
+		for yy in range(y0, y1):
+			for xx in range(x0, x1):
+				im.set_pixel(xx, yy, c)
+	match kind:
+		"m_race":   # bandeira quadriculada
+			R.call(16, 14, 19, 50, w)
+			for yy in 4:
+				for xx in 6:
+					R.call(19 + xx * 5, 14 + yy * 5, 24 + xx * 5, 19 + yy * 5, w if (xx + yy) % 2 == 0 else Color(0.1, 0.1, 0.1))
+		"m_steal":  # carro + cadeado
+			R.call(12, 30, 46, 40, w); R.call(18, 23, 38, 31, w)
+			R.call(15, 39, 21, 45, Color(0.2, 0.2, 0.2)); R.call(37, 39, 43, 45, Color(0.2, 0.2, 0.2))
+			R.call(40, 36, 54, 48, col); R.call(43, 30, 45, 37, col); R.call(49, 30, 51, 37, col); R.call(43, 29, 51, 31, col)
+		"m_hit":    # mira
+			for yy in n:
+				for xx in n:
+					var d := Vector2(xx - 31.5, yy - 31.5).length()
+					if absf(d - 15.0) < 1.8 or d < 2.5:
+						im.set_pixel(xx, yy, Color(1, 0.3, 0.3))
+			R.call(31, 10, 33, 24, w); R.call(31, 40, 33, 54, w); R.call(10, 31, 24, 33, w); R.call(40, 31, 54, 33, w)
+		"m_truck":  # caminhão
+			R.call(10, 20, 36, 40, w); R.call(36, 27, 50, 40, w); R.call(40, 29, 47, 34, bg)
+			R.call(14, 39, 21, 46, Color(0.3, 0.3, 0.3)); R.call(40, 39, 47, 46, Color(0.3, 0.3, 0.3))
+		"m_moto":   # moto + caixa de entrega
+			R.call(14, 36, 22, 44, w); R.call(40, 36, 48, 44, w); R.call(20, 32, 44, 36, w); R.call(36, 24, 39, 33, w)
+			R.call(18, 20, 30, 31, Color(1, 0.6, 0.1))
+		"m_gang":   # caveira
+			for yy in n:
+				for xx in n:
+					if Vector2(xx - 31.5, (yy - 27.0) * 1.1).length() < 13.0:
+						im.set_pixel(xx, yy, w)
+			R.call(24, 36, 40, 46, w)
+			R.call(24, 23, 30, 30, bg); R.call(34, 23, 40, 30, bg); R.call(30, 31, 34, 35, bg)
+			R.call(28, 40, 30, 46, bg); R.call(34, 40, 36, 46, bg)
+		_:
+			R.call(28, 14, 36, 40, w); R.call(28, 44, 36, 50, w)
+	var t := ImageTexture.create_from_image(im)
+	_icons[key] = t
+	return t
 
 func hostiles() -> Array:
 	thugs = thugs.filter(func(t): return is_instance_valid(t))
@@ -118,7 +182,7 @@ func blips() -> Array:
 	var b := []
 	if active == "":
 		for g in givers:
-			b.append({"pos": g.pos, "col": g.col, "icon": "mission"})
+			b.append({"pos": g.pos, "col": g.col, "icon": g.icon})
 	if active == "race" and not checkpoints.is_empty():
 		var n := checkpoints.size()
 		b.append({"pos": checkpoints[cp_i % n], "col": Color(0.2, 0.8, 1.0), "icon": "cp", "next": checkpoints[(cp_i + 1) % n]})
@@ -168,14 +232,17 @@ func tick(dt: float) -> void:
 		_text()
 		return
 	if active == "":
+		# perto do marcador só aparece o botão INICIAR (não começa sozinho)
+		near_giver = {}
+		var pp: Vector3 = veh.global_position if veh else p.global_position
 		for g in givers:
-			if p.global_position.distance_to(g.pos) < 2.6 and not main.combat.dead and veh == null:
-				_start(g.id)
-				_text()
-				return
+			var r := 6.5 if (veh != null and g.id == "race") else 2.8
+			if Vector2(pp.x - g.pos.x, pp.z - g.pos.z).length() < r and not main.combat.dead and (veh == null or g.id == "race"):
+				near_giver = g
 		text = ""
 		_text()
 		return
+	near_giver = {}
 	match active:
 		"delivery": _delivery_tick(veh)
 		"hit": _hit_tick()
@@ -203,14 +270,31 @@ func _job_vehicle(id: String, kind: String, col: Color):
 	job_car = c
 	return c
 
+## opções da tela da missão: [[texto, habilitado, Callable], ...]
+func offer_options(g: Dictionary) -> Array:
+	var id: String = g.id
+	var out := []
+	if id == "race":
+		var veh = main.player.vehicle
+		if veh != null:
+			out.append(["Certeza que quer iniciar com esse veículo? SIM", true, func(): rent_i = -1; _start("race")])
+		for i in RENT.size():
+			var it: Dictionary = RENT[i]
+			var ii := i
+			out.append(["Alugar %s · $%d" % [it.name, it.price], main.money >= it.price, func(): rent_i = ii; _start("race")])
+	else:
+		out.append(["INICIAR", true, func(): _start(id)])
+	return out
+
 func _start(id: String) -> void:
 	var p = main.player
 	var c = main.city
-	if id == "race":
-		if main.money < RACE_FEE:
-			main._msg("Aluguel do carro de corrida: $%d (dinheiro insuficiente)" % RACE_FEE, true)
+	if id == "race" and rent_i >= 0:
+		var it: Dictionary = RENT[rent_i]
+		if main.money < it.price:
+			main._msg("Dinheiro insuficiente para o aluguel", true)
 			return
-		main.money -= RACE_FEE
+		main.money -= it.price
 	active = id
 	reward = INFO[id].reward
 	main.hud.banner(INFO[id].name, Color(1, 0.85, 0.1))
@@ -239,13 +323,20 @@ func _start(id: String) -> void:
 			text = "Pegue a moto de entregas"
 		"gang_g", "gang_p":
 			job_gang = id.substr(5)
-			var kind := "kill" if int(done.get(id, 0)) % 2 == 0 else "drugs"
+			var kind: String = ["kill", "steal", "drugs"][int(done.get(id, 0)) % 3]
 			set_meta("gang_kind", kind)
 			if kind == "kill":
 				var spot := _far_sidewalk(p.global_position, 150.0, 320.0)
 				_spawn_target(spot, 2)
 				text = "Gangue: elimine o alvo (vermelho no mapa)"
 				timer = 240.0
+			elif kind == "steal":
+				var spot := _far_sidewalk(p.global_position, 160.0, 330.0)
+				target_car = main._spawn_car(spot + Vector3(0, 0.5, 0), rng.randf() * TAU, [Color(0.9, 0.9, 0.92), Color(0.05, 0.05, 0.06), Color(0.6, 0.0, 0.05)][rng.randi() % 3], false, ["super", "sport", "suv"][rng.randi() % 3])
+				target_car.parked = true
+				target_car.unlocked = false
+				text = "Gangue: roube o carro marcado e traga para a viela"
+				timer = 300.0
 			else:
 				_make_drops(3, 90.0, 300.0)
 				drop_i = 0
@@ -346,6 +437,29 @@ func _gang_tick(dt: float, veh) -> void:
 	if kind == "kill":
 		_hit_tick()
 		return
+	if kind == "steal":
+		if target_car == null or not is_instance_valid(target_car) or target_car.dead:
+			fail("O carro foi destruído")
+			return
+		var drop: Vector3 = main.city.gang_hq[job_gang].get("alley", main.city.gang_hq[job_gang].gate_out)
+		if veh != target_car:
+			if obj_node:
+				_clear_obj()
+			obj_pos = target_car.global_position
+			text = "Gangue: roube o carro marcado e traga para a viela"
+			return
+		if obj_node == null:
+			_set_obj(drop, Color(0.6, 1.0, 0.3), 5.0)
+		text = "Gangue: leve o carro até a viela"
+		if Vector2(veh.global_position.x - drop.x, veh.global_position.z - drop.z).length() < 8.0 and veh.linear_velocity.length() < 3.0:
+			main.eject_player(Vector3.ZERO)
+			main.cars.erase(target_car)
+			var tc = target_car
+			target_car = null
+			tc.get_tree().create_timer(4.0).timeout.connect(func(): if is_instance_valid(tc) and main.player.vehicle != tc: tc.queue_free())
+			_clear_obj()
+			_success()
+		return
 	var p = main.player
 	var pp: Vector3 = veh.global_position if veh else p.global_position
 	text = "Gangue: entregue a droga nos 3 pontos (%d/3)" % (drop_i + 1)
@@ -409,6 +523,12 @@ var finish_order: Array = []
 func _node(q: Array) -> Vector3:
 	return Vector3((q[0] - 3.5) * main.city.CELL, 0.4, (q[1] - 3.5) * main.city.CELL)
 
+var grid: Array = []          # posições de largada [pos, yaw]
+var race_kind := "sport"      # modelo do carro do jogador (para trocar se explodir)
+var race_mods := {}
+var race_top := 40.0          # velocidade máxima do carro do jogador (m/s)
+var _pdead_t := 0.0
+
 func _race_start() -> void:
 	var route: Array = ROUTES[route_i % ROUTES.size()]
 	route_i += 1
@@ -423,29 +543,178 @@ func _race_start() -> void:
 	var dir: Vector3 = (b - a).normalized()
 	var side: Vector3 = dir.cross(Vector3.UP)
 	var yaw := atan2(dir.x, dir.z)
-	var grid := []
+	grid = []
 	for k in 4:
-		grid.append(a + dir * (16.0 - float(k / 2) * 7.0) + side * (2.4 if k % 2 == 0 else -2.4) + Vector3(0, 0.4, 0))
-	var pc = main._spawn_car(grid[0], yaw, Color(0.95, 0.75, 0.05), false, "sport")
-	pc.unlocked = true
-	pc.set_meta("job", true)
+		grid.append([a + dir * (16.0 - float(k / 2) * 7.0) + side * (2.4 if k % 2 == 0 else -2.4) + Vector3(0, 0.4, 0), yaw])
+	# tela de cinema: do ponto de encontro para a largada
+	main.ui.cinematic("RACHA", "indo para a largada...", _race_setup)
+
+func _race_setup() -> void:
+	var own = main.player.vehicle
+	var pc
+	if rent_i < 0 and own != null and is_instance_valid(own):
+		pc = own                               # corre com o próprio veículo
+		race_kind = own.get("variant") if own.get("variant") else own.kind
+		race_mods = own.get("mods") if own.get("mods") is Dictionary else {}
+	else:
+		if own != null:
+			main.eject_player(Vector3.ZERO)
+		var it: Dictionary = RENT[maxi(rent_i, 0)]
+		race_kind = it.kind
+		race_mods = it.mods.duplicate()
+		race_mods["paint"] = Color(0.95, 0.75, 0.05).to_html()
+		pc = _rent_car(grid[0][0], grid[0][1])
 	job_car = pc
-	main.player.global_position = pc.global_position + side * 2.5
-	main.finish_enter(pc)
+	_place(pc, grid[0][0], grid[0][1])
+	if main.player.vehicle != pc:
+		main.player.global_position = pc.global_position + Vector3(2.5, 0, 0)
+		main.finish_enter(pc)
+	race_top = main.Car.VMAX.get(pc.get("variant"), main.Car.VMAX.get(pc.kind, 160.0)) / 3.6 * float(pc.get("vmax_mult") if pc.get("vmax_mult") else 1.0)
 	racers = []
-	var kinds := ["super", "sport", "sport"]
+	var kinds := ["super", "sport", "super"]
 	var cols := [Color(0.1, 0.3, 0.9), Color(0.85, 0.1, 0.1), Color(0.1, 0.1, 0.1)]
 	for k in 3:
-		var rc = main._spawn_car(grid[k + 1], yaw, cols[k], false, kinds[k])
-		rc.set_meta("job", true)
-		main.seat_npc(rc)
-		racers.append({"car": rc, "cp": 0, "lap": 0, "done": false, "skill": rng.randf_range(0.84, 0.97)})
+		var r := {"cp": 0, "lap": 0, "done": false, "kind": kinds[k], "col": cols[k],
+			"skill": rng.randf_range(1.02, 1.07), "dead_t": 0.0}
+		r.car = _racer_car(r, grid[k + 1][0], grid[k + 1][1])
+		racers.append(r)
 	cp_i = 0
 	laps = 0
 	finish_order = []
+	_pdead_t = 0.0
 	race_t = -3.0        # contagem regressiva
 	main.hud.banner("3", Color(1, 1, 1), 1.0)
 	_set_obj(checkpoints[0], Color(0.2, 0.8, 1.0), 6.0)
+
+## carro alugado do jogador (tunado, mais forte conforme o preço)
+func _rent_car(pos: Vector3, yaw: float):
+	var pc = main._spawn_car(pos, yaw, Color(0.95, 0.75, 0.05), false, race_kind)
+	pc.unlocked = true
+	pc.set_meta("job", true)
+	main.TUNING.apply(pc, race_mods)
+	if rent_i >= 0:
+		pc.eng_mult = RENT[rent_i].eng
+		pc.vmax_mult = RENT[rent_i].vmax
+	return pc
+
+## carro de um adversário: nunca mais lento que o do jogador (velocidade quase igual)
+func _racer_car(r: Dictionary, pos: Vector3, yaw: float):
+	var rc = main._spawn_car(pos, yaw, r.col, false, r.kind)
+	rc.set_meta("job", true)
+	rc.unlocked = false
+	main.TUNING.apply(rc, {"wheels": 1 + rng.randi() % 5, "sticker": 1 + rng.randi() % 5, "spoiler": 1 + rng.randi() % 3, "fbumper": 1, "paint": r.col.to_html()})
+	var base: float = main.Car.VMAX.get(r.kind, 230.0) / 3.6
+	rc.vmax_mult = maxf(1.0, race_top * r.skill * 1.06 / base)
+	rc.eng_mult = 1.3
+	main.seat_npc(rc)
+	_place(rc, pos, yaw)
+	return rc
+
+func _place(c, pos: Vector3, yaw: float) -> void:
+	c.global_transform = Transform3D(Basis(Vector3.UP, yaw), pos + Vector3(0, 0.5, 0))
+	c.linear_velocity = Vector3.ZERO
+	c.angular_velocity = Vector3.ZERO
+	c.throttle = 0.0
+	c.brake_in = 1.0
+
+## ponto de reposição: último ponto alcançado, virado para o próximo
+func _cp_spot(cp: int, lap: int, lane: float) -> Array:
+	var n := checkpoints.size()
+	if cp == 0 and lap == 0:
+		return grid[0]
+	var prv: Vector3 = checkpoints[(cp - 1 + n) % n]
+	var nx: Vector3 = checkpoints[cp % n]
+	var dir: Vector3 = (nx - prv).normalized()
+	return [prv + dir * 8.0 + dir.cross(Vector3.UP) * lane + Vector3(0, 0.4, 0), atan2(dir.x, dir.z)]
+
+## menu do racha: voltar ao último ponto (troca o carro se explodiu)
+func race_to_checkpoint() -> void:
+	if active != "race":
+		return
+	var sp := _cp_spot(cp_i, laps, 0.0)
+	main.ui.cinematic("RACHA", "voltando ao último ponto...", func():
+		if job_car == null or not is_instance_valid(job_car) or job_car.dead:
+			if main.player.vehicle != null:
+				main.eject_player(Vector3.ZERO)
+			job_car = _rent_car(sp[0], sp[1])
+		elif main.player.vehicle != job_car and main.player.vehicle != null:
+			main.eject_player(Vector3.ZERO)
+		if job_car.has_method("repair") and job_car.get("hp") != null and job_car.hp < 30.0:
+			job_car.repair()
+		_place(job_car, sp[0], sp[1])
+		if main.player.vehicle != job_car:
+			main.player.global_position = job_car.global_position + Vector3(2.5, 0, 0)
+			main.finish_enter(job_car)
+		_pdead_t = 0.0)
+
+## recomeça do início: todos de volta à largada, nova contagem
+func race_restart() -> void:
+	if active != "race":
+		return
+	main.ui.cinematic("RACHA", "recomeçando...", func():
+		if job_car == null or not is_instance_valid(job_car) or job_car.dead:
+			if main.player.vehicle != null:
+				main.eject_player(Vector3.ZERO)
+			job_car = _rent_car(grid[0][0], grid[0][1])
+		elif main.player.vehicle != job_car and main.player.vehicle != null:
+			main.eject_player(Vector3.ZERO)
+		if job_car.has_method("repair"):
+			job_car.repair()
+		_place(job_car, grid[0][0], grid[0][1])
+		if main.player.vehicle != job_car:
+			main.player.global_position = job_car.global_position + Vector3(2.5, 0, 0)
+			main.finish_enter(job_car)
+		for k in racers.size():
+			var r: Dictionary = racers[k]
+			if not is_instance_valid(r.car) or r.car.dead:
+				r.car = _racer_car(r, grid[k + 1][0], grid[k + 1][1])
+			else:
+				if r.car.has_method("repair"):
+					r.car.repair()
+				_place(r.car, grid[k + 1][0], grid[k + 1][1])
+			r.cp = 0
+			r.lap = 0
+			r.done = false
+			r.dead_t = 0.0
+		cp_i = 0
+		laps = 0
+		finish_order = []
+		_pdead_t = 0.0
+		race_t = -3.0
+		main.hud.banner("3", Color(1, 1, 1), 1.0)
+		_set_obj(checkpoints[0], Color(0.2, 0.8, 1.0), 6.0))
+
+## desvia de carros da rua à frente: desloca o alvo para o lado livre
+func _dodge(rc, tgt: Vector3) -> Vector3:
+	var b: Basis = rc.global_transform.basis
+	var fwd: Vector3 = b.z
+	fwd.y = 0
+	fwd = fwd.normalized()
+	var rt := fwd.cross(Vector3.UP)
+	var best := 99.0
+	var lat := 0.0
+	var v: float = maxf(rc.linear_velocity.length(), 8.0)
+	var look := clampf(v * 1.1, 14.0, 38.0)
+	for o in main.cars:
+		if o == rc or not is_instance_valid(o) or o.get("dead"):
+			continue
+		var d: Vector3 = o.global_position - rc.global_position
+		var ahead := d.dot(fwd)
+		if ahead < 2.0 or ahead > look:
+			continue
+		var side := d.dot(rt)
+		if absf(side) > 2.6:
+			continue
+		# carro à frente mais lento que nós
+		if o.linear_velocity.dot(fwd) > v * 0.8:
+			continue
+		if ahead < best:
+			best = ahead
+			lat = side
+	if best > 90.0:
+		return tgt
+	var push := -signf(lat) if absf(lat) > 0.3 else 1.0
+	return rc.global_position + fwd * best + rt * push * 3.4
 
 func _race_progress(lap: int, cp: int, pos: Vector3) -> float:
 	var n := checkpoints.size()
@@ -453,8 +722,14 @@ func _race_progress(lap: int, cp: int, pos: Vector3) -> float:
 	return lap * n + cp - d / 500.0
 
 func _race_tick(dt: float, veh) -> void:
+	if main.ui._cine:
+		return
 	if job_car == null or not is_instance_valid(job_car) or job_car.dead:
-		fail("O carro da corrida foi destruído")
+		# o carro do jogador explodiu: volta no último ponto com um carro igual
+		_pdead_t += dt
+		text = "Carro destruído! Voltando ao último ponto..."
+		if _pdead_t > 2.5 and not main.combat.dead:
+			race_to_checkpoint()
 		return
 	var prev_t := race_t
 	race_t += dt
@@ -477,8 +752,18 @@ func _race_tick(dt: float, veh) -> void:
 	# pilotos NPC
 	for r in racers:
 		var rc = r.car
-		if not is_instance_valid(rc) or rc.dead or r.done:
-			if is_instance_valid(rc) and r.done:
+		if not r.done and (not is_instance_valid(rc) or rc.dead):
+			# adversário bateu/explodiu: renasce no último ponto que alcançou (fica a carcaça)
+			r.dead_t += dt
+			if r.dead_t > 3.0:
+				r.dead_t = 0.0
+				if is_instance_valid(rc):
+					rc.remove_meta("job")
+				var sp := _cp_spot(r.cp, r.lap, rng.randf_range(-2.5, 2.5))
+				r.car = _racer_car(r, sp[0], sp[1])
+			continue
+		if r.done:
+			if is_instance_valid(rc):
 				rc.throttle = 0.0
 				rc.brake_in = 0.6
 			continue
@@ -498,7 +783,7 @@ func _race_tick(dt: float, veh) -> void:
 				rc.global_position = prv + dir * 6.0 + Vector3(0, 0.8, 0)
 				rc.rotation = Vector3(0, atan2(dir.x, dir.z), 0)
 				rc.linear_velocity = Vector3.ZERO
-		drive_to(rc, tgt, nxt, 30.0 * r.skill)
+		drive_to(rc, _dodge(rc, tgt), nxt, race_top * r.skill)
 		if Vector2(rc.global_position.x - tgt.x, rc.global_position.z - tgt.z).length() < 9.0:
 			r.cp += 1
 			if r.cp % n == 0:
@@ -624,7 +909,7 @@ func _cleanup() -> void:
 	thugs = []
 	target_ped = null
 	# carro alugado/do trabalho e pilotos somem (o jogador desce antes)
-	if job_car and is_instance_valid(job_car):
+	if job_car and is_instance_valid(job_car) and job_car.has_meta("job"):
 		if main.player.vehicle == job_car:
 			main.eject_player(Vector3.ZERO)
 		main.cars.erase(job_car)

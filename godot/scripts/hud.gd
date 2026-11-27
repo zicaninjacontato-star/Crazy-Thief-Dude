@@ -10,6 +10,7 @@ signal rob_pressed
 signal hostage_pressed
 signal cam_pressed
 signal phone_pressed
+signal reload_pressed
 # ---- editor de HUD: posição/tamanho de cada botão, do minimapa e do joystick (salvo nas configurações)
 var layout_ovr := {}          # nome -> [dx, dy, escala]
 var hud_alpha := 1.0
@@ -93,7 +94,8 @@ var speed: Label
 var hint: Label
 var buttons := {}   # nome -> Rect2 (em pixels de tela)
 var driving := false
-var bike := false             # de bicicleta: aparece o botão PULAR
+var bike := false
+var reload_avail := false      # arma com pente (botão RECARREGAR)             # de bicicleta: aparece o botão PULAR
 var money: Label
 var clock: Label
 var hp := 100.0
@@ -240,7 +242,9 @@ func _layout() -> void:
 	if driving and siren_avail:
 		buttons["siren"] = Rect2(s.x - b * 2 - 44, s.y * 0.38, b, b)
 	buttons["weapon"] = Rect2(s.x - 170, 122, 150, 78)
-	if shop_label != "" and (not driving or action_kind in ["tune", "fare_on", "fare_off"]):
+	if reload_avail and not driving:
+		buttons["reload"] = Rect2(s.x - 240, 128, 64, 64)
+	if shop_label != "" and (not driving or action_kind in ["tune", "fare_on", "fare_off", "mission", "race_menu"]):
 		buttons["shop"] = Rect2(s.x - b - 24, s.y * 0.38 - b - 16, b, b)
 	buttons["cam"] = Rect2(236, 30, 64, 64)
 	buttons["phone"] = Rect2(310, 30, 64, 64)
@@ -338,6 +342,8 @@ func _press(k: String, on: bool) -> void:
 			if on: cam_pressed.emit()
 		"phone":
 			if on: phone_pressed.emit()
+		"reload":
+			if on: reload_pressed.emit()
 		"siren":
 			if on: siren_pressed.emit()
 		"rob":
@@ -439,6 +445,11 @@ func _icon(kind: String, c: Vector2, r: float, col: Color) -> void:
 			root.draw_line(c + Vector2(-0.3, 0.55) * r, c + Vector2(0.3, 0.55) * r, Color(0.5, 0.35, 0.1), w)
 		"car":
 			_car_icon(c, r, col, false)
+		"reload":
+			# recarregar: seta circular
+			root.draw_arc(c, r * 0.55, 0.4, TAU - 0.5, 20, col, 3.0)
+			var tip := c + Vector2(cos(0.4), sin(0.4)) * r * 0.55
+			root.draw_colored_polygon(PackedVector2Array([tip + Vector2(-0.05, -0.38) * r, tip + Vector2(0.3, 0.05) * r, tip + Vector2(-0.32, 0.12) * r]), col)
 		"phone":
 			# celular: corpo + tela + botão
 			root.draw_rect(Rect2(c + Vector2(-0.42, -0.78) * r, Vector2(0.84, 1.56) * r), col, false, 2.5)
@@ -507,6 +518,25 @@ func _icon(kind: String, c: Vector2, r: float, col: Color) -> void:
 			root.draw_rect(Rect2(c + Vector2(-0.9, 0.0) * r, Vector2(1.8, 0.45) * r), col)
 			root.draw_rect(Rect2(c + Vector2(-0.9, -0.3) * r, Vector2(0.45, 0.3) * r), col)
 			root.draw_string(ThemeDB.fallback_font, c + Vector2(0.1, -0.25) * r, "z", HORIZONTAL_ALIGNMENT_LEFT, -1, int(r * 0.8), Color(0.7, 0.85, 1.0))
+		"a_mission":   # play
+			root.draw_colored_polygon(PackedVector2Array([c + Vector2(-0.45, -0.7) * r, c + Vector2(0.75, 0.0) * r, c + Vector2(-0.45, 0.7) * r]), Color(0.4, 1, 0.4))
+		"a_race_menu": # bandeira quadriculada
+			root.draw_line(c + Vector2(-0.6, -0.7) * r, c + Vector2(-0.6, 0.8) * r, col, w * 1.4)
+			for yy in 3:
+				for xx in 4:
+					if (xx + yy) % 2 == 0:
+						root.draw_rect(Rect2(c + Vector2(-0.55 + xx * 0.3, -0.7 + yy * 0.27) * r, Vector2(0.3, 0.27) * r), col)
+			root.draw_rect(Rect2(c + Vector2(-0.55, -0.7) * r, Vector2(1.2, 0.81) * r), col, false, w)
+		"a_roof_in":   # piscina (ondas) e $
+			for k in 2:
+				var pts := PackedVector2Array()
+				for i in 9:
+					pts.append(c + Vector2(-0.8 + i * 0.2, 0.1 + k * 0.35 + sin(i * 1.6) * 0.1) * r)
+				root.draw_polyline(pts, Color(0.4, 0.8, 1.0), w * 1.4)
+			root.draw_string(ThemeDB.fallback_font, c + Vector2(-0.25, -0.15) * r, "$", HORIZONTAL_ALIGNMENT_LEFT, -1, int(r * 0.9), Color(0.4, 1, 0.4))
+		"a_roof_out":  # seta para baixo
+			root.draw_line(c + Vector2(0, -0.7) * r, c + Vector2(0, 0.6) * r, col, w * 1.8)
+			root.draw_colored_polygon(PackedVector2Array([c + Vector2(-0.45, 0.2) * r, c + Vector2(0.45, 0.2) * r, c + Vector2(0, 0.8) * r]), col)
 		"a_tune":
 			root.draw_line(c + Vector2(-0.7, 0.7) * r, c + Vector2(0.35, -0.35) * r, col, w * 1.8)
 			root.draw_arc(c + Vector2(0.45, -0.45) * r, r * 0.35, -0.8, 3.9, 12, col, w * 1.4)
@@ -1011,3 +1041,28 @@ func _blip(p: Vector2, bl: Dictionary, k: float) -> void:
 			root.draw_colored_polygon(PackedVector2Array([p + Vector2(0, -0.8) * r, p + Vector2(0.22, -0.2) * r, p + Vector2(0.8, -0.2) * r, p + Vector2(0.32, 0.15) * r, p + Vector2(0.5, 0.75) * r, p + Vector2(0, 0.4) * r, p + Vector2(-0.5, 0.75) * r, p + Vector2(-0.32, 0.15) * r, p + Vector2(-0.8, -0.2) * r, p + Vector2(-0.22, -0.2) * r]), w)
 		"mission":
 			root.draw_string(ThemeDB.fallback_font, p + Vector2(-0.5, 0.42) * r, "M", HORIZONTAL_ALIGNMENT_LEFT, -1, int(r * 1.3), Color(0.1, 0.1, 0.1))
+		"m_race":   # bandeira quadriculada
+			root.draw_line(p + Vector2(-0.55, -0.7) * r, p + Vector2(-0.55, 0.75) * r, w, lw)
+			for yy in 3:
+				for xx in 4:
+					root.draw_rect(Rect2(p + Vector2(-0.5 + xx * 0.28, -0.7 + yy * 0.25) * r, Vector2(0.28, 0.25) * r), w if (xx + yy) % 2 == 0 else Color(0.08, 0.08, 0.08))
+		"m_steal":  # carro + cadeado
+			_car_icon(p + Vector2(-0.15, 0.05) * r, r * 0.5, w, false)
+			root.draw_rect(Rect2(p + Vector2(0.25, 0.05) * r, Vector2(0.5, 0.45) * r), Color(1, 0.85, 0.2))
+			root.draw_arc(p + Vector2(0.5, 0.05) * r, r * 0.17, PI, TAU, 8, Color(1, 0.85, 0.2), lw)
+		"m_hit":    # mira
+			root.draw_arc(p, r * 0.5, 0, TAU, 14, w, lw)
+			root.draw_line(p + Vector2(0, -0.8) * r, p + Vector2(0, 0.8) * r, w, lw)
+			root.draw_line(p + Vector2(-0.8, 0) * r, p + Vector2(0.8, 0) * r, w, lw)
+		"m_truck":
+			root.draw_rect(Rect2(p + Vector2(-0.75, -0.45) * r, Vector2(0.95, 0.75) * r), w)
+			root.draw_rect(Rect2(p + Vector2(0.25, -0.2) * r, Vector2(0.5, 0.5) * r), w)
+			root.draw_circle(p + Vector2(-0.45, 0.4) * r, r * 0.16, Color(0.1, 0.1, 0.1))
+			root.draw_circle(p + Vector2(0.5, 0.4) * r, r * 0.16, Color(0.1, 0.1, 0.1))
+		"m_moto":
+			root.draw_circle(p + Vector2(-0.45, 0.3) * r, r * 0.24, w)
+			root.draw_circle(p + Vector2(0.45, 0.3) * r, r * 0.24, w)
+			root.draw_line(p + Vector2(-0.45, 0.25) * r, p + Vector2(0.3, -0.25) * r, w, lw)
+			root.draw_rect(Rect2(p + Vector2(-0.6, -0.65) * r, Vector2(0.5, 0.45) * r), Color(1, 0.6, 0.1))
+		"m_gang":
+			_skull(p, r * 0.75, w, true)

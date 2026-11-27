@@ -244,6 +244,12 @@ func _try_parkour(fwd: Vector3) -> void:
 	# precisa de espaço em cima do obstáculo
 	if not _ray(Vector3(probe.x, top + 0.15, probe.z), Vector3(probe.x, top + 1.9, probe.z)).is_empty():
 		return
+	# e nada por cima do jogador até lá (dentro de casa o forro/teto bloqueia: antes ele escalava a
+	# parede e atravessava o telhado)
+	if not _ray(p + Vector3(0, 1.0, 0), Vector3(p.x, top + 1.9, p.z)).is_empty():
+		return
+	if not _ray(Vector3(wallp.x, p.y + 1.0, wallp.z) - fwd * 0.25, Vector3(wallp.x, top + 1.9, wallp.z) - fwd * 0.25).is_empty():
+		return
 	pk_pts = [p]
 	if h <= 1.3:
 		# salto por cima: se do outro lado for livre e baixo, passa; senão sobe e fica em cima

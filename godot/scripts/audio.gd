@@ -247,8 +247,12 @@ func _horn() -> AudioStreamWAV:
 	out.resize(n)
 	for i in n:
 		var t := i / RATE
-		var s := signf(sin(TAU * 410.0 * t)) * 0.3 + signf(sin(TAU * 520.0 * t)) * 0.3
-		out[i] = s * minf(1.0, t / 0.01) * minf(1.0, (dur - t) / 0.03) * 0.5
+		# duas notas (como buzina de carro) com harmônicos suaves e leve saturação
+		var s := 0.0
+		for f in [415.0, 520.0]:
+			s += sin(TAU * f * t) + 0.45 * sin(TAU * f * 2.0 * t) + 0.2 * sin(TAU * f * 3.0 * t)
+		s = tanh(s * 0.9) * 0.6
+		out[i] = s * minf(1.0, t / 0.015) * minf(1.0, (dur - t) / 0.05) * 0.5
 	return _wav(out)
 
 func _chime() -> AudioStreamWAV:

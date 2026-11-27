@@ -14,6 +14,7 @@ var BLOCK := CELL - ROADW   # lado da laje da quadra (calçada + lotes)
 var body: StaticBody3D
 var rng := RandomNumberGenerator.new()
 var lanes: Array = []   # pontos de rota de carros (centro das faixas)
+var house_loops: Array = []   # índices em walk_loops das ruas de casas (norte/sul)
 var walk_loops: Array = []  # percursos de pedestres (um por quadra)
 var hospital_pos := Vector3.ZERO
 var police_pos := Vector3.ZERO
@@ -28,6 +29,7 @@ func _ready() -> void:
 		build()
 
 func build(step: Callable = Callable()) -> void:
+	_party_rng.seed = 99
 	rng.seed = 2026
 	body = StaticBody3D.new()
 	body.name = "Colisao"
@@ -42,6 +44,7 @@ func build(step: Callable = Callable()) -> void:
 	_props()
 	_landmarks()
 	_bus_line()
+	_race_lot()
 	if step.is_valid():
 		await step.call(0.55, "Bairros, morros e ponte")
 	_districts()
@@ -256,6 +259,9 @@ func _block(cx: float, cz: float) -> void:
 	if Vector2i(bi, bj) == SAFE_BLOCK:
 		_safehouse(cx, cz, inner, downtown)
 		return
+	if Vector2i(bi, bj) == HOSPITAL_BLOCK:
+		_hospital(cx, cz)
+		return
 	if Vector2i(bi, bj) == GANG_BLOCK:
 		_gang_hq(cx, cz, inner, "p", PI)
 		return
@@ -338,16 +344,116 @@ func _building(lot: Rect2, downtown: float) -> void:
 	# platibanda e laje COM colisão (antes o jogador pisava 1 m abaixo e "afundava" no telhado)
 	_box(Vector3(w + 0.5, 0.9, d + 0.5), Vector3(c.x, top + 0.45, c.y), roof, true)
 	_box(Vector3(w - 0.3, 0.2, d - 0.3), Vector3(c.x, top + 0.95, c.y), M.concrete(Color(0.3, 0.3, 0.31)), true)
-	# equipamentos no telhado
+	# alguns prédios médios têm festa no terraço (piscina, churrasco, gente conversando)
+	var party: bool = rooftops.size() < 4 and w >= 15.0 and d >= 15.0 and floors >= 4 and floors <= 14 and _party_rng.randf() < 0.3
+	# equipamentos no telhado (o sorteio acontece sempre, para não mudar o resto do mapa)
 	for k in rng.randi_range(1, 4):
 		var p := Vector3(c.x + rng.randf_range(-w * 0.3, w * 0.3), top + 1.6, c.y + rng.randf_range(-d * 0.3, d * 0.3))
-		_box(Vector3(rng.randf_range(1.5, 3.0), 1.2, rng.randf_range(1.5, 2.5)), p, M.plain(Color(0.6, 0.62, 0.63), 0.4, 0.6), true)
+		var esz := Vector3(rng.randf_range(1.5, 3.0), 1.2, rng.randf_range(1.5, 2.5))
+		if not party:
+			_box(esz, p, M.plain(Color(0.6, 0.62, 0.63), 0.4, 0.6), true)
+	if party:
+		_roof_party(c, w, d, top + 1.05)
+
+var rooftops: Array = []     # festas nos terraços: {top, entry, exit, people, pool, grill}
+var _party_rng := RandomNumberGenerator.new()
+func _roof_party(c: Vector2, w: float, d: float, fy: float) -> void:
+	# lado da entrada: o que dá para a rua (longe do centro da quadra)
+	var bi := roundi(c.x / CELL + (N - 1) * 0.5)
+	var bj := roundi(c.y / CELL + (N - 1) * 0.5)
+	var rel := c - Vector2(_center(bi), _center(bj))
+	var sd := Vector2(0, 1)
+	if absf(rel.x) > absf(rel.y) + 1.0:
+		sd = Vector2(signf(rel.x), 0)
+	elif absf(rel.y) > 1.0:
+		sd = Vector2(0, signf(rel.y))
+	var half := Vector2(w, d) * 0.5
+	var edge := Vector2(c.x + sd.x * (half.x + 0.9), c.y + sd.y * (half.y + 0.9))
+	var entry := Vector3(edge.x, 0.3, edge.y)
+	# portaria no térreo
+	var col := Color(0.2, 0.85, 1.0)
+	_box(Vector3(2.4 if sd.y != 0 else 0.15, 2.6, 0.15 if sd.y != 0 else 2.4), Vector3(c.x + sd.x * (half.x + 0.08), 1.45, c.y + sd.y * (half.y + 0.08)), M.plain(Color(0.08, 0.08, 0.1), 0.3), false)
+	var lb := Label3D.new()
+	lb.text = "TERRAÇO · POOL PARTY"
+	lb.font_size = 64
+	lb.pixel_size = 0.01
+	lb.modulate = col
+	lb.outline_size = 10
+	lb.shaded = false
+	lb.position = Vector3(edge.x, 3.4, edge.y)
+	lb.rotation.y = atan2(sd.x, sd.y)
+	add_child(lb)
+	# deque de madeira e piscina (borda + água)
+	var deck := M.wood()
+	_box(Vector3(w - 1.2, 0.08, d - 1.2), Vector3(c.x, fy + 0.04, c.y), deck, false)
+	var pw := w * 0.5
+	var pd := d * 0.34
+	var pc := Vector3(c.x - sd.x * w * 0.12, fy, c.y - sd.y * d * 0.12)
+	var rim := M.concrete(Color(0.92, 0.92, 0.9))
+	for k in 4:
+		var horiz := k < 2
+		var sz := Vector3(pw + 0.6, 0.55, 0.3) if horiz else Vector3(0.3, 0.55, pd)
+		var off := Vector3(0, 0.27, (pd * 0.5 + 0.15) * (1 if k == 0 else -1)) if horiz else Vector3((pw * 0.5 + 0.15) * (1 if k == 2 else -1), 0.27, 0)
+		_box(sz, pc + off, rim, true)
+	_box(Vector3(pw, 0.4, pd), pc + Vector3(0, 0.2, 0), M.plain(Color(0.25, 0.6, 0.85), 0.3), false)
+	var wt := MeshInstance3D.new()
+	var wm := PlaneMesh.new()
+	wm.size = Vector2(pw, pd)
+	wt.mesh = wm
+	wt.material_override = M.water()
+	wt.position = pc + Vector3(0, 0.46, 0)
+	add_child(wt)
+	# espreguiçadeiras, guarda-sóis, churrasqueira, mesa, caixas de som e luzes
+	var ppl: Array = []
+	var side := Vector3(sd.y, 0, -sd.x) if sd.y != 0 else Vector3(0, 0, 1)
+	for k in 4:
+		var lp := pc + side * ((k - 1.5) * 2.4) + Vector3(sd.x, 0, sd.y) * (pd * 0.5 + 1.8 if sd.y != 0 else pw * 0.5 + 1.8)
+		_box(Vector3(0.7, 0.3, 1.8), lp + Vector3(0, 0.25, 0), M.plain([Color(0.95, 0.95, 0.95), Color(0.95, 0.5, 0.1)][k % 2], 0.6), false)
+	for k in 2:
+		var up := pc + side * (k * 2.0 - 1.0) * (pw * 0.5 + 1.6) + Vector3(0, 0, 0)
+		_box(Vector3(0.08, 2.3, 0.08), up + Vector3(0, 1.15, 0), M.plain(Color(0.8, 0.8, 0.8), 0.4), false)
+		_box(Vector3(2.4, 0.12, 2.4), up + Vector3(0, 2.3, 0), M.plain([Color(0.95, 0.2, 0.3), Color(0.2, 0.7, 0.9)][k], 0.7), false)
+	var gp := Vector3(c.x + sd.x * (half.x - 2.5) + side.x * (w * 0.3), fy, c.y + sd.y * (half.y - 2.5) + side.z * (d * 0.3))
+	if sd.y == 0:
+		gp = Vector3(c.x + sd.x * (half.x - 2.5), fy, c.y + d * 0.3)
+	_box(Vector3(1.6, 0.9, 0.7), gp + Vector3(0, 0.45, 0), M.plain(Color(0.12, 0.12, 0.13), 0.4, 0.5), true)
+	_box(Vector3(1.5, 0.05, 0.6), gp + Vector3(0, 0.93, 0), M.emissive(Color(1.0, 0.35, 0.05), 1.6), false)
+	var mesa := gp + Vector3(-sd.x * 3.0, 0, -sd.y * 3.0) + side * 2.0
+	_box(Vector3(1.8, 0.08, 0.9), mesa + Vector3(0, 0.75, 0), deck, false)
+	_box(Vector3(0.12, 0.72, 0.12), mesa + Vector3(0, 0.37, 0), deck, false)
+	for k in 2:
+		_box(Vector3(0.6, 1.1, 0.6), Vector3(c.x, fy, c.y) + side * (k * 2.0 - 1.0) * (minf(w, d) * 0.5 - 1.2) + Vector3(0, 0.55, 0), M.plain(Color(0.05, 0.05, 0.06), 0.4), false)
+	for k in 10:
+		var t := float(k) / 9.0
+		var lp2 := Vector3(c.x, fy + 2.6, c.y) + side * lerpf(-0.45, 0.45, t) * maxf(w, d) + Vector3(sd.x, 0, sd.y) * 0.3 * minf(w, d)
+		_box(Vector3(0.18, 0.18, 0.18), lp2, M.emissive(Color.from_hsv(t, 0.7, 1.0), 1.8), false)
+	var li := OmniLight3D.new()
+	li.omni_range = 16.0
+	li.light_energy = 0.8
+	li.light_color = Color(1.0, 0.8, 0.6)
+	li.position = Vector3(c.x, fy + 3.5, c.y)
+	add_child(li)
+	# gente: rodinhas de conversa no deque, churrasqueiro, gente na beira da piscina
+	var grill_man := gp + Vector3(-sd.x * 1.0, 0, -sd.y * 1.0)
+	for k in 7:
+		var ang := float(k) / 7.0 * TAU
+		var r := minf(w, d) * 0.5 - 2.2
+		var pp2 := Vector3(c.x + cos(ang) * r * 0.9, fy, c.y + sin(ang) * r * 0.9)
+		if pp2.distance_to(pc) < maxf(pw, pd) * 0.5 + 0.8:
+			pp2 = pp2 + (pp2 - pc).normalized() * 2.0
+		ppl.append([pp2, atan2(c.x - pp2.x, c.y - pp2.z)])
+	ppl.append([grill_man, atan2(gp.x - grill_man.x, gp.z - grill_man.z)])
+	# saída: porta da escada no terraço
+	var ex := Vector3(edge.x - sd.x * 2.6, fy, edge.y - sd.y * 2.6) + side * (maxf(w, d) * 0.3)
+	_box(Vector3(1.6, 2.4, 1.6), ex + Vector3(0, 1.2, 0) - Vector3(sd.x, 0, sd.y) * 1.2, M.concrete(Color(0.5, 0.5, 0.52)), true)
+	rooftops.append({"top": Vector3(c.x, fy, c.y), "entry": entry, "exit": ex, "people": ppl, "pool": pc + Vector3(0, 0.46, 0), "fee": 50})
 
 const STORE_BLOCKS := {Vector2i(4, 4): "guns", Vector2i(2, 2): "cars", Vector2i(3, 4): "clothes", Vector2i(1, 3): "food", Vector2i(3, 2): "shop24", Vector2i(5, 4): "tuning", Vector2i(5, 2): "shop24b"}
 const STORE_NAMES := {"guns": "AMMU★NATION", "cars": "CONCESSIONÁRIA", "clothes": "ROUPAS", "food": "LANCHONETE", "shop24": "LOJA 24H", "shop24b": "LOJA 24H", "tuning": "OFICINA TUNING"}
 const STORE_COLS := {"guns": Color(0.95, 0.15, 0.1), "cars": Color(0.2, 0.75, 1.0), "clothes": Color(0.95, 0.45, 0.85), "food": Color(1.0, 0.7, 0.15), "shop24": Color(0.3, 0.9, 0.4), "shop24b": Color(0.3, 0.9, 0.4), "tuning": Color(1.0, 0.55, 0.1)}
 const POLICE_BLOCK := Vector2i(4, 2)
 const SAFE_BLOCK := Vector2i(2, 3)
+const HOSPITAL_BLOCK := Vector2i(1, 4)     # hospital de 3 andares com heliponto
 const GANG_BLOCK := Vector2i(5, 6)       # esconderijo da Gangue Rosa (o da Verde fica ao sul, x −90)
 var _store_info := {}        # tipo -> {door, counter, clerk, center, x0, x1, z0, z1}
 var station_cars: Array = []     # vagas da garagem da polícia [pos, yaw]
@@ -733,7 +839,8 @@ func _multimesh(mesh: Mesh, mat: Material, xf: Array) -> MultiMeshInstance3D:
 
 ## hospital e delegacia: placas grandes na calçada e pontos de reaparecimento
 func _landmarks() -> void:
-	hospital_pos = Vector3(_center(1), 0.3, _center(4) - BLOCK * 0.5 + 1.6)
+	if hospital_pos == Vector3.ZERO:
+		hospital_pos = Vector3(_center(1), 0.3, _center(4) - BLOCK * 0.5 + 1.6)
 	police_pos = Vector3(_center(POLICE_BLOCK.x), 0.3, _center(POLICE_BLOCK.y) - BLOCK * 0.5 + 1.6)
 	var white := M.emissive(Color(0.95, 0.95, 0.95), 0.6)
 	var red := M.emissive(Color(0.9, 0.08, 0.08), 1.4)
@@ -744,7 +851,7 @@ func _landmarks() -> void:
 	for t in _store_info:
 		var si: Dictionary = _store_info[t]
 		shops.append({"type": t, "pos": si.door, "counter": si.counter, "clerk": si.clerk, "center": si.center, "name": STORE_NAMES[t], "col": STORE_COLS[t], "box": Rect2(si.x0, si.z0, si.x1 - si.x0, si.z1 - si.z0)})
-	for spec in [[hospital_pos, red, "H"], [police_pos, blue, "P"]]:
+	for spec in [[police_pos, blue, "P"]]:
 		var p: Vector3 = spec[0] + Vector3(2.5, 0, 0)
 		_box(Vector3(0.15, 4.0, 0.15), p + Vector3(0, 2.0, 0), pole, true)
 		_box(Vector3(2.2, 2.2, 0.2), p + Vector3(0, 5.0, 0), white, false)
@@ -927,6 +1034,205 @@ func _police_station(cx: float, cz: float) -> void:
 	station = {"cell": Vector3(x0 + cw * 0.5, 0.3, (c1 + bz) * 0.5 + 0.6), "door": Vector3(cx, 0.3, fz - 2.5),
 		"garage_out": Vector3(cx, 0.7, gz1 + 6.0), "heli": hp + Vector3(0, 0.3, 0), "front": Vector3(cx, 0.3, fz)}
 
+# ---------------------------------------------------------------- hospital
+## Prédio de 3 andares (pé-direito 4 m) ocupando a frente do quarteirão, entrada ao sul:
+## térreo = recepção, sala de espera, 2 consultórios; 1º andar = enfermaria com macas e pacientes;
+## 2º andar = centro cirúrgico e quartos; telhado = heliponto. Rampas em zigue-zague no lado leste
+## ligam os andares (vão nas lajes com guarda-corpo). hospital_pos = recepção (onde você acorda).
+var hospital := {}
+func _hospital(cx: float, cz: float) -> void:
+	var h := (BLOCK - SIDE * 2.0) * 0.5
+	var wallm := M.concrete(Color(0.93, 0.94, 0.95))
+	var inner_w := M.plain(Color(0.86, 0.9, 0.92), 0.8)
+	var floor_m := M.plain(Color(0.78, 0.8, 0.82), 0.35, 0.05)
+	var green := M.plain(Color(0.25, 0.6, 0.5), 0.6)
+	var red := M.emissive(Color(0.9, 0.08, 0.08), 1.4)
+	var glass := M.plain(Color(0.2, 0.3, 0.38), 0.05, 0.6)
+	var bedm := M.plain(Color(0.92, 0.94, 0.96), 0.5)
+	var metal := M.plain(Color(0.6, 0.62, 0.65), 0.3, 0.8)
+	var fz := cz - h
+	var bz := cz + h - 6.0
+	var x0 := cx - h
+	var x1 := cx + h
+	var H := 4.0
+	var T := 0.3
+	# poço das rampas (leste): x de sx0 a x1, z de sa a sa+10
+	var sx0 := x1 - 7.2
+	var smid := x1 - 3.75
+	var sa := fz + 8.0
+	var sb := sa + 10.0
+	# lajes (piso do 1º, 2º andar e telhado) com vão no poço das rampas
+	for f in 4:
+		var y := f * H + (0.2 if f == 0 else 0.0)
+		if f == 0:
+			_box(Vector3(2.0 * h, 0.06, bz - fz), Vector3(cx, 0.18, (fz + bz) * 0.5), floor_m, false)
+			continue
+		_box(Vector3(sx0 - x0, T, bz - fz), Vector3((x0 + sx0) * 0.5, y, (fz + bz) * 0.5), floor_m if f < 3 else M.concrete(Color(0.5, 0.51, 0.52)), true)
+		_box(Vector3(x1 - sx0, T, sa - fz), Vector3((sx0 + x1) * 0.5, y, (fz + sa) * 0.5), floor_m, true)
+		_box(Vector3(x1 - sx0, T, bz - sb), Vector3((sx0 + x1) * 0.5, y, (sb + bz) * 0.5), floor_m, true)
+		# guarda-corpo em volta do vão (sobra a entrada/saída das rampas)
+		_box(Vector3(0.12, 1.0, sb - sa), Vector3(sx0, y + 0.65, (sa + sb) * 0.5), metal, true)
+		_box(Vector3(0.12, 1.0 if f < 3 else 1.0, sb - sa - 3.0), Vector3(smid, y + 0.65, (sa + sb) * 0.5 + (1.5 if f % 2 == 1 else -1.5)), metal, true)
+	# rampas: térreo→1º (faixa leste, sobe para o norte), 1º→2º (faixa oeste, sobe para o sul),
+	# 2º→telhado (faixa leste, sobe para o norte)
+	var lane_e := (smid + x1) * 0.5
+	var lane_w := (sx0 + smid) * 0.5
+	for r in [[lane_e, 0.2, H, true], [lane_w, H, 2.0 * H, false], [lane_e, 2.0 * H, 3.0 * H, true]]:
+		var rise: float = r[2] - r[1]
+		var ang := atan2(rise, sb - sa)
+		var ln := sqrt(rise * rise + (sb - sa) * (sb - sa))
+		var up: bool = r[3]
+		var b := Basis(Vector3.RIGHT, -ang if up else ang)
+		_boxr(Vector3(3.2, 0.25, ln), Transform3D(b, Vector3(r[0], (r[1] + r[2]) * 0.5, (sa + sb) * 0.5)), M.concrete(Color(0.7, 0.71, 0.72)), true)
+	# paredes externas por andar (frente com janelas; porta de 3,2 m no térreo)
+	for f in 3:
+		var y0 := f * H
+		var yc := y0 + H * 0.5 + 0.15
+		if f == 0:
+			for seg in [[x0, cx - 1.6], [cx + 1.6, x1]]:
+				var w: float = seg[1] - seg[0]
+				_box(Vector3(w, H, T), Vector3((seg[0] + seg[1]) * 0.5, yc, fz), wallm, true)
+				_box(Vector3(w - 2.0, 1.6, 0.06), Vector3((seg[0] + seg[1]) * 0.5, y0 + 2.2, fz - 0.17), glass, false)
+			_box(Vector3(3.2, H - 3.0, T), Vector3(cx, y0 + H - 0.35, fz), wallm, true)
+		else:
+			_box(Vector3(2.0 * h, H, T), Vector3(cx, yc, fz), wallm, true)
+			for k in 6:
+				_box(Vector3(4.0, 1.6, 0.06), Vector3(x0 + 4.0 + k * 7.0, y0 + 2.3, fz - 0.17), glass, false)
+		_box(Vector3(2.0 * h, H, T), Vector3(cx, yc, bz), wallm, true)
+		_box(Vector3(T, H, bz - fz), Vector3(x0, yc, (fz + bz) * 0.5), wallm, true)
+		_box(Vector3(T, H, bz - fz), Vector3(x1, yc, (fz + bz) * 0.5), wallm, true)
+		_box(Vector3(2.0 * h + 0.2, 0.35, 0.35), Vector3(cx, y0 + H, fz - 0.05), green, false)
+		# luzes de teto
+		for xx in [cx - 14.0, cx - 5.0, cx + 5.0]:
+			for zz in [fz + 5.0, fz + 15.0, fz + 25.0]:
+				_box(Vector3(1.4, 0.05, 0.5), Vector3(xx, y0 + H - 0.05, zz), M.emissive(Color(1, 0.98, 0.95), 2.0), false)
+	var roof_y := 3.0 * H
+	# platibanda, letreiro, cruz vermelha e heliponto
+	for seg in [[Vector3(2.0 * h, 1.0, 0.3), Vector3(cx, roof_y + 0.65, fz)], [Vector3(2.0 * h, 1.0, 0.3), Vector3(cx, roof_y + 0.65, bz)],
+			[Vector3(0.3, 1.0, bz - fz), Vector3(x0, roof_y + 0.65, (fz + bz) * 0.5)], [Vector3(0.3, 1.0, bz - fz), Vector3(x1, roof_y + 0.65, (fz + bz) * 0.5)]]:
+		_box(seg[0], seg[1], wallm, true)
+	var hp := Vector3(cx - 6.0, roof_y + 0.2, (fz + bz) * 0.5 + 2.0)
+	_box(Vector3(14.0, 0.06, 14.0), hp, M.concrete(Color(0.2, 0.42, 0.3)), false)
+	for q in [[Vector3(1.0, 0.03, 6.0), Vector3(-2.0, 0.04, 0)], [Vector3(1.0, 0.03, 6.0), Vector3(2.0, 0.04, 0)], [Vector3(3.0, 0.03, 1.0), Vector3(0, 0.04, 0)]]:
+		_box(q[0], hp + q[1], M.plain(Color(0.96, 0.96, 0.96), 0.6), false)
+	_box(Vector3(5.0, 1.4, 0.3), Vector3(cx + 4.0, roof_y + 2.1, fz - 0.2), red, false)
+	_box(Vector3(1.4, 5.0, 0.3), Vector3(cx + 4.0, roof_y + 2.1, fz - 0.2), red, false)
+	var lb := Label3D.new()
+	lb.text = "HOSPITAL"
+	lb.font_size = 150
+	lb.pixel_size = 0.01
+	lb.modulate = Color(0.95, 0.15, 0.15)
+	lb.outline_size = 14
+	lb.shaded = false
+	lb.rotation.y = PI
+	lb.position = Vector3(cx - 9.0, roof_y + 1.6, fz - 0.4)
+	add_child(lb)
+	# marquise e rampa de ambulância na frente
+	_box(Vector3(12.0, 0.3, 4.0), Vector3(cx, H - 0.6, fz - 2.0), green, false)
+	_box(Vector3(6.0, 0.15, 2.0), Vector3(cx, 0.22, fz - 1.0), M.concrete(Color(0.88, 0.88, 0.88)), false)
+	# ---- térreo: recepção, espera, consultórios (oeste)
+	_box(Vector3(5.0, 1.1, 0.8), Vector3(cx + 2.0, 0.7, fz + 6.0), M.plain(Color(0.9, 0.9, 0.92), 0.4), true)
+	_box(Vector3(5.0, 0.1, 1.0), Vector3(cx + 2.0, 1.3, fz + 6.0), green, false)
+	for k in 4:
+		_box(Vector3(2.6, 0.45, 0.6), Vector3(cx - 3.0 + (k % 2) * 3.2, 0.42, fz + 2.5 + float(k / 2) * 1.6), M.plain(Color(0.2, 0.45, 0.6), 0.7), true)
+	var cons := x0 + 12.0
+	_box(Vector3(0.2, H, bz - fz - 6.0), Vector3(cons, H * 0.5 + 0.15, fz + 6.0 + (bz - fz - 6.0) * 0.5), inner_w, true)
+	for zz in [fz + 6.0, fz + 16.0]:
+		_box(Vector3(cons - x0 - 2.0, H, 0.2), Vector3((x0 + cons) * 0.5 - 1.0, H * 0.5 + 0.15, zz), inner_w, true)
+	for k in 2:
+		var rz: float = fz + 11.0 + k * 10.0
+		_box(Vector3(2.0, 0.6, 0.9), Vector3(x0 + 3.0, 0.5, rz), bedm, true)          # maca de exame
+		_box(Vector3(1.6, 0.08, 0.8), Vector3(x0 + 8.0, 0.95, rz), M.wood(), true)     # mesa do médico
+		_box(Vector3(0.6, 0.45, 0.05), Vector3(x0 + 8.0, 1.25, rz + 0.25), M.emissive(Color(0.5, 0.8, 1.0), 0.8), false)
+		var lc := Label3D.new()
+		lc.text = "CONSULTÓRIO %d" % (k + 1)
+		lc.font_size = 40
+		lc.pixel_size = 0.006
+		lc.shaded = false
+		lc.position = Vector3(cons + 0.15, 3.0, rz)
+		lc.rotation.y = PI * 0.5
+		add_child(lc)
+	# ---- 1º andar: enfermaria (macas em fileira) e 2º andar: centro cirúrgico + quartos
+	var beds: Array = []
+	for k in 6:
+		var bx := x0 + 4.0 + k * 4.4
+		for row in [fz + 4.0, fz + 14.0]:
+			_box(Vector3(1.0, 0.5, 2.1), Vector3(bx, H + 0.7, row), bedm, true)
+			_box(Vector3(1.0, 0.15, 0.4), Vector3(bx, H + 0.98, row - 0.85), M.plain(Color(0.95, 0.95, 0.95), 0.9), false)
+			_box(Vector3(0.05, 1.6, 0.05), Vector3(bx + 0.6, H + 1.1, row - 1.0), metal, false)    # suporte de soro
+			_box(Vector3(0.2, 0.3, 0.08), Vector3(bx + 0.6, H + 1.85, row - 1.0), M.plain(Color(0.8, 0.9, 1.0), 0.2), false)
+			beds.append(Vector3(bx, H + 0.95, row))
+		_box(Vector3(0.1, 2.0, 3.2), Vector3(bx + 2.2, H + 1.15, fz + 4.0), M.plain(Color(0.5, 0.75, 0.8), 0.8), false)   # cortinas
+	var y2 := 2.0 * H
+	_box(Vector3(0.2, H, 16.0), Vector3(cx - 4.0, y2 + H * 0.5 + 0.15, fz + 8.0), inner_w, true)
+	_box(Vector3(1.0, 0.9, 2.2), Vector3(x0 + 8.0, y2 + 0.6, fz + 8.0), metal, true)         # mesa de cirurgia
+	_box(Vector3(1.2, 0.1, 1.2), Vector3(x0 + 8.0, y2 + H - 0.6, fz + 8.0), M.emissive(Color(1, 1, 0.95), 4.0), false)
+	_box(Vector3(0.6, 1.4, 0.6), Vector3(x0 + 10.0, y2 + 0.85, fz + 6.0), M.plain(Color(0.3, 0.35, 0.4), 0.4, 0.6), true)
+	var lcc := Label3D.new()
+	lcc.text = "CENTRO CIRÚRGICO"
+	lcc.font_size = 48
+	lcc.pixel_size = 0.006
+	lcc.shaded = false
+	lcc.position = Vector3(cx - 4.15, y2 + 3.0, fz + 12.0)
+	lcc.rotation.y = -PI * 0.5
+	add_child(lcc)
+	for k in 3:
+		var rx := cx + 1.0 + k * 4.0
+		_box(Vector3(1.0, 0.5, 2.1), Vector3(rx, y2 + 0.7, fz + 24.0), bedm, true)
+		beds.append(Vector3(rx, y2 + 0.95, fz + 24.0))
+	# sinal de andar perto das rampas
+	for f in 3:
+		var lf := Label3D.new()
+		lf.text = ["TÉRREO", "1º ANDAR · ENFERMARIA", "2º ANDAR · CIRURGIA"][f]
+		lf.font_size = 40
+		lf.pixel_size = 0.006
+		lf.shaded = false
+		lf.position = Vector3(sx0 - 0.1, f * H + 3.0, sa - 1.0)
+		lf.rotation.y = PI * 0.5
+		add_child(lf)
+	var li := OmniLight3D.new()
+	li.omni_range = 18.0
+	li.light_energy = 1.0
+	li.position = Vector3(cx, H - 0.6, fz + 10.0)
+	add_child(li)
+	# área de ambulâncias (atrás)
+	_box(Vector3(2.0 * h, 0.05, cz + h - bz), Vector3(cx, 0.18, (bz + cz + h) * 0.5), M.asphalt(), false)
+	hospital_pos = Vector3(cx + 2.0, 0.3, fz + 3.5)
+	hospital = {"beds": beds, "reception": Vector3(cx + 2.0, 0.2, fz + 7.2), "heli": hp + Vector3(0, 0.3, 0),
+		"staff": [Vector3(x0 + 7.0, 0.2, fz + 12.0), Vector3(x0 + 7.0, 0.2, fz + 22.0), Vector3(x0 + 10.0, H + 0.2, fz + 9.0), Vector3(cx + 6.0, H + 0.2, fz + 9.0), Vector3(x0 + 9.0, y2 + 0.2, fz + 9.6)],
+		"ambulances": [[Vector3(cx - 10.0, 0.7, bz + 3.0), PI * 0.5], [Vector3(cx + 10.0, 0.7, bz + 3.0), PI * 0.5]]}
+
+# ---------------------------------------------------------------- ponto de encontro da corrida
+## Estacionamento ao norte (longe do hospital), com carros tunados e gente conversando
+var race_lot := {}
+func _race_lot() -> void:
+	var c := Vector3(-160.0, 0.0, 262.0)
+	_box(Vector3(60.0, 0.08, 40.0), c + Vector3(0, 0.04, 0), M.asphalt(), true)
+	for k in 9:
+		_box(Vector3(0.15, 0.02, 5.0), c + Vector3(-24.0 + k * 6.0, 0.1, -14.0), M.plain(Color(0.95, 0.95, 0.9), 0.6), false)
+		_box(Vector3(0.15, 0.02, 5.0), c + Vector3(-24.0 + k * 6.0, 0.1, 14.0), M.plain(Color(0.95, 0.95, 0.9), 0.6), false)
+	for k in 2:
+		var tp := c + Vector3(-28.0 + k * 56.0, 0, 0)
+		_box(Vector3(0.3, 8.0, 0.3), tp + Vector3(0, 4.0, 0), M.plain(Color(0.2, 0.2, 0.22), 0.4, 0.7), true)
+		_box(Vector3(2.4, 0.4, 0.8), tp + Vector3(0, 8.0, 0), M.emissive(Color(1, 0.95, 0.8), 3.0), false)
+	# faixa de largada pintada e bandeira xadrez
+	for k in 12:
+		_box(Vector3(1.0, 0.02, 1.0), c + Vector3(-5.5 + k, 0.1, 0), M.plain(Color(0.05, 0.05, 0.05) if k % 2 == 0 else Color(0.95, 0.95, 0.95), 0.6), false)
+	_box(Vector3(0.15, 5.0, 0.15), c + Vector3(-7.0, 2.5, 0), M.plain(Color(0.3, 0.3, 0.32), 0.4), true)
+	var lb := Label3D.new()
+	lb.text = "RACHA · PONTO DE ENCONTRO"
+	lb.font_size = 90
+	lb.pixel_size = 0.01
+	lb.modulate = Color(1, 0.75, 0.1)
+	lb.outline_size = 12
+	lb.shaded = false
+	lb.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	lb.position = c + Vector3(0, 6.0, -19.0)
+	add_child(lb)
+	race_lot = {"giver": c + Vector3(0, 0.15, -10.0), "cars": [[c + Vector3(-18, 0.8, 14), PI], [c + Vector3(-12, 0.8, 14), PI], [c + Vector3(12, 0.8, 14), PI], [c + Vector3(18, 0.8, 14), PI], [c + Vector3(-18, 0.8, -14), 0.0]],
+		"people": [[c + Vector3(-15, 0.1, 9), 0.6], [c + Vector3(-14, 0.1, 10.2), PI + 0.6], [c + Vector3(6, 0.1, 9), -0.4], [c + Vector3(7.2, 0.1, 9.8), PI - 0.4], [c + Vector3(16, 0.1, 9), 0.2], [c + Vector3(-8, 0.1, -9), 1.4], [c + Vector3(-6.8, 0.1, -8.6), -1.7]],
+		"rent": c + Vector3(3.0, 0.8, -4.0)}
+
 # ---------------------------------------------------------------- utilidades com rotação
 func _boxr(size: Vector3, xf: Transform3D, mat: Material, collide := true) -> void:
 	var bm := BoxMesh.new()
@@ -1092,8 +1398,24 @@ func _gang_hq(cx: float, cz: float, inner: float, g: String, yaw: float) -> void
 	_lb(base, Vector3(inner, WH, 0.3), Vector3(0, WH * 0.5, -h), wallm, true)
 	for sx in [-1.0, 1.0]:
 		_lb(base, Vector3(0.3, WH, inner), Vector3(sx * h, WH * 0.5, 0), wallm, true)
-		_lb(base, Vector3(h - 3.5, WH, 0.3), Vector3(sx * (h + 3.5) * 0.5, WH * 0.5, h), wallm, true)
+		if sx < 0.0:
+			_lb(base, Vector3(h - 3.5, WH, 0.3), Vector3(sx * (h + 3.5) * 0.5, WH * 0.5, h), wallm, true)
+		else:
+			# do lado direito a frente tem a entrada da viela (x de h−5 a h)
+			_lb(base, Vector3(h - 8.5, WH, 0.3), Vector3((3.5 + h - 5.0) * 0.5, WH * 0.5, h), wallm, true)
 		_lb(base, Vector3(0.6, WH + 0.6, 0.6), Vector3(sx * 3.8, (WH + 0.6) * 0.5, h), dark, true)
+	# viela (canto da frente, lado direito): corredor de 5 m entre o muro de fora e um muro interno,
+	# fechado no fundo; lixeiras, caixotes, grafite e luz fraca. É ali que a gangue passa os serviços.
+	var al_h := 4.2
+	_lb(base, Vector3(0.3, al_h, 14.0), Vector3(h - 5.0, al_h * 0.5, h - 7.0), dark, true)
+	_lb(base, Vector3(5.0, al_h, 0.3), Vector3(h - 2.5, al_h * 0.5, h - 14.0), dark, true)
+	_lb(base, Vector3(0.3, al_h - WH, 14.0), Vector3(h, WH + (al_h - WH) * 0.5, h - 7.0), dark, true)
+	_lb(base, Vector3(5.0, 0.05, 14.0), Vector3(h - 2.5, 0.06, h - 7.0), M.plain(Color(0.2, 0.19, 0.18), 0.95), false)
+	_lb(base, Vector3(1.6, 1.2, 1.0), Vector3(h - 1.0, 0.6, h - 12.5), M.plain(Color(0.15, 0.35, 0.18), 0.6, 0.3), true)
+	_lb(base, Vector3(1.2, 0.8, 1.2), Vector3(h - 4.0, 0.4, h - 11.0), M.wood(), true)
+	_lb(base, Vector3(0.05, 1.8, 4.0), Vector3(h - 4.83, 1.6, h - 8.0), M.emissive(gcol, 0.5), false)
+	_lb(base, Vector3(0.05, 1.2, 3.0), Vector3(h - 0.18, 1.5, h - 5.0), M.emissive(gcol.lightened(0.3), 0.4), false)
+	_lb(base, Vector3(0.4, 0.1, 0.4), Vector3(h - 2.5, al_h - 0.2, h - 9.0), M.emissive(Color(1.0, 0.75, 0.4), 1.5), false)
 	for side in [[Vector3(inner, 0.35, 0.34), Vector3(0, 1.6, -h)], [Vector3(0.34, 0.35, inner), Vector3(-h, 1.6, 0)], [Vector3(0.34, 0.35, inner), Vector3(h, 1.6, 0)]]:
 		_lb(base, side[0], side[1], stripe, false)
 		_lb(base, side[0] * Vector3(1, 0.3, 1), side[1] + Vector3(0, WH - 1.45, 0), M.plain(Color(0.12, 0.12, 0.12), 0.5, 0.5), false)
@@ -1169,6 +1491,9 @@ func _gang_hq(cx: float, cz: float, inner: float, g: String, yaw: float) -> void
 		"fwd": fwd,
 		"notes": [base * Vector3(-14.0, 2.62, 12.0), base * Vector3(5.5, H + 0.32, -9.5), base * Vector3(0.0, 0.0, kz - 1.0), base * Vector3(14.6, 0.0, 15.6), base * Vector3(-16.5, 0.0, -17.0)],
 		"cars": [[base * Vector3(10.0, 0.7, 8.0), yaw + PI * 0.5], [base * Vector3(-8.0, 0.7, -17.5), yaw + PI * 0.5]],
+		"alley": base * Vector3(h - 2.5, 0.0, h - 2.0),
+		"alley_men": [base * Vector3(h - 2.0, 0.0, h - 8.0), base * Vector3(h - 3.2, 0.0, h - 9.2)],
+		"alley_yaw": yaw,
 	}
 
 # ---------------------------------------------------------------- casa segura (casa de verdade)
@@ -1389,6 +1714,15 @@ func _districts() -> void:
 					_box(Vector3(22.0, 0.05, 22.0), lc + Vector3(0, 0.07, 0), M.grass(), false)
 					_house(Transform3D(Basis(Vector3.UP, PI if sg > 0.0 else 0.0), lc), 22.0, rng.randf() < 0.25)
 			xx += 24.0
+	# pedestres nas ruas de casas (norte e sul): percursos pela beira da rua, em trechos de ~70 m
+	for st in [[300.0, -30.0, 285.0], [378.0, -20.0, 285.0], [-400.0, -190.0, 160.0]]:
+		var x0: float = st[1]
+		while x0 < st[2] - 20.0:
+			var x1: float = minf(x0 + 70.0, st[2])
+			var zz2: float = st[0]
+			house_loops.append(walk_loops.size())
+			walk_loops.append([Vector3(x0, 0.1, zz2 - 7.6), Vector3(x1, 0.1, zz2 - 7.6), Vector3(x1, 0.1, zz2 + 7.6), Vector3(x0, 0.1, zz2 + 7.6)])
+			x0 = x1
 	# morros com estrada de terra até o mirante (noroeste)
 	hills = [[Vector2(-165, 385), 62.0, 24.0], [Vector2(-80, 418), 34.0, 11.0], [Vector2(-215, 330), 26.0, 8.0]]
 	for hl in hills:

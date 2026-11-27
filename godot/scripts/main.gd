@@ -111,10 +111,16 @@ func _ready() -> void:
 		get_viewport().screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
 	# tela de título aparece na hora; o mundo é montado aos poucos por trás (com a árvore pausada)
 	var async_load := shot == "" or shot_view == "title"
+	var start_mode := "start"
 	if async_load:
 		title = Title.new()
 		add_child(title)
 		get_tree().paused = true
+		# o mundo só começa a ser montado quando o jogador toca INICIAR (ou CONFIGURAÇÕES)
+		if shot_view != "title":
+			start_mode = await title.go
+		else:
+			title._begin("start")
 		await _lstep(0.02, "Preparando")
 	audio = Audio.new()
 	add_child(audio)
@@ -189,6 +195,7 @@ func _ready() -> void:
 	phone.main = self
 	add_child(phone)
 	hud.phone_pressed.connect(func(): phone.open_home())
+	hud.reload_pressed.connect(func(): combat.reload())
 	daynight = DayNight.new()
 	add_child(daynight)
 	daynight.setup(self)
@@ -198,14 +205,18 @@ func _ready() -> void:
 	ui.apply_now()
 	if async_load:
 		title.done()
+		if shot_view != "title":
+			title.hide_title()
+			if start_mode == "settings":
+				ui.show_settings(ui.show_main_menu)
+			else:
+				ui.show_main_menu()
 		if shot_view == "title":
 			print("TITLE loaded frames_waited=", Engine.get_process_frames())
 			await get_tree().process_frame
 			await get_tree().process_frame
 			get_viewport().get_texture().get_image().save_png(shot)
 			get_tree().quit()
-		title.start_pressed.connect(func(): title.hide_title(); ui.show_main_menu())
-		title.settings_pressed.connect(func(): title.hide_title(); ui.show_settings(func(): ui._close(); get_tree().paused = true; title.show_title()))
 	elif shot_view in ["menu", "shop", "cars_shop", "settings"]:
 		ui.show_main_menu()
 	if shot_view in ["menu", "shop", "cars_shop", "settings", "clothes", "tuning", "tuning2", "hudedit", "phone", "phonecam"]:
@@ -213,6 +224,7 @@ func _ready() -> void:
 
 ## novo jogo: só soco, $600, sem carros comprados
 var title = null
+var play_s := 0.0          # tempo de jogo (vai no save)
 var phone = null
 
 # ---------------------------------------------------------------- celular: 190 / 192 / 666
@@ -440,6 +452,7 @@ func new_game() -> void:
 	combat.ammo = {}
 	combat.weapon = "fist"
 	tod = 10.0
+	play_s = 0.0
 	player.outfit = player.OUTFIT0.duplicate()
 	player.rebuild_body(false)
 	combat._equip()
@@ -473,6 +486,7 @@ func load_game() -> void:
 	var w: String = d.get("weapon", "fist")
 	combat.weapon = w if ow.has(w) else "fist"
 	tod = float(d.get("time", 10.0))
+	play_s = float(d.get("play_s", 0.0))
 	var of: Dictionary = player.OUTFIT0.duplicate()
 	var od2: Dictionary = d.get("outfit", {})
 	for k in od2:
@@ -805,6 +819,27 @@ func _shop_action() -> void:
 			ui.show_sleep()
 		"tune":
 			start_tuning()
+		"roof_in":
+			var rt: Dictionary = act_target
+			if money < int(rt.fee):
+				_msg("A entrada da festa custa $%d" % int(rt.fee), true)
+			else:
+				money -= int(rt.fee)
+				audio.play("cash")
+				ui.cinematic("POOL PARTY", "subindo para o terraço...", func():
+					player.global_position = rt.exit + Vector3(0, 0.3, 0) + (rt.top - rt.exit).normalized() * 1.5
+					player.velocity = Vector3.ZERO)
+		"roof_out":
+			var rt2: Dictionary = act_target
+			ui.cinematic("POOL PARTY", "descendo...", func():
+				player.global_position = rt2.entry + (rt2.entry - Vector3(rt2.top.x, 0.3, rt2.top.z)).normalized() * 1.5
+				player.velocity = Vector3.ZERO)
+		"mission":
+			var g: Dictionary = missions.near_giver
+			if not g.is_empty():
+				ui.show_mission_offer(missions.INFO[g.id].name, missions.INFO[g.id].desc, missions.offer_options(g))
+		"race_menu":
+			ui.show_race_menu()
 		"fare_on":
 			missions.start_fares("taxi")
 		"fare_off":
@@ -1231,10 +1266,17 @@ func _spawn_fleeing(c) -> void:
 	peds.append(p)
 	audio.play("scream", p.position, -6.0)
 
+## veículos que o jogador dirigiu e largou: ficam marcados no minimapa (os 4 mais recentes)
+var used_cars: Array = []
 func finish_exit(c, pos: Vector3) -> void:
 	c.throttle = 0
 	c.brake_in = 1.0
 	c.driver = null
+	if not c.has_meta("job") and not c.has_meta("uber"):
+		used_cars.erase(c)
+		used_cars.push_front(c)
+		if used_cars.size() > 4:
+			used_cars.resize(4)
 	player.vehicle = null
 	player.visible = true
 	player.collision_layer = 2
@@ -1457,6 +1499,7 @@ func save_mods(c) -> void:
 
 ## primeira pessoa: esconde a cabeça (e o que está nela) para não tapar a visão
 var _fp_hidden := []
+var phone_cam := 0          # câmera do celular: 0 desligada · 1 olhos do personagem · 2 selfie
 func _fp_head(on: bool) -> void:
 	var want := []
 	if on:
@@ -1628,14 +1671,18 @@ func gang_war() -> bool:
 func _zones_hud() -> void:
 	var z: Array = gangs.zones()
 	if wanted > 0:
-		if wanted >= 5:
-			z.append({"pos": player.global_position, "r": 60.0, "col": Color(0.65, 0.2, 0.95, 0.3), "ring": true})
-		elif not police.knows:
+		# zona amarela = local do crime (fixa). Círculo de perseguição: acompanha você só enquanto a
+		# polícia está te vendo de perto; senão fica parado onde te viram por último
+		var chasing: bool = police.seen and (police.units.size() > 0 or police.cops.size() > 0 or police.heli != null)
+		var cpos: Vector3 = player.global_position if chasing else police.last_known
+		if not police.knows:
 			z.append({"pos": police.search_pos, "r": police.ZONE_R, "col": Color(1.0, 0.85, 0.1, 0.3), "ring": true})
+		elif wanted >= 5:
+			z.append({"pos": cpos, "r": 60.0, "col": Color(0.65, 0.2, 0.95, 0.3), "ring": true})
 		elif wanted <= 2:
-			z.append({"pos": player.global_position, "r": 40.0, "col": Color(0.2, 0.45, 1.0, 0.3), "ring": true})
+			z.append({"pos": cpos, "r": 40.0, "col": Color(0.2, 0.45, 1.0, 0.3), "ring": true})
 		else:
-			z.append({"pos": player.global_position, "r": 45.0, "col": Color(1.0, 0.15, 0.12, 0.3), "ring": true})
+			z.append({"pos": cpos, "r": 45.0, "col": Color(1.0, 0.15, 0.12, 0.3), "ring": true})
 	hud.zones = z
 	hud.skulls = gangs.skulls
 	hud.skull_col = gangs.T[gangs.hunter].col if gangs.hunter != "" else Color.WHITE
@@ -1647,6 +1694,7 @@ const ARMY_COP_KILLS := 12
 var heat := 0.0
 var cop_kills := 0
 var _indoor := 0.0
+var _cam_allow := 1.0
 func _raise_wanted(n: int) -> void:
 	if interior != "":
 		return
@@ -1678,6 +1726,7 @@ func _process(dt: float) -> void:
 		cine_cam = false
 		hud.input_block = false
 	hud.tuning = not tune.is_empty()
+	play_s += dt
 	_upkeep(dt)
 	frames += 1
 	_visits_tick(dt)
@@ -1702,7 +1751,7 @@ func _process(dt: float) -> void:
 		hud.aim = false
 	var aiming: bool = hud.aim and player.vehicle == null and not combat.dead and combat.down_t <= 0.0 and not player.swimming
 	combat.aim = aiming
-	var fp: bool = cam_mode == 3 and not combat.dead and not (player.body and player.body.ragdolled) and not cine_cam
+	var fp: bool = (cam_mode == 3 or phone_cam == 1) and not combat.dead and not (player.body and player.body.ragdolled) and not cine_cam
 	if not aiming:
 		player.aim_yaw = NAN
 		if not fp:
@@ -1758,15 +1807,19 @@ func _process(dt: float) -> void:
 	sq.collision_mask = 1
 	sq.exclude = excl
 	var fr: PackedFloat32Array = space.cast_motion(sq)
+	var allow := 1.0
 	if fr.size() == 2 and fr[0] < 1.0 and fr[0] > 0.001:
-		want_pos = focus + (want_pos - focus) * fr[0]
+		allow = fr[0]
 	elif fr.size() == 2 and fr[0] <= 0.001:
 		# esfera já encostada em algo: volta ao raio simples
 		var cq := PhysicsRayQueryParameters3D.create(focus, want_pos, 1)
 		cq.exclude = excl
 		var ch := space.intersect_ray(cq)
 		if not ch.is_empty():
-			want_pos = ch.position + (focus - want_pos).normalized() * 0.3
+			allow = maxf(0.05, (ch.position.distance_to(focus) - 0.3) / maxf(0.01, want_pos.distance_to(focus)))
+	# encolhe na hora (parede), volta a se afastar devagar: sem o vai-e-vem perto de obstáculos
+	_cam_allow = allow if allow < _cam_allow else move_toward(_cam_allow, allow, dt * 1.6)
+	want_pos = focus + (want_pos - focus) * _cam_allow
 	_fp_head(fp)
 	if fp:
 		# primeira pessoa: câmera nos olhos do personagem (sentado no veículo ou a pé)
@@ -1784,8 +1837,23 @@ func _process(dt: float) -> void:
 			cam.look_at(eye + look * 10.0, Vector3.UP)
 			if player.vehicle == null and not aiming:
 				player.aim_yaw = cam_yaw + PI
+	elif phone_cam == 2 and player.body and not combat.dead and not player.body.ragdolled:
+		# selfie: o celular na mão estendida, de frente para o rosto; girar o dedo gira em volta
+		var hb2: Node3D = player.body.bones.get("head")
+		if hb2:
+			var od := off
+			od.y = 0
+			od = od.normalized() if od.length() > 0.01 else Vector3(0, 0, 1)
+			var head: Vector3 = hb2.global_position + Vector3(0, 0.1, 0)
+			var ce: Vector3 = head + od * 1.05 + Vector3(0, 0.18 - cam_pitch * 0.6, 0) + od.cross(Vector3.UP) * 0.25
+			cam.global_position = ce
+			cam.look_at(head + Vector3(0, -0.15, 0), Vector3.UP)
+			if player.vehicle == null:
+				player.aim_yaw = cam_yaw
 	elif not cine_cam:
-		cam.global_position = cam.global_position.lerp(want_pos, minf(1.0, dt * (14.0 if aiming else 8.0))) if frames > 2 else want_pos
+		# presa ao personagem (antes deslizava atrás de um alvo que anda aos saltos da física a 40 Hz
+		# e "tremia" para frente e para trás); o giro continua livre pelo dedo
+		cam.global_position = want_pos
 		cam.look_at(focus + (-off.normalized() * 6.0 if aiming else Vector3.ZERO), Vector3.UP)
 	# ambiente: cidade x mar pela distância da água; braçadas; carros e barcos passando
 	var sdist: float = world2.sea_dist(player.global_position.x, player.global_position.z)
@@ -1839,6 +1907,7 @@ func _process(dt: float) -> void:
 		fps_acc = 0
 		fps_n = 0
 	hud.driving = player.vehicle != null
+	hud.reload_avail = combat.MAG.has(combat.weapon) and not combat.dead
 	hud.bike = player.vehicle != null and player.vehicle.get("variant") == "bike"
 	hud.info.text = "%d FPS · %s · b%s · Fatia de teste Godot" % [round(fps_show), RenderingServer.get_video_adapter_name(), build_id]
 	hud.stars.text = "★".repeat(wanted) + "☆".repeat(5 - wanted)
@@ -1898,6 +1967,21 @@ func _process(dt: float) -> void:
 			shop_action = "fare_on"
 		elif missions.active in ["taxi", "uber"]:
 			shop_action = "fare_off"
+	# festa no terraço: portaria (paga a entrada) e porta da escada lá em cima
+	if player.vehicle == null and not combat.dead and shop_action == "":
+		for rt in city.rooftops:
+			if player.global_position.distance_to(rt.entry) < 2.6:
+				shop_action = "roof_in"
+				act_target = rt
+			elif player.global_position.distance_to(rt.exit) < 2.4:
+				shop_action = "roof_out"
+				act_target = rt
+	# marcador de missão: botão INICIAR (nunca começa sozinho); no racha, botão do menu da corrida
+	if not combat.dead and not passenger_ride:
+		if missions.active == "" and not missions.near_giver.is_empty():
+			shop_action = "mission"
+		elif missions.active == "race" and missions.race_t >= 0.0:
+			shop_action = "race_menu"
 	# oficina: entrar com o carro na frente da loja
 	if player.vehicle != null and interior == "" and not combat.dead:
 		for sh in city.shops:
@@ -1915,7 +1999,7 @@ func _process(dt: float) -> void:
 				ce = true
 				break
 	hud.can_enter = ce
-	hud.shop_label = {"enter": "ENTRAR", "exit": "SAIR", "buy": "COMPRAR", "carry": "CARREGAR", "drop": "SOLTAR", "trunk": "PORTA-MALAS", "eat": "COMER", "rob": "ASSALTAR", "snack": "COMPRAR", "sleep": "DORMIR", "tune": "OFICINA", "fare_on": "SERVIÇO", "fare_off": "ENCERRAR", "loot": (gangs.loot_label(loot_target) if loot_target != null else "PEGAR")}.get(shop_action, "")
+	hud.shop_label = {"enter": "ENTRAR", "exit": "SAIR", "buy": "COMPRAR", "carry": "CARREGAR", "drop": "SOLTAR", "trunk": "PORTA-MALAS", "eat": "COMER", "rob": "ASSALTAR", "snack": "COMPRAR", "sleep": "DORMIR", "tune": "OFICINA", "fare_on": "SERVIÇO", "fare_off": "ENCERRAR", "mission": "INICIAR", "race_menu": "RACHA", "roof_in": "FESTA $50", "roof_out": "DESCER", "loot": (gangs.loot_label(loot_target) if loot_target != null else "PEGAR")}.get(shop_action, "")
 	var pk: String = player.vehicle.kind if player.vehicle else ""
 	hud.gas_name = "SUBIR" if pk == "heli" else "ACEL"
 	hud.brk_name = "DESCER" if pk == "heli" else "FREIO"
@@ -1942,6 +2026,11 @@ func _process(dt: float) -> void:
 		if is_instance_valid(a) and not a.dead:
 			bl.append({"pos": a.global_position, "col": Color(0.35, 0.45, 0.2), "near": true, "icon": a.kind})
 	bl.append_array(gangs.blips())
+	used_cars = used_cars.filter(func(uc): return is_instance_valid(uc) and not uc.get("dead"))
+	for uc in used_cars:
+		if uc != player.vehicle:
+			var kind_i: String = "pboat" if uc.kind == "boat" else ("pheli" if uc.kind == "heli" else ("pmoto" if uc.kind == "moto" else "pcar"))
+			bl.append({"pos": uc.global_position, "col": Color(0.25, 0.75, 1.0), "icon": kind_i})
 	hud.map_blips = bl
 	# rastro até o destino (missão/táxi tem prioridade sobre o ponto marcado no mapa)
 	_route_t -= dt
@@ -2573,6 +2662,31 @@ func _test9(v: String) -> void:
 			combat.busted()
 		if frames % 20 == 0:
 			print("BST ", frames, " pos=", player.global_position.snapped(Vector3.ONE * 0.1), " cell=", city.station.cell, " busted_t=", snappedf(combat.busted_t, 0.1))
+	if v in ["hosp", "hosp1", "hosp2", "hosproof", "racelot", "alley", "roof", "swimmers", "houseped"]:
+		if frames == 4:
+			var hs: Dictionary = city.hospital
+			match v:
+				"hosp": player.global_position = city.hospital_pos + Vector3(0, 0, 3)
+				"hosp1": player.global_position = hs.beds[2] + Vector3(2.5, -0.6, 0)
+				"hosp2": player.global_position = hs.staff[4] + Vector3(0, 0.2, 2)
+				"hosproof": player.global_position = hs.heli + Vector3(6, 0.5, 6)
+				"racelot": player.global_position = city.race_lot.giver + Vector3(0, 0.3, 8)
+				"alley": player.global_position = city.gang_hq["p"].alley + Vector3(0, 0.3, 0)
+				"roof": player.global_position = city.rooftops[0].top + Vector3(0, 0.5, 0) if city.rooftops.size() > 0 else Vector3.ZERO
+				"swimmers": player.global_position = Vector3(world2.SHORE_X - 6.0, 1.0, 0.0)
+				"houseped": player.global_position = Vector3(60, 0.5, 300)
+			print("PLC ", v, " rooftops=", city.rooftops.size(), " roof0=", city.rooftops[0] if city.rooftops.size() > 0 else {})
+		if frames == 8:
+			cam_yaw = float(OS.get_environment("YAW")) if OS.get_environment("YAW") != "" else cam_yaw
+		if frames % 60 == 0:
+			var near := 0
+			var sw := 0
+			for q in peds:
+				if is_instance_valid(q) and q.global_position.distance_to(player.global_position) < 60.0:
+					near += 1
+				if is_instance_valid(q) and q.mode == "swim":
+					sw += 1
+			print("PLC ", frames, " peds_near=", near, " swimmers=", sw, " p=", player.global_position.snapped(Vector3.ONE * 0.1), " action=", shop_action)
 	if v == "housecam":
 		var r: Array = city.safehouse.rect
 		if frames == 4:
@@ -3494,11 +3608,19 @@ func _test_views() -> void:
 			_shop_action()
 		if frames % 30 == 0:
 			print("TAXI ", frames, " veh=", player.vehicle.kind if player.vehicle else "-", " active=", missions.active, " st=", missions.taxi_state, " obj=", missions.obj_pos, " text=", missions.text)
-	if v in ["phone", "phonecam", "call190", "call192", "call666", "uber"]:
+	if v in ["phone", "phonecam", "selfie", "fpphoto", "call190", "call192", "call666", "uber"]:
 		if frames == 4:
 			player.global_position = city._center(3) * Vector3(1, 0, 0) + Vector3(0, 0.3, city._center(3) - city.BLOCK * 0.5 + 1.6)
 		if v == "phone" and frames == 10:
 			phone.open_home()
+		if v in ["selfie", "fpphoto"] and frames == 10:
+			phone.open_camera()
+			if v == "selfie":
+				phone_cam = 2
+				phone._pose_i = int(OS.get_environment("POSE")) if OS.get_environment("POSE") != "" else 0
+				phone._apply_pose()
+		if v in ["selfie", "fpphoto"] and frames == 30:
+			print("PHN cam=", phone_cam, " pose=", player.body.arm_pose, " campos=", cam.global_position.snapped(Vector3.ONE * 0.1), " head=", player.body.bones.head.global_position.snapped(Vector3.ONE * 0.1))
 		if v == "phonecam" and frames == 10:
 			phone.open_camera()
 		if v == "phonecam" and frames == 16:
@@ -3537,12 +3659,28 @@ func _test_views() -> void:
 			if ph == 0:
 				missions._cleanup()
 				player.global_position = missions._giver(seq[k]).pos + Vector3(0, 0.3, 0)
+			if ph == 6:
+				print("JOB ", seq[k], " action=", shop_action, " near=", missions.near_giver.get("id", ""))
+				if not missions.near_giver.is_empty():
+					missions.offer_options(missions.near_giver)[0][2].call()
 			if ph == 30:
 				print("JOB ", seq[k], " active=", missions.active, " text=", missions.text, " car=", missions.job_car.kind if missions.job_car and is_instance_valid(missions.job_car) else "-", " drops=", missions.drops.size(), " thugs=", missions.thugs.size(), " near_gang=", missions.near_gang_job(seq[k].substr(5) if seq[k].begins_with("gang") else "g", player.global_position))
 	if v == "race":
 		if frames == 4:
 			money = 5000
 			player.global_position = missions._giver("race").pos
+		if frames == 10:
+			print("RACE action=", shop_action, " near=", missions.near_giver.get("id", ""), " opts=", missions.offer_options(missions.near_giver).map(func(o): return o[0]))
+			var oi := int(OS.get_environment("RENT")) if OS.get_environment("RENT") != "" else 1
+			missions.offer_options(missions.near_giver)[oi][2].call()
+		if frames == int(OS.get_environment("RKILL")) and missions.racers.size() > 0:
+			missions.racers[0].car.take_damage(5000.0)
+			print("RACE kill racer0")
+		if frames == int(OS.get_environment("RCP")):
+			missions.race_to_checkpoint()
+			print("RACE to checkpoint")
+		if frames == 40:
+			print("RACE top=", snappedf(missions.race_top, 0.1), " racer_vmax=", missions.racers.map(func(r): return snappedf(r.car.vmax_mult, 0.01)), " kind=", missions.race_kind)
 		if frames > 20 and missions.active == "race" and player.vehicle:
 			# o jogador "pilota" com o mesmo piloto automático dos NPCs
 			var n: int = missions.checkpoints.size()
@@ -3568,6 +3706,9 @@ func _test_views() -> void:
 	if v == "mission":
 		if frames == 4:
 			player.global_position = missions.givers[1].pos
+		if frames == 8:
+			print("MIS action=", shop_action)
+			missions.offer_options(missions.near_giver)[0][2].call()
 		if frames % 30 == 0:
 			print("MIS ", frames, " active=", missions.active, " text=", missions.text, " hostiles=", missions.hostiles().size(), " timer=", snappedf(missions.timer, 1))
 	if v == "busride":
@@ -3969,16 +4110,108 @@ func _spawn_population(first := true) -> void:
 		var pc = _spawn_car(pos, yaw, palette[k % palette.size()])
 		pc.parked = true
 	# pedestres
-	for k in _pop_peds:
+	for k in _pop_peds + 16:
 		var p := Ped.new()
 		add_child(p)
-		var loopw: Array = city.walk_loops[rng.randi() % city.walk_loops.size()]
+		# os 16 a mais andam nas ruas de casas (norte e sul)
+		var loopw: Array = city.walk_loops[city.house_loops[k % city.house_loops.size()] if k >= _pop_peds and city.house_loops.size() > 0 else rng.randi() % city.walk_loops.size()]
 		p.setup(loopw, rng.randi_range(0, 3), rng)
 		p.position = loopw[p.idx].lerp(loopw[(p.idx + 1) % 4], rng.randf())
 		peds.append(p)
 	for p in peds:
 		p.died.connect(_on_ped_died)
+	_spawn_places()
 	_spawn_vehicles2()
+
+## pessoa parada (atendente/conversa/doente): Ped em modo "clerk" (olha para o jogador de perto)
+func _static_ped(pos: Vector3, yaw: float, cols: Array) -> Ped:
+	var q := Ped.new()
+	add_child(q)
+	q.setup([pos, pos + Vector3(0.01, 0, 0), pos, pos], 0, rng)
+	for k in mini(cols.size(), 4):
+		q._cols[k] = cols[k]
+	q.body.queue_free()
+	q._make_body()
+	q.global_position = pos
+	q.speed = 0.0
+	q.mode = "clerk"
+	q.body.rotation.y = yaw
+	q.died.connect(_on_ped_died)
+	peds.append(q)
+	return q
+
+var _extras: Array = []      # macas com feridos (Humanoid solto)
+## hospital (equipe, feridos nas macas, ambulâncias), ponto do racha (carros tunados, gente conversando)
+## e os 2 gangsters da viela que passam serviços
+func _spawn_places() -> void:
+	for e in _extras:
+		if is_instance_valid(e):
+			e.queue_free()
+	_extras = []
+	var skin := [Color(0.78, 0.56, 0.38), Color(0.45, 0.3, 0.2), Color(0.92, 0.75, 0.6)]
+	var hair := [Color(0.08, 0.06, 0.05), Color(0.35, 0.2, 0.1), Color(0.8, 0.7, 0.4)]
+	var hs: Dictionary = city.hospital
+	if not hs.is_empty():
+		for k in hs.staff.size():
+			var wc := Color(0.95, 0.96, 0.97) if k % 2 == 0 else Color(0.35, 0.65, 0.7)
+			_static_ped(hs.staff[k], rng.randf() * TAU, [wc, wc, skin[k % 3], hair[k % 3]])
+		_static_ped(hs.reception, PI, [Color(0.35, 0.65, 0.7), Color(0.2, 0.25, 0.35), skin[1], hair[0]])
+		# feridos deitados nas macas (alguns com curativo vermelho)
+		for k in hs.beds.size():
+			if k % 3 == 2:
+				continue
+			var h := Humanoid.new()
+			h.build(Color(0.7, 0.8, 0.95), Color(0.7, 0.8, 0.95), skin[k % 3], hair[(k + 1) % 3], {})
+			add_child(h)
+			h.add_to_group("tmp")
+			h.global_position = hs.beds[k] + Vector3(0, 0.12, -0.85)
+			h.rotation = Vector3(-PI * 0.5, 0, 0)
+			h.set_far(40.0)
+			if k % 2 == 0:
+				var bd := MeshInstance3D.new()
+				var bm := BoxMesh.new()
+				bm.size = Vector3(0.36, 0.2, 0.12)
+				bd.mesh = bm
+				bd.material_override = M.plain(Color(0.95, 0.95, 0.95), 0.7)
+				h.add_child(bd)
+				bd.position = Vector3(0.0, 1.05 if k % 4 == 0 else 0.55, 0.12)
+			_extras.append(h)
+		for a in hs.ambulances:
+			var v = _spawn_car(a[0], a[1], Color(0.97, 0.97, 0.97), false, "van")
+			v.parked = true
+			v.set_meta("amb", true)
+	# racha: carros modificados e rodinhas de conversa
+	var rl: Dictionary = city.race_lot
+	if not rl.is_empty():
+		var rk := ["sport", "super", "hatch", "sedan", "sport"]
+		var rc := [Color(0.1, 0.9, 0.3), Color(0.95, 0.4, 0.05), Color(0.6, 0.1, 0.8), Color(0.05, 0.05, 0.06), Color(0.95, 0.95, 0.1)]
+		for k in rl.cars.size():
+			var c = _spawn_car(rl.cars[k][0], rl.cars[k][1], rc[k % rc.size()], false, rk[k % rk.size()])
+			c.parked = true
+			TUNING.apply(c, {"wheels": 1 + k % 5, "sticker": 1 + (k * 2) % 5, "spoiler": 1 + k % 3, "fbumper": 1 + k % 2, "rbumper": 1 + k % 2, "susp": 1 + k % 2, "tint": 2, "paint": rc[k % rc.size()].to_html()})
+		var shirts := [Color(0.1, 0.1, 0.1), Color(0.85, 0.1, 0.1), Color(0.95, 0.95, 0.95), Color(0.1, 0.3, 0.7), Color(0.95, 0.6, 0.1)]
+		for k in rl.people.size():
+			_static_ped(rl.people[k][0], rl.people[k][1], [shirts[k % shirts.size()], Color(0.15, 0.17, 0.25), skin[k % 3], hair[k % 3]])
+		_static_ped(rl.giver + Vector3(0, 0, 1.6), PI, [Color(0.05, 0.05, 0.05), Color(0.05, 0.05, 0.05), skin[0], hair[0]])
+	# festas nos terraços
+	var party_shirts := [Color(0.95, 0.3, 0.5), Color(0.2, 0.75, 0.9), Color(0.95, 0.85, 0.2), Color(0.95, 0.95, 0.95), Color(0.3, 0.85, 0.4), Color(0.9, 0.45, 0.1)]
+	for rt in city.rooftops:
+		for k in rt.people.size():
+			var pr: Array = rt.people[k]
+			var q := _static_ped(pr[0] + Vector3(0, 0.05, 0), pr[1], [party_shirts[(k + rt.people.size()) % party_shirts.size()], Color.from_hsv(rng.randf(), 0.5, 0.6), skin[k % 3], hair[k % 3]])
+			q.beach = true
+			q.body.queue_free()
+			q._make_body()
+			q.body.rotation.y = pr[1]
+	# viela das gangues: 2 gangsters passando serviço
+	for g in city.gang_hq.keys():
+		var hq: Dictionary = city.gang_hq[g]
+		if not hq.has("alley_men"):
+			continue
+		var gc: Color = Color(0.1, 0.62, 0.22) if g == "g" else Color(0.95, 0.32, 0.68)
+		for k in hq.alley_men.size():
+			var q := _static_ped(hq.alley_men[k] + Vector3(0, 0.2, 0), hq.alley_yaw + PI * (0.6 if k == 0 else 1.4), [gc, Color(0.08, 0.08, 0.1), skin[(k + 1) % 3], hair[0]])
+			q.set_meta("gang_giver", g)
 
 func _spawn_vehicles2() -> void:
 	var road_x: float = city._center(2) - city.CELL * 0.5
@@ -4049,6 +4282,24 @@ func _spawn_vehicles2() -> void:
 	for sc in city.station_cars:
 		var pc = _spawn_car(sc[0], sc[1], Color.WHITE, true)
 		pc.parked = true
+	# banhistas nadando no mar, perto da praia
+	for k in 7:
+		var sx: float = world2.SHORE_X + rng.randf_range(10.0, 48.0)
+		var sz: float = rng.randf_range(world2.ISL_Z0 + 40.0, world2.ISL_Z1 - 40.0)
+		var sl := [Vector3(sx, 0, sz), Vector3(sx + rng.randf_range(-6, 6), 0, sz + rng.randf_range(18, 40))]
+		var sw := Ped.new()
+		add_child(sw)
+		sw.setup(sl, 0, rng)
+		sw.beach = true
+		sw._cols[1] = Color.from_hsv(rng.randf(), 0.65, 0.75)
+		sw.body.queue_free()
+		sw._make_body()
+		sw.mode = "swim"
+		sw.speed = rng.randf_range(0.7, 1.1)
+		sw.swim_y = world2.WATER_Y - 1.15
+		sw.position = Vector3(sx, sw.swim_y, sz)
+		sw.died.connect(_on_ped_died)
+		peds.append(sw)
 	for k in 6:
 		var p := Ped.new()
 		add_child(p)
@@ -4171,11 +4422,14 @@ func _upkeep(dt: float) -> void:
 	# pedestres da cidade
 	var alive := 0
 	for q in peds:
-		if not q.down and not q.beach:
+		if not q.down and not q.beach and q.mode != "clerk":
 			alive += 1
-	if alive < _pop_peds:
+	if alive < _pop_peds + 16:
 		for t in 8:
-			var loopw: Array = city.walk_loops[rng.randi() % city.walk_loops.size()]
+			# perto das ruas de casas, repõe gente lá (antes ficavam vazias)
+			var in_houses: bool = (pp.z > 250.0 or pp.z < -340.0) and city.house_loops.size() > 0
+			var li: int = city.house_loops[rng.randi() % city.house_loops.size()] if in_houses and rng.randf() < 0.7 else rng.randi() % city.walk_loops.size()
+			var loopw: Array = city.walk_loops[li]
 			var k := rng.randi_range(0, 3)
 			var pos: Vector3 = loopw[k]
 			if pos.distance_to(pp) < 55.0 or (pos.distance_to(pp) < 120.0 and _seen(pos)):

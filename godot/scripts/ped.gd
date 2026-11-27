@@ -52,6 +52,7 @@ func setup(path: Array, start: int, rng: RandomNumberGenerator) -> void:
 	_make_body()
 
 var beach := false
+var swim_y := 0.0           # altura no mar (modo "swim")
 func _make_body() -> void:
 	body = Humanoid.new()
 	body.build(_cols[0], _cols[1], _cols[2], _cols[3], {"beach": beach})
@@ -173,6 +174,9 @@ func start_call(t: float) -> void:
 	flee = 0.0
 
 func scare() -> void:
+	if mode == "swim":
+		flee = 6.0
+		return
 	if not down and mode != "hostage" and mode != "handsup" and mode != "clerk" and mode != "call":
 		_end_mode()
 		flee = 6.0
@@ -231,6 +235,27 @@ func _mode_tick(dt: float) -> void:
 	var pl = main.player
 	if mode == "fish":
 		body.animate(0.0, dt)
+		return
+	if mode == "swim":
+		# banhista nadando no mar: vai e volta entre os 2 pontos do laço; foge de tiros/explosões nadando
+		body.swimming = true
+		var tgt: Vector3 = loop[idx]
+		var dv := tgt - position
+		dv.y = 0
+		var sp := speed * (2.2 if flee > 0.0 else 1.0)
+		if flee > 0.0:
+			flee -= dt
+			var aw: Vector3 = position - pl.global_position
+			aw.y = 0
+			dv = aw if aw.length() > 0.1 else dv
+		if dv.length() < 1.0:
+			idx = (idx + 1) % loop.size()
+		else:
+			var dn := dv.normalized()
+			position += dn * sp * dt
+			body.rotation.y = lerp_angle(body.rotation.y, atan2(dn.x, dn.z), minf(1.0, dt * 3.0))
+		position.y = swim_y + sin(Time.get_ticks_msec() * 0.002 + float(idx)) * 0.05
+		body.animate(sp, dt)
 		return
 	if mode == "clerk":
 		# atendente atrás do balcão: olha para o cliente quando ele chega perto

@@ -40,6 +40,7 @@ var jet_cd := 0.0
 var tank_cd := 3.0
 var _out_i := 0
 var boat_cd := 0.0
+var sea_t := 0.0          # há quanto tempo o jogador procurado está no mar
 
 func setup(m: Node3D) -> void:
 	main = m
@@ -50,6 +51,7 @@ func setup(m: Node3D) -> void:
 	m.add_child(_sk)
 
 func clear() -> void:
+	sea_t = 0.0
 	for c in cops:
 		if is_instance_valid(c) and not c.down:
 			c.queue_free()
@@ -106,7 +108,8 @@ func tick(dt: float) -> void:
 	var p: Node3D = main.player.vehicle if main.player.vehicle else main.player
 	var pp: Vector3 = p.global_position
 	# sem saber onde você está: as unidades vasculham pontos da zona amarela
-	if knows or main.wanted >= 5:
+	# a polícia só "sabe" onde você está enquanto alguém te vê (senão vai até o último lugar visto)
+	if (knows and seen) or main.wanted >= 5:
 		last_known = pp
 	else:
 		_sw_t -= dt
@@ -154,13 +157,23 @@ func tick(dt: float) -> void:
 			_spawn_unit("armored", s, pp)
 			spawn_cd = 4.0
 	# 3★+ e o jogador no mar: lanchas da polícia
+	# fugiu para o mar (qualquer estrela): lanchas e helicóptero aparecem aos poucos
 	var in_sea: bool = main.world2.is_water(pp.x, pp.z) and main.world2.sea_dist(pp.x, pp.z) > 8.0
-	if s >= 3 and in_sea and units.filter(func(u): return u.kind == "boat").size() < (1 if s < 4 else 2) and boat_cd <= 0.0:
+	sea_t = sea_t + dt if in_sea else maxf(0.0, sea_t - dt * 2.0)
+	# 1ª lancha depois de 4 s no mar, 2ª aos 25 s, 3ª aos 55 s (mais cedo com mais estrelas)
+	var want_boats := 0
+	if in_sea:
+		for th in [4.0, 25.0, 55.0]:
+			if sea_t * (1.0 + (s - 1) * 0.35) > th:
+				want_boats += 1
+		want_boats = mini(want_boats, 1 + s / 2)
+	if in_sea and units.filter(func(u): return u.kind == "boat").size() < want_boats and boat_cd <= 0.0:
 		_spawn_boat(pp)
 		boat_cd = 6.0
 	boat_cd -= dt
 	heli_cd -= dt
-	if s >= 4 and heli_cd <= 0.0 and (heli == null or not is_instance_valid(heli) or heli.dead):
+	var sea_heli := in_sea and sea_t > 35.0 / (1.0 + (s - 1) * 0.35)
+	if (s >= 4 or sea_heli) and heli_cd <= 0.0 and (heli == null or not is_instance_valid(heli) or heli.dead):
 		if heli == null or not is_instance_valid(heli):
 			_spawn_heli(pp)
 	if heli and is_instance_valid(heli):

@@ -2,7 +2,29 @@ extends CanvasLayer
 ## Menus: tela inicial, pausa, configurações, lojas (armas e carros) e save/carregamento.
 ## Enquanto um menu está aberto o jogo fica pausado (este nó continua rodando).
 
-const SAVE := "user://save.json"
+const SAVE := "user://save.json"           # save antigo (vira o slot 1)
+const SLOTS := 3
+var slot := 1
+func slot_path(n: int) -> String:
+	return "user://save_slot%d.json" % n
+## informações de um slot para a lista (vazio = {})
+func slot_info(n: int) -> Dictionary:
+	var p := slot_path(n)
+	if n == 1 and not FileAccess.file_exists(p) and FileAccess.file_exists(SAVE):
+		p = SAVE
+	if not FileAccess.file_exists(p):
+		return {}
+	var d = JSON.parse_string(FileAccess.get_file_as_string(p))
+	return d if d is Dictionary else {}
+func last_slot() -> int:
+	var best := 0
+	var bt := -1.0
+	for n in range(1, SLOTS + 1):
+		var d := slot_info(n)
+		if not d.is_empty() and float(d.get("saved_at", 0.0)) >= bt:
+			bt = float(d.get("saved_at", 0.0))
+			best = n
+	return best
 const SETS := "user://settings.json"
 const QUAL := ["BAIXO", "MÉDIO", "ALTO"]
 
@@ -337,7 +359,15 @@ func loading(on: bool, text := "Carregando...") -> void:
 	t.position = Vector2(0, s.y * 0.44)
 	bg.add_child(t)
 	var tip := Label.new()
-	tip.text = ["Dica: policiais de moto caem se você acertar a moto", "Dica: a oficina tuning blinda seu carro", "Dica: suba na caçamba de uma picape para pegar carona", "Dica: gangues avisam antes de atacar — saia da área", "Dica: segure o acelerador e puxe para trás para empinar a moto"][randi() % 5]
+	var tips: Array = preload("res://scripts/title.gd").TIPS
+	tip.text = "Dica: " + tips[randi() % tips.size()]
+	# troca de dica a cada 3 s enquanto carrega
+	var tm := Timer.new()
+	tm.wait_time = 3.0
+	tm.process_mode = Node.PROCESS_MODE_ALWAYS
+	tm.autostart = true
+	tm.timeout.connect(func(): tip.text = "Dica: " + tips[randi() % tips.size()])
+	bg.add_child(tm)
 	tip.add_theme_font_size_override("font_size", 20)
 	tip.add_theme_color_override("font_color", Color(0.7, 0.7, 0.72))
 	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -375,17 +405,61 @@ func letterbox(on: bool, title := "") -> void:
 	_lb.add_child(t)
 
 # ---------------- telas ----------------
+## tela de missão: nome, descrição e opções [[texto, habilitado, Callable], ...]
+func show_mission_offer(title: String, desc: String, opts: Array) -> void:
+	var box := _open(title)
+	var l := _info(box, desc)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.custom_minimum_size = Vector2(500, 0)
+	for o in opts:
+		var cb: Callable = o[2]
+		_btn(box, o[0], func(): _close(); cb.call(), o[1])
+	_btn(box, "AGORA NÃO", _close)
+
+## menu do racha: voltar ao último ponto, recomeçar ou desistir
+func show_race_menu() -> void:
+	var box := _open("RACHA")
+	_btn(box, "VOLTAR AO ÚLTIMO PONTO", func(): _close(); main.missions.race_to_checkpoint())
+	_btn(box, "RECOMEÇAR DO INÍCIO", func(): _close(); main.missions.race_restart())
+	_btn(box, "DESISTIR", func(): _close(); main.missions.fail("Você desistiu"))
+	_btn(box, "CONTINUAR", _close)
+
 func show_main_menu() -> void:
 	var box := _open("CRAZY THIEF DUDE")
 	_info(box, "versão Godot · fatia de teste", Color(0.6, 0.6, 0.6))
-	_btn(box, "CONTINUAR", func(): main.load_game(); _close(), FileAccess.file_exists(SAVE))
-	_btn(box, "NOVO JOGO", func(): main.new_game(); _close())
+	var ls := last_slot()
+	_btn(box, "CONTINUAR" + (" (slot %d)" % ls if ls > 0 else ""), func(): slot = ls; main.load_game(); _close(), ls > 0)
+	_btn(box, "CARREGAR JOGO", func(): show_slots("load"), ls > 0)
+	_btn(box, "NOVO JOGO", func(): show_slots("new"))
 	_btn(box, "CONFIGURAÇÕES", func(): show_settings(show_main_menu))
+
+## slots de save: carregar, novo jogo (escolhe onde salvar) ou salvar
+func show_slots(mode: String) -> void:
+	var box := _open({"load": "CARREGAR JOGO", "new": "NOVO JOGO · escolha o slot", "save": "SALVAR JOGO"}[mode])
+	for n in range(1, SLOTS + 1):
+		var d := slot_info(n)
+		var txt := "SLOT %d · vazio" % n
+		if not d.is_empty():
+			var dt := Time.get_datetime_dict_from_unix_time(int(d.get("saved_at", 0.0)))
+			var pm := int(d.get("play_s", 0.0)) / 60
+			txt = "SLOT %d · $%d · %dh%02d de jogo · salvo %02d/%02d %02d:%02d" % [n, int(d.get("money", 0)), pm / 60, pm % 60, dt.day, dt.month, dt.hour, dt.minute]
+		var nn := n
+		match mode:
+			"load":
+				_btn(box, txt, func(): slot = nn; main.load_game(); _close(), not d.is_empty())
+			"new":
+				_btn(box, txt + ("  (será apagado)" if not d.is_empty() else ""), func(): slot = nn; main.new_game(); _close())
+			"save":
+				_btn(box, txt, func(): slot = nn; save_game(); show_slots("save"))
+	if mode == "save":
+		_info(box, "Jogando no slot %d" % slot, Color(0.4, 1, 0.4))
+	_btn(box, "VOLTAR", show_pause if mode == "save" else show_main_menu)
 
 func show_pause() -> void:
 	var box := _open("PAUSA")
 	_btn(box, "CONTINUAR", _close)
-	_btn(box, "SALVAR JOGO", func(): save_game(); _info(box, "Jogo salvo!", Color(0.4, 1, 0.4)))
+	_btn(box, "SALVAR JOGO (slot %d)" % slot, func(): save_game(); _info(box, "Jogo salvo!", Color(0.4, 1, 0.4)))
+	_btn(box, "SALVAR EM OUTRO SLOT", func(): show_slots("save"))
 	_btn(box, "CONFIGURAÇÕES", func(): show_settings(show_pause))
 	_btn(box, "CÓDIGOS", show_cheats)
 	_btn(box, "MENU INICIAL", func(): save_game(); show_main_menu())
@@ -729,16 +803,14 @@ func apply_now() -> void:
 
 func save_game() -> void:
 	var c = main.combat
-	var d := {"money": main.money, "armor": main.armor, "owned": c.owned, "ammo": c.ammo, "weapon": c.weapon, "cars": main.owned_cars, "outfit": main.player.outfit, "time": main.tod}
-	var f := FileAccess.open(SAVE, FileAccess.WRITE)
+	var d := {"money": main.money, "armor": main.armor, "owned": c.owned, "ammo": c.ammo, "weapon": c.weapon, "cars": main.owned_cars, "outfit": main.player.outfit, "time": main.tod,
+		"saved_at": Time.get_unix_time_from_system(), "play_s": main.play_s}
+	var f := FileAccess.open(slot_path(slot), FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(d))
 
 func load_save() -> Dictionary:
-	if not FileAccess.file_exists(SAVE):
-		return {}
-	var d = JSON.parse_string(FileAccess.get_file_as_string(SAVE))
-	return d if d is Dictionary else {}
+	return slot_info(slot)
 
 # ---------------------------------------------------------------- casa segura: dormir (salva e passa o tempo)
 func show_sleep() -> void:

@@ -29,6 +29,10 @@ func close() -> void:
 		_shot_ui.queue_free()
 		_shot_ui = null
 		main.hud.visible = true
+		main.phone_cam = 0
+		if main.player.body and is_instance_valid(main.player.body):
+			main.player.body.arm_pose = ""
+			main.player.body.hide_gun = false
 	get_tree().paused = false
 
 # ---------------------------------------------------------------- moldura
@@ -167,12 +171,62 @@ func open_camera() -> void:
 	back.position = Vector2(60, 60)
 	back.pressed.connect(close)
 	_shot_ui.add_child(back)
+	# visão dos olhos do personagem / selfie, e poses para a foto
+	main.phone_cam = 1
+	_pose_i = 0
+	var area := Control.new()       # arrastar o dedo gira a câmera
+	area.set_anchors_preset(Control.PRESET_FULL_RECT)
+	area.mouse_filter = Control.MOUSE_FILTER_PASS
+	area.gui_input.connect(_drag)
+	_shot_ui.add_child(area)
+	_shot_ui.move_child(area, 0)
+	var flip := Button.new()
+	flip.text = "SELFIE"
+	flip.add_theme_font_size_override("font_size", 22)
+	flip.custom_minimum_size = Vector2(150, 56)
+	flip.position = Vector2(s.x - 205, s.y * 0.5 - 140)
+	flip.pressed.connect(func():
+		main.phone_cam = 2 if main.phone_cam == 1 else 1
+		flip.text = "OLHOS" if main.phone_cam == 2 else "SELFIE"
+		_apply_pose())
+	_shot_ui.add_child(flip)
+	var pose := Button.new()
+	pose.text = "POSE: " + POSES[0][1]
+	pose.add_theme_font_size_override("font_size", 20)
+	pose.custom_minimum_size = Vector2(220, 56)
+	pose.position = Vector2(60, s.y - 120)
+	pose.pressed.connect(func():
+		_pose_i = (_pose_i + 1) % POSES.size()
+		pose.text = "POSE: " + POSES[_pose_i][1]
+		_apply_pose())
+	_shot_ui.add_child(pose)
+	_apply_pose()
 	var gal := Button.new()
 	gal.text = "Galeria"
 	gal.add_theme_font_size_override("font_size", 22)
 	gal.position = Vector2(s.x - 190, s.y * 0.5 + 80)
 	gal.pressed.connect(func(): close(); open_gallery())
 	_shot_ui.add_child(gal)
+
+const POSES := [["", "natural"], ["peace", "paz e amor"], ["flex", "muque"], ["wave", "tchau"], ["point", "apontando"], ["crossed", "braços cruzados"], ["cheer", "comemorando"], ["handsup", "mãos para cima"]]
+var _pose_i := 0
+
+func _apply_pose() -> void:
+	var b = main.player.body
+	if b == null or not is_instance_valid(b):
+		return
+	var ps: String = POSES[_pose_i][0]
+	# selfie sem pose escolhida: braço esticado segurando o celular
+	if ps == "":
+		ps = "selfie" if main.phone_cam == 2 else ""
+	b.arm_pose = ps
+	b.hide_gun = true
+
+func _drag(e: InputEvent) -> void:
+	if e is InputEventScreenDrag or (e is InputEventMouseMotion and (e.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0):
+		var rel: Vector2 = e.relative
+		main.cam_yaw -= rel.x * 0.006
+		main.cam_pitch = clampf(main.cam_pitch + rel.y * 0.004, -1.0, 1.0)
 
 func _take_photo() -> void:
 	if _shot_ui == null:
