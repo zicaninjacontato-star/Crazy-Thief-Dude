@@ -297,6 +297,126 @@ func _cleanup() -> void:
 			p.queue_free()
 	queue_free()
 
+## degrau (meio-fio, soleira, degrau solto): sobe até 0,45 m se a frente estiver livre lá em cima
+func _step_up(want: Vector3) -> void:
+	if not is_on_wall() or want.length() < 0.5 or swimming:
+		return
+	var fwd := Vector3(want.x, 0, want.z).normalized() * 0.35
+	var up := Transform3D(global_transform.basis, global_position + Vector3(0, 0.46, 0))
+	if not test_move(global_transform, Vector3(0, 0.46, 0)) and not test_move(up, fwd):
+		global_position += Vector3(0, 0.46, 0) + fwd
+		velocity.y = 0.0
+
+# ---------------------------------------------------------------- subir atrás do jogador
+var _route: Array = []        # pontos da escada (ou [entrada, "tp", saída] da portaria do terraço)
+var _ri := 0
+var _route_t := 0.0
+var _noroute_t := 0.0
+var _wp_t := 0.0
+var _edge_t := 0.0
+var _edge := false
+func _pick_route(tp: Vector3) -> void:
+	var c = get_tree().current_scene.city
+	_route = []
+	_ri = 0
+	var best := 1e9
+	for ac in c.access:
+		var rc: Rect2 = ac.rect.grow(3.0)
+		if ac.rect.size.x > 0.0 and not rc.has_point(Vector2(tp.x, tp.z)):
+			continue
+		if ac.top + 1.5 < tp.y - 1.0:
+			continue
+		var dd: float = Vector2(ac.door.x - global_position.x, ac.door.z - global_position.z).length()
+		if dd < best and dd < 120.0:
+			best = dd
+			# só até o andar do jogador
+			var pts: Array = []
+			# até o andar do jogador e depois sai pela porta da caixa da escada
+			for i in ac.pts.size():
+				pts.append(ac.pts[i])
+				if ac.pts[i].y >= tp.y - 0.6 and i + 1 < ac.pts.size() and absf(ac.pts[i + 1].y - ac.pts[i].y) < 0.3 and pts.size() > 2:
+					pts.append(ac.pts[i + 1])
+					break
+			var lastp: Vector3 = pts[-1]
+			for ex in ac.get("exits", []):
+				if absf(ex.y - lastp.y) < 0.3:
+					pts.append(ex)
+			_route = pts
+			# já está no meio da escada (caiu, ou recomeçou): segue do ponto mais perto
+			var bd := 1e9
+			for i in pts.size():
+				var q: Vector3 = pts[i]
+				var dd3 := Vector2(q.x - global_position.x, q.z - global_position.z).length() + absf(q.y - global_position.y) * 3.0
+				if dd3 < bd:
+					bd = dd3
+					_ri = i
+	for rt in c.rooftops:
+		if Vector2(rt.top.x - tp.x, rt.top.z - tp.z).length() < 16.0 and absf(rt.top.y - tp.y) < 2.5:
+			var dd2: float = Vector2(rt.entry.x - global_position.x, rt.entry.z - global_position.z).length()
+			if dd2 < best:
+				best = dd2
+				_route = [rt.entry, "tp", rt.exit]
+				_ri = 0
+
+func _climb_dir(tp: Vector3, dt: float) -> Vector3:
+	_route_t -= dt
+	if _route.is_empty() and _route_t <= 0.0:
+		_route_t = 2.0
+		_pick_route(tp)
+	if _route.is_empty():
+		# sem escada conhecida: depois de um tempo (fora da vista) aparece lá em cima, perto do jogador
+		_noroute_t += dt
+		var sc = get_tree().current_scene
+		if _noroute_t > 10.0 and not sc._seen(global_position + Vector3(0, 1, 0)):
+			_noroute_t = 0.0
+			var space := get_world_3d().direct_space_state
+			for k in 8:
+				var a := rng.randf() * TAU
+				var p := tp + Vector3(cos(a), 0, sin(a)) * rng.randf_range(5.0, 9.0)
+				var q := PhysicsRayQueryParameters3D.create(p + Vector3(0, 2.5, 0), p + Vector3(0, -3.0, 0), 1)
+				var r := space.intersect_ray(q)
+				if not r.is_empty() and absf(r.position.y - tp.y) < 1.2 and not sc._seen(r.position + Vector3(0, 1, 0)):
+					global_position = r.position + Vector3(0, 0.1, 0)
+					velocity = Vector3.ZERO
+					break
+		return Vector3.INF
+	if _ri >= _route.size():
+		if OS.get_environment("CLBDBG") != "": print("CLB end route size=", _route.size(), " y=", global_position.y)
+		_route = []
+		return Vector3.INF
+	var wp = _route[_ri]
+	if wp is String:            # portaria do terraço: entra e sai lá em cima
+		global_position = _route[_ri + 1] + Vector3(0, 0.2, 0)
+		velocity = Vector3.ZERO
+		_route = []
+		return Vector3.INF
+	var tw: Vector3 = wp - global_position
+	var flat := Vector2(tw.x, tw.z)
+	if flat.length() < 0.8 and absf(tw.y) < 1.9:
+		_ri += 1
+		_wp_t = 0.0
+		return Vector3.ZERO
+	# sem progresso no ponto por muito tempo: desiste dessa rota (vai pelo plano B)
+	_wp_t += dt
+	# enroscou numa quina da escada: passa para o ponto (fora da vista, ou já na porta de saída)
+	if _wp_t > 3.0 and (_ri >= _route.size() - 2 or not get_tree().current_scene._seen(global_position + Vector3(0, 1, 0))):
+		global_position = wp + Vector3(0, 0.15, 0)
+		velocity = Vector3.ZERO
+		_wp_t = 0.0
+		_ri += 1
+		return Vector3.ZERO
+	if _wp_t > 9.0:
+		if OS.get_environment("CLBDBG") != "": print("CLB timeout ri=", _ri)
+		_wp_t = 0.0
+		_route = []
+		_route_t = 12.0
+		_noroute_t = 6.0
+		return Vector3.INF
+	# travou na escada por muito tempo: refaz a rota
+	var v := Vector3(tw.x, 0, tw.z).normalized() * speed * 0.9
+	body.rotation.y = lerp_angle(body.rotation.y, atan2(v.x, v.z), 0.3)
+	return v
+
 func _physics_process(dt: float) -> void:
 	if down:
 		return
@@ -384,13 +504,29 @@ func _physics_process(dt: float) -> void:
 	var want := Vector3.ZERO
 	var goal := 1.1 if arrest_only else pref
 	var in_cover := false
+	# jogador lá em cima (telhado/andar de cima): procura uma escada/acesso e sobe atrás dele
+	var climb := Vector3.INF
+	var dyp := tp.y - global_position.y
+	# rota começada vai até o fim (sair da caixa da escada), mesmo já quase no nível do jogador
+	if (dyp > 1.3 or (not _route.is_empty() and dyp > -1.0)) and not swimming and kind != "thug":
+		climb = _climb_dir(tp, dt)
+	else:
+		if not _route.is_empty() and OS.get_environment("CLBDBG") != "": print("CLB else dyp=", dyp, " tp=", tp, " y=", global_position.y)
+		_route = []
+		_noroute_t = 0.0
 	# cobertura: corre para trás de um veículo entre ele e o alvo, abaixa e levanta para atirar
 	if not arrest_only:
 		_cover_t -= dt
 		if _cover_t <= 0.0:
 			_cover_t = rng.randf_range(2.5, 4.0)
 			cover_pos = _find_cover(tp)
-	if cover_pos != Vector3.INF and not arrest_only:
+			# cobertura longe demais ou em outro nível: ignora
+			if cover_pos != Vector3.INF and (absf(cover_pos.y - global_position.y) > 1.2 or cover_pos.distance_to(global_position) > 16.0):
+				cover_pos = Vector3.INF
+	if climb != Vector3.INF:
+		want = climb
+		body.pose = ""
+	elif cover_pos != Vector3.INF and not arrest_only:
 		var tc := cover_pos - global_position
 		tc.y = 0
 		if tc.length() > 0.7:
@@ -427,10 +563,34 @@ func _physics_process(dt: float) -> void:
 			_side_dir = -_side_dir if rng.randf() < 0.5 else _side_dir
 	else:
 		_stuck_t = 0.0
+	# beirada (telhado, laje, escada): não anda para o vazio (só se estiver seguindo a escada)
+	if climb == Vector3.INF and want.length() > 0.3 and is_on_floor():
+		_edge_t -= dt
+		if _edge_t <= 0.0:
+			_edge_t = 0.15
+			var ahead := global_position + Vector3(want.x, 0, want.z).normalized() * 0.9
+			var qd := PhysicsRayQueryParameters3D.create(ahead + Vector3(0, 0.6, 0), ahead + Vector3(0, -1.6, 0), 1)
+			qd.exclude = [get_rid()]
+			_edge = get_world_3d().direct_space_state.intersect_ray(qd).is_empty()
+			# caixa da escada (fora da rota): não entra (descia e caía de volta lá embaixo)
+			if not _edge and global_position.y > 1.0:
+				for ac in get_tree().current_scene.city.access:
+					if ac.hole.has_point(Vector2(ahead.x, ahead.z)):
+						_edge = true
+		if _edge:
+			want = Vector3.ZERO
+			_strafe = -_strafe
+			# a cobertura estava do outro lado do vão/beirada: esquece e vai direto
+			if cover_pos != Vector3.INF:
+				cover_pos = Vector3.INF
+				_cover_t = 4.0
+				_edge = false
+				want = dirv * speed
 	var hv := Vector3(velocity.x, 0, velocity.z).move_toward(want, 18.0 * dt)
 	velocity.x = hv.x
 	velocity.z = hv.z
 	move_and_slide()
+	_step_up(want)
 	if not in_cover and body.pose == "cover":
 		body.pose = ""
 	body.aiming = not arrest_only and d < 30.0 and body.pose == ""

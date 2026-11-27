@@ -1,4 +1,5 @@
 extends Node3D
+const M := preload("res://scripts/mats.gd")
 ## Pedestre: caminha pela calçada em volta da quadra e às vezes atravessa na faixa (só quando o
 ## semáforo fecha para os carros daquela rua). Colisão estilo "Euphoria": encostar andando empurra
 ## e ele cambaleia; passar correndo ou bater de leve com carro derruba (ragdoll) e ele levanta depois.
@@ -104,6 +105,14 @@ func _get_up() -> void:
 	var hips := global_position
 	if body.parts.size() > 0 and is_instance_valid(body.parts[0]):
 		hips = body.parts[0].global_position
+	# caiu de um prédio: queda alta mata (acima de ~7 m)
+	if _fall_y > 0.0:
+		var drop := _fall_y - hips.y
+		_fall_y = -1.0
+		if drop > 7.0:
+			hit(null, Vector3(0, -6.0, 0), false)
+			get_tree().current_scene.audio.play("bones", hips, 0.0)
+			return
 	var fd: bool = body.rag_face_down()
 	var yaw := body.rotation.y
 	if body.parts.size() > 1 and is_instance_valid(body.parts[1]):
@@ -114,7 +123,14 @@ func _get_up() -> void:
 		if is_instance_valid(p):
 			p.queue_free()
 	body.queue_free()
-	global_position = Vector3(hips.x, global_position.y, hips.z)
+	# levanta no chão de verdade embaixo do quadril (antes ficava na altura antiga = "flutuando")
+	var gy := global_position.y
+	var sp := get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.create(hips + Vector3(0, 0.6, 0), hips + Vector3(0, -40.0, 0), 1)
+	var r := sp.intersect_ray(q)
+	if not r.is_empty():
+		gy = r.position.y + 0.02
+	global_position = Vector3(hips.x, gy, hips.z)
 	_make_body()
 	body.rotation.y = yaw
 	body.apply_wounds(wd)
@@ -177,9 +193,130 @@ func scare() -> void:
 	if mode == "swim":
 		flee = 6.0
 		return
+	if mode == "party" and not down:
+		_party_react()
+		return
+	if mode in ["cower", "leap"]:
+		return
 	if not down and mode != "hostage" and mode != "handsup" and mode != "clerk" and mode != "call":
 		_end_mode()
 		flee = 6.0
+
+# ---------------------------------------------------------------- gravidade (telhados, andares)
+## gente em lugar alto: se não há chão embaixo (empurrado da beirada, chão sumiu), cai de verdade
+var _gchk := 0.0
+func _ground_tick(dt: float) -> bool:
+	if mode in ["swim", "fish", "hostage"] or global_position.y < 0.6 or (body and body.pose == "carried"):
+		return false
+	_gchk -= dt
+	if _gchk > 0.0:
+		return false
+	_gchk = 0.15
+	var q := PhysicsRayQueryParameters3D.create(global_position + Vector3(0, 0.5, 0), global_position + Vector3(0, -2.0, 0), 1)
+	var r := get_world_3d().direct_space_state.intersect_ray(q)
+	var gap: float = 99.0 if r.is_empty() else global_position.y - r.position.y
+	if gap > 0.9:
+		# caiu da beirada: vira ragdoll e despenca (morre se for alto)
+		var fall_v := Vector3(sin(body.rotation.y), 0, cos(body.rotation.y)) * (3.0 if mode == "leap" else 1.2)
+		if roof.size.x > 0.0:
+			# para fora do prédio (empurrado / pulando da beirada)
+			var out := global_position - Vector3(roof.get_center().x, global_position.y, roof.get_center().y)
+			fall_v = out.normalized() * (3.2 if mode == "leap" else 2.4)
+		if mode == "leap" or mode == "party" or mode == "cower":
+			mode = ""
+			body.arm_pose = ""
+		knock(fall_v, 0.0)
+		_fall_y = global_position.y
+		return true
+	if gap > 0.04:
+		global_position.y = r.position.y + 0.02
+	return false
+
+var _fall_y := -1.0
+
+# ---------------------------------------------------------------- festa no terraço
+var roof := Rect2()          # área do terraço (correr sem cair)
+var party_acts: Array = ["dance", "talk", "drink", "photo", "talk", "dance"]
+var _act_t := 0.0
+var leap_to := Vector3.ZERO
+var _prop: Node3D = null
+func start_party(r: Rect2) -> void:
+	roof = r
+	mode = "party"
+	_act_t = 0.0
+
+func _set_prop(kind: String) -> void:
+	if _prop and is_instance_valid(_prop):
+		_prop.queue_free()
+	_prop = null
+	if kind == "" or body == null or not body.bones.has("foreR"):
+		return
+	var mi := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	if kind == "drink":
+		bm.size = Vector3(0.07, 0.12, 0.07)
+		mi.material_override = M.plain(Color(0.95, 0.4, 0.1) if _rng.randf() < 0.5 else Color(0.85, 0.8, 0.2), 0.3)
+	else:
+		bm.size = Vector3(0.08, 0.15, 0.015)
+		mi.material_override = M.plain(Color(0.08, 0.08, 0.1), 0.3)
+	mi.mesh = bm
+	body.bones.foreR.add_child(mi)
+	mi.position = Vector3(0, -0.3, 0.06)
+	_prop = mi
+
+func _party_tick(dt: float) -> void:
+	_act_t -= dt
+	if _act_t <= 0.0:
+		_act_t = _rng.randf_range(6.0, 13.0)
+		var a: String = party_acts[_rng.randi() % party_acts.size()]
+		body.arm_pose = a
+		_set_prop("drink" if a == "drink" else ("phone" if a == "photo" else ""))
+	var pl = get_tree().current_scene.player
+	var tp: Vector3 = pl.global_position - global_position
+	if tp.length() < 4.0 and body.arm_pose != "dance":
+		body.rotation.y = lerp_angle(body.rotation.y, atan2(tp.x, tp.z), minf(1.0, dt * 3.0))
+	body.animate(0.0, dt)
+
+## crime perto: corre pelo terraço, parte para cima, se abaixa com medo ou (raro) pula lá de cima
+func _party_react() -> void:
+	_set_prop("")
+	body.arm_pose = ""
+	var r := _rng.randf()
+	var main := get_tree().current_scene
+	var pl = main.player
+	var near_pl: bool = pl.global_position.distance_to(global_position) < 9.0 and absf(pl.global_position.y - global_position.y) < 2.0
+	if r < 0.4 or (r < 0.6 and not near_pl):
+		# corre em volta do terraço (por dentro da beirada)
+		mode = ""
+		var y := global_position.y
+		var rr := roof.grow(-1.6)
+		loop = [Vector3(rr.position.x, y, rr.position.y), Vector3(rr.end.x, y, rr.position.y), Vector3(rr.end.x, y, rr.end.y), Vector3(rr.position.x, y, rr.end.y)]
+		idx = _rng.randi() % 4
+		flee = 12.0
+		cross_to = Vector3.INF
+		main.audio.play("scream", global_position, -6.0)
+	elif r < 0.6:
+		start_brawl()
+	elif r < 0.93:
+		mode = "cower"
+		mode_t = _rng.randf_range(10.0, 16.0)
+		body.arm_pose = "cower"
+		main.audio.play("scream", global_position, -8.0)
+	else:
+		# pula: vai até a beirada mais próxima e passa dela
+		mode = "leap"
+		var p := global_position
+		var ds: Array = [p.x - roof.position.x, roof.end.x - p.x, p.z - roof.position.y, roof.end.y - p.z]
+		var k := 0
+		for i in 4:
+			if ds[i] < ds[k]:
+				k = i
+		match k:
+			0: leap_to = Vector3(roof.position.x - 2.0, p.y, p.z)
+			1: leap_to = Vector3(roof.end.x + 2.0, p.y, p.z)
+			2: leap_to = Vector3(p.x, p.y, roof.position.y - 2.0)
+			_: leap_to = Vector3(p.x, p.y, roof.end.y + 2.0)
+		main.audio.play("scream", global_position, -2.0)
 
 func _end_mode() -> void:
 	if mode == "fish" and body:
@@ -256,6 +393,27 @@ func _mode_tick(dt: float) -> void:
 			body.rotation.y = lerp_angle(body.rotation.y, atan2(dn.x, dn.z), minf(1.0, dt * 3.0))
 		position.y = swim_y + sin(Time.get_ticks_msec() * 0.002 + float(idx)) * 0.05
 		body.animate(sp, dt)
+		return
+	if mode == "party":
+		_party_tick(dt)
+		return
+	if mode == "cower":
+		body.arm_pose = "cower"
+		body.animate(0.0, dt)
+		mode_t -= dt
+		if mode_t <= 0.0:
+			mode = "party"
+			body.arm_pose = ""
+		return
+	if mode == "leap":
+		# corre para a beirada e pula (a gravidade faz o resto)
+		var to2: Vector3 = leap_to - global_position
+		to2.y = 0
+		if to2.length() > 0.2:
+			var st := to2.normalized() * 4.6 * dt
+			position += st
+			body.rotation.y = lerp_angle(body.rotation.y, atan2(st.x, st.z), minf(1.0, dt * 8.0))
+		body.animate(4.6, dt)
 		return
 	if mode == "clerk":
 		# atendente atrás do balcão: olha para o cliente quando ele chega perto
@@ -364,6 +522,8 @@ func _ped_tick(dt: float) -> void:
 		knocked = minf(0.0, knocked + dt)
 		body.animate(0.0, dt)
 		return
+	if _ground_tick(dt):
+		return
 	if mode != "" and stagger <= 0.0:
 		_mode_tick(dt)
 		return
@@ -398,7 +558,7 @@ func _ped_tick(dt: float) -> void:
 	to.y = 0
 	if to.length() < 0.3:
 		idx = (idx + 1) % loop.size()
-		if loop.size() == 4 and _rng.randf() < 0.3 and flee <= 0.0:
+		if loop.size() == 4 and _rng.randf() < 0.3 and flee <= 0.0 and global_position.y < 0.6:
 			_try_cross()
 		return
 	var step := to.normalized() * sp * dt

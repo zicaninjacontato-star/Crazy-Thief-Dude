@@ -528,6 +528,9 @@ var race_kind := "sport"      # modelo do carro do jogador (para trocar se explo
 var race_mods := {}
 var race_top := 40.0          # velocidade máxima do carro do jogador (m/s)
 var _pdead_t := 0.0
+var _gas_prev := false
+var _gas_taps: Array = []
+var _nitro_used := false
 
 func _race_start() -> void:
 	var route: Array = ROUTES[route_i % ROUTES.size()]
@@ -582,6 +585,7 @@ func _race_setup() -> void:
 	laps = 0
 	finish_order = []
 	_pdead_t = 0.0
+	_nitro_used = false
 	race_t = -3.0        # contagem regressiva
 	main.hud.banner("3", Color(1, 1, 1), 1.0)
 	_set_obj(checkpoints[0], Color(0.2, 0.8, 1.0), 6.0)
@@ -680,9 +684,43 @@ func race_restart() -> void:
 		laps = 0
 		finish_order = []
 		_pdead_t = 0.0
+		_nitro_used = false
 		race_t = -3.0
 		main.hud.banner("3", Color(1, 1, 1), 1.0)
 		_set_obj(checkpoints[0], Color(0.2, 0.8, 1.0), 6.0))
+
+## vácuo: atrás de outro carro da corrida (3–22 m, alinhado) ganha força e velocidade
+func _draft_tick(dt: float) -> void:
+	var rcs: Array = []
+	if job_car and is_instance_valid(job_car) and not job_car.dead:
+		rcs.append(job_car)
+	for r in racers:
+		if is_instance_valid(r.car) and not r.car.dead:
+			rcs.append(r.car)
+	var mine := 0.0
+	for c in rcs:
+		var best := 0.0
+		var fwd: Vector3 = c.global_transform.basis.z
+		var sp: float = c.linear_velocity.length()
+		if sp > 8.0:
+			for o in rcs:
+				if o == c:
+					continue
+				var d: Vector3 = o.global_position - c.global_position
+				var ahead := d.dot(fwd)
+				if ahead < 3.0 or ahead > 22.0:
+					continue
+				if absf(d.dot(fwd.cross(Vector3.UP))) > 1.8:
+					continue
+				if o.linear_velocity.dot(fwd) < 6.0:
+					continue
+				best = maxf(best, 1.0 - (ahead - 3.0) / 19.0 * 0.6)
+		c.draft = move_toward(c.draft, best, dt * (2.5 if best > c.draft else 1.5))
+		if c == job_car:
+			mine = c.draft
+	in_draft = mine > 0.2
+
+var in_draft := false
 
 ## desvia de carros da rua à frente: desloca o alvo para o lado livre
 func _dodge(rc, tgt: Vector3) -> Vector3:
@@ -739,8 +777,11 @@ func _race_tick(dt: float, veh) -> void:
 			if is_instance_valid(r.car):
 				r.car.brake_in = 1.0
 				r.car.throttle = 0.0
+				r.car.hold = true
 		if veh:
-			veh.brake_in = 1.0
+			veh.hold = true          # acelerar antes do VAI! não sai do lugar
+		_gas_prev = veh != null and veh.throttle > 0.5
+		_gas_taps = []
 		if int(ceil(prev_t)) != int(ceil(race_t)) and race_t < -0.01:
 			main.hud.banner(str(int(ceil(-race_t))), Color(1, 1, 1), 1.0)
 		text = "Prepare-se..."
@@ -748,6 +789,26 @@ func _race_tick(dt: float, veh) -> void:
 	if prev_t < 0.0:
 		main.hud.banner("VAI!", Color(0.3, 1.0, 0.3), 1.0)
 		main.audio.play("horn", job_car.global_position, 0.0)
+		job_car.hold = false
+		job_car.brake_in = 0.0
+		for r in racers:
+			if is_instance_valid(r.car):
+				r.car.hold = false
+				# adversários também usam nitro na largada (às vezes)
+				if rng.randf() < 0.6:
+					r.car.nitro_t = rng.randf_range(1.5, 2.6)
+	# nitro: tocar 2× no acelerador logo depois da largada (até 3 s)
+	if veh == job_car and race_t < 3.0 and not _nitro_used:
+		var gas: bool = veh.throttle > 0.5
+		if gas and not _gas_prev:
+			_gas_taps.append(race_t)
+			if _gas_taps.size() >= 2 and _gas_taps[-1] - _gas_taps[-2] < 0.6:
+				_nitro_used = true
+				veh.nitro_t = 2.6
+				main.hud.banner("NITRO!", Color(0.3, 0.8, 1.0), 1.2)
+				main.audio.play("whoosh", veh.global_position, 4.0)
+		_gas_prev = gas
+	_draft_tick(dt)
 	var n := checkpoints.size()
 	# pilotos NPC
 	for r in racers:
@@ -775,14 +836,15 @@ func _race_tick(dt: float, veh) -> void:
 			r.st = r.get("st", 0.0) + dt
 		else:
 			r.st = 0.0
-		if r.st > 7.0:
+		if r.st > 6.0:
+			# travado (poste, parede, outro carro): volta no último ponto com o carro inteiro
 			r.st = 0.0
-			if not main._seen(rc.global_position):
-				var prv: Vector3 = checkpoints[(r.cp - 1 + n) % n]
-				var dir: Vector3 = (tgt - prv).normalized()
-				rc.global_position = prv + dir * 6.0 + Vector3(0, 0.8, 0)
-				rc.rotation = Vector3(0, atan2(dir.x, dir.z), 0)
-				rc.linear_velocity = Vector3.ZERO
+			var sp := _cp_spot(r.cp, r.lap, rng.randf_range(-2.5, 2.5))
+			main.cars.erase(rc)
+			rc.queue_free()
+			r.car = _racer_car(r, sp[0], sp[1])
+			r.car.hold = false
+			continue
 		drive_to(rc, _dodge(rc, tgt), nxt, race_top * r.skill)
 		if Vector2(rc.global_position.x - tgt.x, rc.global_position.z - tgt.z).length() < 9.0:
 			r.cp += 1
@@ -812,7 +874,7 @@ func _race_tick(dt: float, veh) -> void:
 	for r in racers:
 		if is_instance_valid(r.car) and not r.done and _race_progress(r.lap, r.cp, r.car.global_position) > mine:
 			place += 1
-	text = "Volta %d/%d · %dº lugar · ponto %d/%d" % [mini(laps + 1, RACE_LAPS), RACE_LAPS, place, cp_i % n + 1, n]
+	text = "Volta %d/%d · %dº lugar · ponto %d/%d" % [mini(laps + 1, RACE_LAPS), RACE_LAPS, place, cp_i % n + 1, n] + ("  · VÁCUO!" if in_draft else "")
 
 func _race_finish() -> void:
 	var place: int = finish_order.find(job_car) + 1
@@ -855,8 +917,10 @@ func drive_to(c, tgt: Vector3, nxt: Vector3, vmax: float) -> void:
 	c.steer_in = clampf(ang * 1.8, -1.0, 1.0)
 	var turn: float = absf((nxt - tgt).normalized().signed_angle_to(to.normalized(), Vector3.UP)) if dist > 0.5 else 0.0
 	var want: float = vmax
-	if dist < 30.0 and turn > 0.6:
-		want = lerpf(11.0, vmax, clampf((dist - 8.0) / 22.0, 0.0, 1.0))
+	if turn > 0.6:
+		# velocidade que ainda dá para frear até a curva (≈7 m/s² de freio)
+		var vc := lerpf(13.0, 8.0, clampf((turn - 0.6) / 1.2, 0.0, 1.0))
+		want = minf(vmax, sqrt(vc * vc + 2.0 * 7.0 * maxf(0.0, dist - 9.0)))
 	var fs: float = c.forward_speed()
 	if local.z < -1.0 and fs < 2.0:
 		c.throttle = -0.7          # ponto atrás: ré e gira
@@ -908,6 +972,11 @@ func _cleanup() -> void:
 			t.get_tree().create_timer(10.0).timeout.connect(t.queue_free)
 	thugs = []
 	target_ped = null
+	if job_car and is_instance_valid(job_car) and job_car.get("hold") != null:
+		job_car.hold = false
+		job_car.draft = 0.0
+		job_car.nitro_t = 0.0
+	in_draft = false
 	# carro alugado/do trabalho e pilotos somem (o jogador desce antes)
 	if job_car and is_instance_valid(job_car) and job_car.has_meta("job"):
 		if main.player.vehicle == job_car:

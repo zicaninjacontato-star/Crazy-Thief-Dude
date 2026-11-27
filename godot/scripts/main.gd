@@ -1332,6 +1332,7 @@ func _physics_process(dt: float) -> void:
 			g = maxf(g, maxf(0.0, k.y))
 			b = maxf(b, maxf(0.0, -k.y))
 		c.throttle = g - b
+		c.brake_in = 0.0          # quem dirige é o jogador (nada de freio "preso" de outra cena)
 		c.steer_in = -mv.x
 		c.handbrake = Input.is_action_pressed("jump")
 		if "stick" in c:
@@ -2662,14 +2663,27 @@ func _test9(v: String) -> void:
 			combat.busted()
 		if frames % 20 == 0:
 			print("BST ", frames, " pos=", player.global_position.snapped(Vector3.ONE * 0.1), " cell=", city.station.cell, " busted_t=", snappedf(combat.busted_t, 0.1))
-	if v in ["hosp", "hosp1", "hosp2", "hosproof", "racelot", "alley", "roof", "swimmers", "houseped"]:
+	if v in ["hosp", "hosp1", "hosp2", "hosproof", "hospstair", "hosphut", "racelot", "alley", "roof", "swimmers", "houseped"]:
 		if frames == 4:
 			var hs: Dictionary = city.hospital
 			match v:
 				"hosp": player.global_position = city.hospital_pos + Vector3(0, 0, 3)
 				"hosp1": player.global_position = hs.beds[2] + Vector3(2.5, -0.6, 0)
 				"hosp2": player.global_position = hs.staff[4] + Vector3(0, 0.2, 2)
-				"hosproof": player.global_position = hs.heli + Vector3(6, 0.5, 6)
+				"hosproof": player.global_position = hs.heli + Vector3(0, 0.5, -9)
+				"hospstair":
+					var best = city.access[0]
+					for ac in city.access:
+						if ac.door.distance_to(city.hospital_pos) < best.door.distance_to(city.hospital_pos):
+							best = ac
+					player.global_position = best.pts[8] + Vector3(0, 0.3, 0)
+				"hosphut":
+					var best2 = city.access[0]
+					for ac in city.access:
+						if ac.door.distance_to(city.hospital_pos) < best2.door.distance_to(city.hospital_pos):
+							best2 = ac
+					player.global_position = best2.exits[-1] + Vector3(0, 0.3, -2.0)
+					print("PLC exits=", best2.exits, " last=", best2.pts.slice(-3))
 				"racelot": player.global_position = city.race_lot.giver + Vector3(0, 0.3, 8)
 				"alley": player.global_position = city.gang_hq["p"].alley + Vector3(0, 0.3, 0)
 				"roof": player.global_position = city.rooftops[0].top + Vector3(0, 0.5, 0) if city.rooftops.size() > 0 else Vector3.ZERO
@@ -2686,7 +2700,54 @@ func _test9(v: String) -> void:
 					near += 1
 				if is_instance_valid(q) and q.mode == "swim":
 					sw += 1
+			var hel = cars.filter(func(c): return is_instance_valid(c) and c.has_meta("medical"))
+			print("PLC heli=", hel.map(func(c): return c.global_position.snapped(Vector3.ONE * 0.1)), " pad=", city.hospital.heli)
 			print("PLC ", frames, " peds_near=", near, " swimmers=", sw, " p=", player.global_position.snapped(Vector3.ONE * 0.1), " action=", shop_action)
+	if v in ["copclimb", "copclimb2", "copclimb3"]:
+		if frames == 4:
+			god = true
+			var tgt_pos: Vector3
+			var start: Vector3
+			match v:
+				"copclimb":       # telhado do hospital (escada)
+					tgt_pos = city.hospital.heli + Vector3(-3, 0.5, 3)
+					start = city.hospital_pos + Vector3(0, 0, -8)
+				"copclimb2":      # 1º andar da delegacia
+					tgt_pos = city.station.front + Vector3(-8, 3.8, 3)
+					start = city.station.door + Vector3(4, 0, -4)
+				_:                # terraço da festa (portaria)
+					tgt_pos = city.rooftops[0].top + Vector3(2, 0.5, 2)
+					start = city.rooftops[0].entry + Vector3(0, 0, 0) + (city.rooftops[0].entry - Vector3(city.rooftops[0].top.x, 0.3, city.rooftops[0].top.z)).normalized() * 6.0
+			player.global_position = tgt_pos
+			var cc := Cop.new()
+			add_child(cc)
+			cc.setup(7, "cop")
+			cc.global_position = start
+			cc.target = player
+			cc.cool = 999.0
+			set_meta("cc", cc)
+		if frames % 20 == 0 and has_meta("cc"):
+			var cc2 = get_meta("cc")
+			print("CLB vel=", cc2.velocity.snapped(Vector3.ONE * 0.1), " speed=", cc2.speed, " side=", snappedf(cc2._side_t, 0.1), " wp=", cc2._route[cc2._ri] if cc2._ri < cc2._route.size() else "-", " floor=", cc2.is_on_floor(), " anim=", cc2.anim, " cover=", cc2.cover_pos, " los=", cc2._los, " edge=", cc2._edge, " pref=", cc2.pref)
+			print("CLB ", frames, " cop=", cc2.global_position.snapped(Vector3.ONE * 0.1), " ri=", cc2._ri, "/", cc2._route.size(), " pl=", player.global_position.snapped(Vector3.ONE * 0.1), " d=", snappedf(cc2.global_position.distance_to(player.global_position), 0.1))
+	if v == "roofpanic":
+		var rt: Dictionary = city.rooftops[0]
+		if frames == 4:
+			player.global_position = rt.top + Vector3(0, 0.5, 3.0)
+		var party := peds.filter(func(q): return is_instance_valid(q) and q.roof == rt.rect)
+		if frames == 40:
+			# empurrado da beirada: deve cair (e não flutuar)
+			var q0 = party[0]
+			q0.global_position = Vector3(rt.rect.end.x + 0.8, q0.global_position.y, rt.top.z)
+			set_meta("q0", q0)
+			print("RFP pushed y=", q0.global_position.y)
+		if frames == int(OS.get_environment("PANIC")):
+			for q in party:
+				q.scare()
+			print("RFP panic modes=", party.map(func(q): return q.mode))
+		if frames % 30 == 0:
+			var q0b = get_meta("q0", null)
+			print("RFP ", frames, " acts=", party.map(func(q): return q.body.arm_pose if q.mode == "party" else q.mode), " pushed=", (q0b.global_position.snapped(Vector3.ONE * 0.1) if q0b and is_instance_valid(q0b) else "-"), " down=", (q0b.down if q0b and is_instance_valid(q0b) else "-"), " kn=", (snappedf(q0b.knocked, 0.1) if q0b and is_instance_valid(q0b) else 0.0), " swim=", peds.filter(func(q): return is_instance_valid(q) and q.mode == "swim" and q.global_position.y > 5.0).size())
 	if v == "housecam":
 		var r: Array = city.safehouse.rect
 		if frames == 4:
@@ -2960,11 +3021,15 @@ func _test9(v: String) -> void:
 		if frames == 4:
 			var h = _near_kind("heli")
 			h.global_position = Vector3(-205, 60, 70)
+			set_meta("aj", h)
 			player.global_position = h.global_position
 			vehanim.start_enter(h)
 		if frames == 40:
 			_toggle_car()
 		if frames % 10 == 0:
+			var ajh = get_meta("aj", null)
+			if ajh and is_instance_valid(ajh):
+				print("AIR heli y=", snappedf(ajh.global_position.y, 0.1), " dead=", ajh.dead, " fall=", ajh._fall)
 			print("AIR ", frames, " veh=", player.vehicle != null, " rag=", player.body.ragdolled, " down=", snappedf(combat.down_t, 0.1), " hp=", snappedf(hp, 1), " y=", snappedf((player.body.parts[0].global_position.y if player.body.ragdolled else player.global_position.y), 0.1), " dead=", combat.dead)
 	if v == "carry":
 		if frames == 4:
@@ -3684,10 +3749,20 @@ func _test_views() -> void:
 		if frames > 20 and missions.active == "race" and player.vehicle:
 			# o jogador "pilota" com o mesmo piloto automático dos NPCs
 			var n: int = missions.checkpoints.size()
-			if missions.race_t >= 0.0:
-				missions.drive_to(player.vehicle, missions.checkpoints[missions.cp_i % n], missions.checkpoints[(missions.cp_i + 1) % n], 26.0)
+			var rt: float = missions.race_t
+			if rt < 0.0:
+				player.vehicle.throttle = 1.0       # tenta queimar a largada (deve ficar parado)
+			elif rt < 0.4 and OS.get_environment("NITRO") != "":
+				player.vehicle.throttle = 1.0 if (rt > 0.1 and rt < 0.2) or rt > 0.3 else 0.0
+			else:
+				missions.drive_to(player.vehicle, missions.checkpoints[missions.cp_i % n], missions.checkpoints[(missions.cp_i + 1) % n], 30.0)
 		if frames % 40 == 0:
 			var rs: Array = missions.racers.map(func(r): return [r.lap, r.cp, snappedf(r.car.linear_velocity.length(), 1)] if is_instance_valid(r.car) else "x")
+			if player.vehicle:
+				print("RACE car v=", snappedf(player.vehicle.speed_kmh(), 1), "km/h hold=", player.vehicle.hold, " nitro=", snappedf(player.vehicle.nitro_t, 0.1), " draft=", snappedf(player.vehicle.draft, 0.01), " brake_in=", player.vehicle.brake_in, " rt=", snappedf(missions.race_t, 0.1))
+			for r in missions.racers:
+				if is_instance_valid(r.car):
+					print("RACE r pos=", r.car.global_position.snapped(Vector3.ONE), " st=", snappedf(r.get("st", 0.0), 0.1), " thr=", snappedf(r.car.throttle, 0.1), " brk=", r.car.brake_in, " hold=", r.car.hold, " frz=", r.car.freeze, " steer=", snappedf(r.car.steer_in, 0.1))
 			print("RACE ", frames, " active=", missions.active, " text=", missions.text, " money=", money, " racers=", rs, " veh=", player.vehicle != null)
 	if v == "busjack":
 		if frames == 4:
@@ -4164,8 +4239,10 @@ func _spawn_places() -> void:
 			h.build(Color(0.7, 0.8, 0.95), Color(0.7, 0.8, 0.95), skin[k % 3], hair[(k + 1) % 3], {})
 			add_child(h)
 			h.add_to_group("tmp")
-			h.global_position = hs.beds[k] + Vector3(0, 0.12, -0.85)
-			h.rotation = Vector3(-PI * 0.5, 0, 0)
+			# deitado de costas: pés no pé da maca, cabeça no travesseiro
+			var byw: float = hs.get("bed_yaw", [])[k] if k < hs.get("bed_yaw", []).size() else 0.0
+			h.global_position = hs.beds[k] + Vector3(0, 0.1, 0) + Basis(Vector3.UP, byw) * Vector3(0, 0, 0.88)
+			h.rotation = Vector3(-PI * 0.5, byw, 0)
 			h.set_far(40.0)
 			if k % 2 == 0:
 				var bd := MeshInstance3D.new()
@@ -4176,6 +4253,29 @@ func _spawn_places() -> void:
 				h.add_child(bd)
 				bd.position = Vector3(0.0, 1.05 if k % 4 == 0 else 0.55, 0.12)
 			_extras.append(h)
+		# helicóptero do hospital parado no heliponto
+		var hh = _spawn_arcade("heli", hs.heli + Vector3(0, 0.6, 0), PI * 0.5, Color(0.95, 0.95, 0.96))
+		if hh:
+			hh.set_meta("medical", true)
+			if hh.has_method("repaint"):
+				pass
+			var crs := MeshInstance3D.new()
+			var cbm := BoxMesh.new()
+			cbm.size = Vector3(0.05, 0.9, 0.9)
+			crs.mesh = cbm
+			crs.material_override = M.plain(Color(0.85, 0.08, 0.08), 0.6)
+			var mr = hh.get("model_root")
+			if mr:
+				for sd in [-1.0, 1.0]:
+					var c1: MeshInstance3D = crs.duplicate()
+					mr.add_child(c1)
+					c1.position = Vector3(sd * 1.05, 1.3, 0.3)
+					var c2: MeshInstance3D = crs.duplicate()
+					c2.mesh = BoxMesh.new()
+					c2.mesh.size = Vector3(0.05, 0.3, 0.9)
+					mr.add_child(c2)
+					c2.position = Vector3(sd * 1.05, 1.3, 0.3)
+					c2.rotation.x = PI * 0.5
 		for a in hs.ambulances:
 			var v = _spawn_car(a[0], a[1], Color(0.97, 0.97, 0.97), false, "van")
 			v.parked = true
@@ -4203,6 +4303,27 @@ func _spawn_places() -> void:
 			q.body.queue_free()
 			q._make_body()
 			q.body.rotation.y = pr[1]
+			q.start_party(rt.rect)
+			if k == rt.people.size() - 1:
+				q.party_acts = ["talk"]          # o do churrasco fica na grelha
+		# 2 nadando na piscina
+		var ps: Vector2 = rt.pool_size
+		for k in 2:
+			var pc: Vector3 = rt.pool
+			var sl := [pc + Vector3(-ps.x * 0.3, 0, -ps.y * 0.2 + k * ps.y * 0.4), pc + Vector3(ps.x * 0.3, 0, -ps.y * 0.2 + k * ps.y * 0.4)]
+			var sw := Ped.new()
+			add_child(sw)
+			sw.setup(sl, k, rng)
+			sw.beach = true
+			sw._cols[1] = Color.from_hsv(rng.randf(), 0.65, 0.75)
+			sw.body.queue_free()
+			sw._make_body()
+			sw.mode = "swim"
+			sw.speed = rng.randf_range(0.5, 0.8)
+			sw.swim_y = pc.y - 0.75
+			sw.position = Vector3(sl[k].x, sw.swim_y, sl[k].z)
+			sw.died.connect(_on_ped_died)
+			peds.append(sw)
 	# viela das gangues: 2 gangsters passando serviço
 	for g in city.gang_hq.keys():
 		var hq: Dictionary = city.gang_hq[g]

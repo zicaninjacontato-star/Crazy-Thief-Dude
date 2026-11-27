@@ -130,6 +130,12 @@ func _physics_process(dt: float) -> void:
 		body.rotation.y = lerp_angle(body.rotation.y, ang, minf(1.0, dt * 10.0))
 	if not is_nan(aim_yaw):
 		body.rotation.y = aim_yaw
+	# animação de pulo: só no ar de verdade (degrau/calçada não conta)
+	var in_air: bool = not is_on_floor() and not swimming and (velocity.y > 1.0 or velocity.y < -2.5 or body.airborne)
+	if is_on_floor() or swimming:
+		in_air = false
+	body.airborne = in_air
+	body.air_vy = velocity.y
 	body.animate(hv.length(), dt)
 	# parkour: correndo contra um obstáculo baixo (pula por cima) ou um muro/beirada até 2,6 m (escala)
 	if is_on_floor() and not swimming and hv.length() > 3.2 and mag > 0.6:

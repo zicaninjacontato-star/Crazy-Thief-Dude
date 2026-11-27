@@ -269,7 +269,15 @@ func _input(e: InputEvent) -> void:
 	if edit_mode:
 		_edit_input(e)
 		return
-	if input_block:
+	if input_block or not visible:
+		return
+	# celular, menus e roleta por cima: o toque é deles (nada de abrir a roleta ao tirar foto)
+	var mn = get_parent()
+	if mn and mn.get("phone") != null and mn.phone and mn.phone.is_open():
+		_release_all()
+		return
+	if mn and mn.get("ui") != null and mn.ui and (mn.ui.overlay != null or mn.ui.wheel != null):
+		_release_all()
 		return
 	_layout()
 	if map_full:
@@ -316,6 +324,14 @@ func _input(e: InputEvent) -> void:
 			cam_drag += e.position - _cam_last
 			_cam_last = e.position
 		root.queue_redraw()
+
+func _release_all() -> void:
+	for idx in _btn_ids.keys():
+		_press(_btn_ids[idx], false)
+	_btn_ids.clear()
+	_joy_id = -1
+	_cam_id = -1
+	joy = Vector2.ZERO
 
 func _press(k: String, on: bool) -> void:
 	match k:

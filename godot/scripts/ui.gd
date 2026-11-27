@@ -94,6 +94,16 @@ var _sc_drag := false
 var _sc_vel := 0.0
 var _sc_last := 0.0
 func _input(ev: InputEvent) -> void:
+	# roleta de armas: tocar fora dos botões fecha
+	if wheel and ((ev is InputEventScreenTouch and ev.pressed) or (ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT)):
+		var inside := false
+		for b in wheel.get_children():
+			if b is Button and not b.disabled and b.get_global_rect().has_point(ev.position):
+				inside = true
+		if not inside:
+			_close_wheel.call_deferred()
+			get_viewport().set_input_as_handled()
+			return
 	_scrolls = _scrolls.filter(func(x): return is_instance_valid(x) and x.is_visible_in_tree())
 	if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT:
 		if ev.pressed:

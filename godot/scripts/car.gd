@@ -67,6 +67,9 @@ var wheelie := 0.0            # ângulo do empinado (rad)
 signal wheelie_fall(car)
 var mods := {}             # oficina tuning (tuning.gd)
 var eng_mult := 1.0
+var hold := false          # largada do racha: preso até o "VAI!"
+var nitro_t := 0.0         # nitro (s restantes)
+var draft := 0.0           # vácuo atrás de outro carro (0..1)
 var vmax_mult := 1.0
 var dmg_mult := 1.0
 var variant := ""          # modelo real (bike/sportbike usam o comportamento de "moto")
@@ -775,6 +778,19 @@ func _physics_process(dt: float) -> void:
 	# limite de velocidade por modelo (e ré até 30 km/h)
 	var vmax: float = VMAX.get(variant, VMAX.get(kind, 160.0)) / 3.6 * vmax_mult
 	eng *= eng_mult
+	# vácuo e nitro (racha)
+	if draft > 0.01:
+		eng *= 1.0 + 0.45 * draft
+		vmax *= 1.0 + 0.1 * draft
+	if nitro_t > 0.0:
+		nitro_t -= dt
+		if throttle > 0.05:
+			eng = maxf(eng, max_engine * eng_mult) * 1.6
+			apply_central_force(global_transform.basis.z * mass * 2.5)
+		vmax *= 1.3
+	if hold:
+		eng = 0.0
+		brk = maxf(brk, max_brake)
 	if fs > vmax and eng > 0.0:
 		eng = 0.0
 		brk = maxf(brk, max_brake * 0.05)

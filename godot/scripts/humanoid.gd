@@ -33,6 +33,10 @@ var throw_t := 0.0
 var dive := false
 var crouching := false
 var slumped := false
+var _seed_ph := randf() * TAU   # fase própria (cada um dança/gesticula num ritmo)
+var airborne := false      # jogador no ar (pulo/queda)
+var air_vy := 0.0
+var _air_t := 0.0
 var pose := ""            # vault, climb, carry, drag, tackle, pull, break, lockpick, cover, carried
 var pose_t := 0.0
 var gun_kind := ""
@@ -277,6 +281,23 @@ func animate(speed: float, dt: float) -> void:
 	if pose != "":
 		_pose(dt, th, sh, up, fo)
 		return
+	# no ar (pulo/queda curta): joelhos dobrados subindo, pernas abrindo e braços equilibrando caindo
+	if airborne and not sitting:
+		_air_t += dt
+		var rise := clampf(air_vy / 6.0, -1.0, 1.0)
+		var tuck := clampf(0.5 + rise * 0.5, 0.0, 1.0)
+		th[0].rotation.x = lerpf(-0.25, -1.05, tuck)
+		sh[0].rotation.x = lerpf(0.35, 1.35, tuck)
+		th[1].rotation.x = lerpf(0.15, -0.45, tuck)
+		sh[1].rotation.x = lerpf(0.25, 0.8, tuck)
+		bones.chest.rotation.x = lerpf(0.05, 0.18, tuck)
+		if not aiming and arm_pose == "":
+			for k3 in 2:
+				var sg := 1.0 if k3 == 0 else -1.0
+				up[k3].rotation = Vector3(lerpf(-0.4, -1.9, tuck), 0, sg * lerpf(0.9, 0.35, tuck))
+				fo[k3].rotation.x = lerpf(-0.3, -0.6, tuck)
+		return
+	_air_t = 0.0
 	if sitting and moto_pose:
 		for k in 2:
 			var sg := 1.0 if k == 0 else -1.0
@@ -412,6 +433,53 @@ func _upper(dt: float, up: Array, fo: Array) -> void:
 				up[k3].rotation = Vector3(-0.55, 0, 0.2 if k3 == 0 else -0.2)
 				fo[k3].rotation = Vector3(-1.75, 0.8 if k3 == 0 else -0.8, 0)
 			bones.head.rotation.x = -0.12
+			return
+		"dance":      # dançando: quadril balança, joelhos marcam o ritmo, braços no alto
+			var bt := _t * 6.0 + _seed_ph
+			bones.hips.rotation.z = sin(bt) * 0.12
+			bones.hips.rotation.y = sin(bt * 0.5) * 0.25
+			bones.hips.position.y = 0.98 - absf(sin(bt)) * 0.06
+			for k3 in 2:
+				var sg := 1.0 if k3 == 0 else -1.0
+				th[k3].rotation.x = -0.15 - maxf(0.0, sin(bt + k3 * PI)) * 0.35
+				sh[k3].rotation.x = 0.25 + maxf(0.0, sin(bt + k3 * PI)) * 0.5
+				up[k3].rotation = Vector3(-2.2 + sin(bt + k3 * PI) * 0.5, 0, sg * 0.45)
+				fo[k3].rotation.x = -0.7 + sin(bt * 2.0) * 0.3
+			bones.head.rotation.x = sin(bt) * 0.12
+			return
+		"drink":      # copo na mão; de vez em quando leva à boca
+			var sip := clampf((sin(_t * 0.9 + _seed_ph) - 0.55) * 4.0, 0.0, 1.0)
+			up[1].rotation = Vector3(lerpf(-0.35, -1.05, sip), 0, lerpf(-0.12, -0.45, sip))
+			fo[1].rotation.x = lerpf(-1.3, -2.35, sip)
+			up[0].rotation = Vector3(-0.1, 0, 0.1)
+			fo[0].rotation.x = -0.3
+			bones.head.rotation.x = -0.2 * sip
+			return
+		"photo":      # celular na frente tirando foto
+			for k3 in 2:
+				up[k3].rotation = Vector3(-1.45, 0, 0.25 if k3 == 0 else -0.25)
+				fo[k3].rotation.x = -0.75
+			bones.head.rotation.x = 0.1
+			bones.chest.rotation.y = sin(_t * 0.6 + _seed_ph) * 0.3
+			return
+		"talk":       # conversando: gesticula com a mão
+			up[1].rotation = Vector3(-0.55 + sin(_t * 2.6 + _seed_ph) * 0.25, 0, -0.25)
+			fo[1].rotation.x = -1.3 + sin(_t * 4.1 + _seed_ph) * 0.35
+			up[0].rotation = Vector3(-0.2 + sin(_t * 1.7) * 0.12, 0, 0.12)
+			fo[0].rotation.x = -0.6
+			bones.head.rotation.y = sin(_t * 0.8 + _seed_ph) * 0.3
+			bones.head.rotation.x = sin(_t * 3.3) * 0.05
+			return
+		"cower":      # agachado com as mãos na cabeça, tremendo
+			bones.hips.position.y = 0.55
+			for k3 in 2:
+				var sg := 1.0 if k3 == 0 else -1.0
+				th[k3].rotation = Vector3(-1.55, 0, sg * 0.25)
+				sh[k3].rotation.x = 2.3
+				up[k3].rotation = Vector3(-2.6 + sin(_t * 22.0) * 0.04, 0, sg * 0.85)
+				fo[k3].rotation.x = -2.3
+			bones.chest.rotation.x = 0.55
+			bones.head.rotation.x = 0.4
 			return
 		"cheer":      # comemorando, dois braços para cima
 			for k3 in 2:

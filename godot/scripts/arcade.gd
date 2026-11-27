@@ -33,6 +33,8 @@ var seat := Vector3(0, 0.6, 0)
 var model_root: Node3D
 var hp := 100.0
 var dead := false
+var _had_driver := false
+var _abandoned := false
 var parked := false
 var linear_velocity := Vector3.ZERO
 var engine_on := false
@@ -287,10 +289,18 @@ func _physics_process(dt: float) -> void:
 		_sink()
 		return
 	var before := velocity
+	# piloto pulou com a aeronave no ar: ela perde o controle, cai girando e explode no que bater
+	if kind in ["plane", "heli"] and not dead:
+		if driver == null and _had_driver and ai_mode == "" and npc_drv == null and global_position.y > 3.0:
+			_fall = true
+			_abandoned = true
+		_had_driver = driver != null
 	match kind:
 		"boat": _boat_phys(dt)
 		"plane": _plane_phys(dt)
 		"heli": _heli_phys(dt)
+	if _abandoned and not dead and (get_slide_collision_count() > 0 or global_position.y <= 0.05):
+		explode()
 	linear_velocity = velocity
 	# barco/jet-ski andando: respingos na popa e nas laterais
 	if kind == "boat" and not sinking and absf(v) > 4.0:
