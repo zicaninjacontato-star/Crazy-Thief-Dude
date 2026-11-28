@@ -393,6 +393,8 @@ func _cops_tick(dt: float, s: int, p: Node3D) -> void:
 		if cp.down:
 			continue
 		cp.target = p
+		if main.incidents:
+			main.incidents.mixed_target(cp)      # tiroteio com gangue: atira nos dois lados
 		cp.arrest_only = s <= 1 and not armed
 		cp.accuracy = 0.32 + s * 0.07
 		if cp.weapon == "rifle":
@@ -510,6 +512,26 @@ func _bust(dt: float, s: int, pp: Vector3) -> void:
 	bust_t = 0.0
 
 ## policial caído: outro colega (se houver pelo menos 2) arrasta o corpo para trás de uma viatura
+## policial arrancado da viatura/moto pelo jogador: levanta e parte para cima atirando (+2 estrelas)
+func angry_cop(pos: Vector3, push: Vector3, cols := []) -> void:
+	var cp := Cop.new()
+	main.add_child(cp)
+	cp.setup(rng.randi(), "cop")
+	cp.global_position = pos + Vector3(0, 0.2, 0)
+	cp.target = main.player
+	cp.shot_player.connect(main.combat._on_cop_shot)
+	cp.died.connect(_on_cop_down)
+	cops.append(cp)
+	cp.knock(push, 0.0)
+	cop_attacked(pos)
+
+## agressão direta a um policial (roubo da viatura/moto, tiro no policial que dirige)
+func cop_attacked(pos: Vector3) -> void:
+	main._raise_wanted(2)
+	knows = true
+	seen = true
+	last_known = pos
+
 func _on_cop_down(dead_cop) -> void:
 	var alive := cops.filter(func(c): return is_instance_valid(c) and not c.down and c.rescue_rb == null and c.anim == "")
 	if alive.size() < 2 or dead_cop.body.parts.is_empty():

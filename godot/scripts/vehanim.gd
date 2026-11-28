@@ -272,6 +272,12 @@ func _drop_driver() -> void:
 		return
 	var pos := h.global_position
 	pos.y = main.ground_at(pos, [car.get_rid()])
+	# viatura: o policial puxado levanta e reage atirando
+	if car.get("police") == true and not drv_info.dead:
+		main.police.angry_cop(pos, car.global_transform.basis.x * 2.5 + Vector3(0, 1.0, 0))
+		h.queue_free()
+		drv_info = {}
+		return
 	var q = Ped.new()
 	main.add_child(q)
 	var loop: Array = main.city.walk_loops[0]

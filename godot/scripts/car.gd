@@ -928,9 +928,14 @@ func _anti_flip(dt: float) -> void:
 		return
 	var up := global_transform.basis.y
 	var tilt := up.angle_to(Vector3.UP)
-	if tilt > 0.25 and tilt < 2.0:
-		var axis := up.cross(Vector3.UP).normalized()
-		apply_torque(axis * tilt * mass * 9.0)
+	# só endireita o ROLAMENTO (capotar de lado). Inclinação para frente/trás em morro, rampa ou
+	# no ar é livre — antes o torque nivelava o carro e ele "grudava" no chão em vez de voar
+	var roll := asin(clampf(global_transform.basis.x.y, -1.0, 1.0))
+	var pitch := asin(clampf(global_transform.basis.z.y, -1.0, 1.0))
+	if absf(roll) > 0.3 and tilt < 2.0:
+		apply_torque(global_transform.basis.z * roll * mass * 9.0)
+	if absf(pitch) > 1.0 and tilt < 2.0:
+		apply_torque(-global_transform.basis.x * pitch * mass * 4.0)
 	if up.y < 0.35 and linear_velocity.length() < 3.0:
 		_flip_t += dt
 		if _flip_t > 2.5:

@@ -130,6 +130,7 @@ func _spawn_member(g: String, pos: Vector3, weapon: String, idle: bool):
 	else:
 		q.target = main.player
 	q.shot_player.connect(main.combat._on_cop_shot)
+	q.shot_player.connect(func(_d, _f): if main.incidents: main.incidents.on_gang_shot(q))
 	q.hurt.connect(_on_hurt)
 	q.died.connect(_on_died)
 	members[g].append(q)

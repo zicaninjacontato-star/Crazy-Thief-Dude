@@ -14,6 +14,7 @@ signal hurt(cop)
 var gang := ""             # "g" verde / "p" rosa (membro de gangue)
 
 var target: Node3D
+var alt_target: Node3D = null   # alvo que tem prioridade (gangster × policial em tiroteio)
 var searching := false
 var _idle_skip := 0.0     # a polícia ainda não sabe onde o jogador está (zona amarela): não atira
 var body: Node3D
@@ -87,6 +88,11 @@ func _rebuild_body(first := false) -> void:
 			if first:
 				hp = 120.0
 				speed = 4.8
+		"guard":
+			# segurança do aeroporto: camisa cinza, calça preta, boné preto
+			body.build(Color(0.55, 0.57, 0.6), Color(0.06, 0.06, 0.07), skin, Color(0.05, 0.04, 0.03), {"hat": 1, "hat_c": Color(0.06, 0.06, 0.07), "glasses": rng.randf() < 0.4})
+			if first:
+				hp = 150.0
 		"thug":
 			body.build(Color(0.15, 0.15, 0.15), Color(0.1, 0.1, 0.32), skin, Color(0.05, 0.04, 0.03), {"hat": 1, "hat_c": Color(0.7, 0.1, 0.1), "jacket": Color(0.6, 0.05, 0.05)})
 			if first:
@@ -486,6 +492,10 @@ func _physics_process(dt: float) -> void:
 		move_and_slide()
 		body.animate(0.0, dt)
 		return
+	if alt_target != null and (not is_instance_valid(alt_target) or alt_target.get("down") == true):
+		alt_target = null
+	if alt_target != null:
+		target = alt_target
 	var tp: Vector3 = target.global_position
 	var to := tp - global_position
 	to.y = 0
@@ -623,4 +633,14 @@ func _physics_process(dt: float) -> void:
 			sc.bullet_mark(r.position, r.normal, col)
 		else:
 			W.tracer(sc, muzzle, aim)
-			shot_player.emit(dmg if hitp else 0.0, global_position)
+			var is_pl: bool = target == sc.player or target == sc.player.vehicle
+			if is_pl:
+				shot_player.emit(dmg if hitp else 0.0, global_position)
+			else:
+				# atirando em outro NPC (gangster × policial, suspeito)
+				sc.audio.play("shot_pistol", global_position, -4.0)
+				if hitp and is_instance_valid(target):
+					if target.has_method("damage"):
+						target.damage(dmg * 1.2, (tp - global_position).normalized(), sc.gore, null, "torso")
+					elif target.has_method("take_damage"):
+						target.take_damage(dmg * 0.3)

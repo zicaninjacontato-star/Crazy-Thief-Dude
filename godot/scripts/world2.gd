@@ -114,6 +114,10 @@ func sea_dist(x: float, z: float) -> float:
 		var dz := maxf(z - (r.end.y + RIM_W), (r.position.y - RIM_W) - z)
 		var d := Vector2(dx, dz).length() if dx > 0.0 and dz > 0.0 else maxf(dx, dz)
 		best = minf(best, d)
+	# a faixa de areia da praia continua 120 m além da ilha (norte e sul): ali é areia, não mar
+	# (antes os carros afundavam na areia perto da ponte)
+	if x > BEACH_X0 - 2.0 and x < SHORE_X - 4.0 and z > ISL_Z0 - 118.0 and z < ISL_Z1 + 118.0:
+		best = minf(best, maxf(x - (SHORE_X - 4.0), maxf((ISL_Z0 - 118.0) - z, z - (ISL_Z1 + 118.0))))
 	return best
 
 func is_water(x: float, z: float) -> bool:
@@ -227,6 +231,23 @@ func _beach() -> void:
 		else:
 			_strip("z", n.z, pa.z, rim, minf(pa.x, pb.x) - (60.0 if re[3] else 0.0), maxf(pa.x, pb.x) + (60.0 if re[4] else 0.0))
 	_rocks()
+	# pontas da faixa da praia: rampa de areia até o fundo (antes ficava um "buraco" no fim da faixa)
+	for sg in [-1.0, 1.0]:
+		var zend: float = (ISL_Z1 + 120.0) if sg > 0.0 else (ISL_Z0 - 120.0)
+		var cap := MeshInstance3D.new()
+		var cbm := BoxMesh.new()
+		cbm.size = Vector3(SHORE_X + 8.0 - BEACH_X0 + 10.0, 0.6, 27.0)
+		cap.mesh = cbm
+		cap.material_override = M.sand()
+		cap.position = Vector3((BEACH_X0 - 10.0 + SHORE_X + 8.0) * 0.5, (1.1 + SEA_FLOOR) * 0.5 - 0.2, zend + sg * 10.5)
+		cap.rotation.x = sg * 0.55
+		add_child(cap)
+		var ccs := CollisionShape3D.new()
+		var cbx := BoxShape3D.new()
+		cbx.size = cbm.size
+		ccs.shape = cbx
+		ccs.transform = cap.transform
+		body.add_child(ccs)
 	# leito do mar em volta de tudo (−12 m)
 	var fl := CollisionShape3D.new()
 	var fb := BoxShape3D.new()

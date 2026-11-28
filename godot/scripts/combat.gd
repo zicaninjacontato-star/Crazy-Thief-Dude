@@ -17,6 +17,7 @@ var ammo := {"pistol": 60, "smg": 240, "shotgun": 30}
 var cool := 0.0
 var aim_t := 0.0
 var fire_held := false
+var last_shot_t := -99.0       # quando o jogador atirou pela última vez (s)
 var pending_shot := 0.0      # toque no ATIRAR guardado até a arma poder disparar
 var aim := false             # mira manual ligada (botão MIRA)
 var cash: Array = []
@@ -187,6 +188,8 @@ func _process(dt: float) -> void:
 	if (fire_held or pending_shot > 0.0) and cool <= 0.0 and not p.swimming and carrying == null:
 		var auto: bool = W.DATA[weapon].auto
 		pending_shot = 0.0
+		if weapon != "fist":
+			last_shot_t = Time.get_ticks_msec() / 1000.0
 		shoot()
 		if not auto:
 			fire_held = false
@@ -326,7 +329,10 @@ func _hit_vehicle_part(vh: Dictionary, dmg: float) -> void:
 	else:
 		FX.blood_burst(main, vh.pos, Vector3.UP, 14)
 		main.traffic_sys.kill_driver(c)
-		main._add_wanted(1)
+		if c.get("police") == true:
+			main.police.cop_attacked(c.global_position)      # atirou no policial: +2 estrelas na hora
+		else:
+			main._add_wanted(1)
 		main.audio.play("scream", vh.pos, -4.0)
 
 func _peds_near(pos: Vector3, r: float) -> bool:

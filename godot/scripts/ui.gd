@@ -104,6 +104,17 @@ func _input(ev: InputEvent) -> void:
 			_close_wheel.call_deferred()
 			get_viewport().set_input_as_handled()
 			return
+	# oficina: arrastar fora do painel gira a câmera em volta do carro; rodinha/pinça = zoom
+	if overlay and main and not main.tune.is_empty():
+		var panel_w := 660.0
+		if ev is InputEventScreenDrag and ev.position.x > panel_w:
+			main.tune_cam(-ev.relative.x * 0.008, ev.relative.y * 0.01)
+		elif ev is InputEventMouseMotion and ev.device != InputEvent.DEVICE_ID_EMULATION and (ev.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0 and ev.position.x > panel_w and not _sc_drag:
+			main.tune_cam(-ev.relative.x * 0.008, ev.relative.y * 0.01)
+		elif ev is InputEventMouseButton and ev.pressed and ev.position.x > panel_w and ev.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
+			main.tune_zoom(-0.6 if ev.button_index == MOUSE_BUTTON_WHEEL_UP else 0.6)
+		elif ev is InputEventMagnifyGesture:
+			main.tune_zoom((1.0 - ev.factor) * 6.0)
 	_scrolls = _scrolls.filter(func(x): return is_instance_valid(x) and x.is_visible_in_tree())
 	if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT:
 		if ev.pressed:
@@ -472,7 +483,14 @@ func show_pause() -> void:
 	_btn(box, "SALVAR EM OUTRO SLOT", func(): show_slots("save"))
 	_btn(box, "CONFIGURAÇÕES", func(): show_settings(show_pause))
 	_btn(box, "CÓDIGOS", show_cheats)
-	_btn(box, "MENU INICIAL", func(): save_game(); show_main_menu())
+	_btn(box, "MENU INICIAL", func(): save_game(); _to_title())
+
+## volta para a tela de título de verdade (recarrega a cena: o mundo é montado de novo ao INICIAR)
+func _to_title() -> void:
+	_close()
+	Engine.time_scale = 1.0
+	get_tree().paused = false
+	get_tree().reload_current_scene.call_deferred()
 
 ## códigos (por enquanto só liga/desliga; os nomes dos códigos virão depois)
 func show_cheats() -> void:
@@ -813,7 +831,7 @@ func apply_now() -> void:
 
 func save_game() -> void:
 	var c = main.combat
-	var d := {"money": main.money, "armor": main.armor, "owned": c.owned, "ammo": c.ammo, "weapon": c.weapon, "cars": main.owned_cars, "outfit": main.player.outfit, "time": main.tod,
+	var d := {"money": main.money, "armor": main.armor, "owned": c.owned, "ammo": c.ammo, "weapon": c.weapon, "cars": main.owned_cars, "my_mods": main.my_car_mods, "uber_pts": main.uber_pts, "outfit": main.player.outfit, "time": main.tod,
 		"saved_at": Time.get_unix_time_from_system(), "play_s": main.play_s}
 	var f := FileAccess.open(slot_path(slot), FileAccess.WRITE)
 	if f:
@@ -853,20 +871,22 @@ func show_tuning() -> void:
 
 func _tune_panel() -> void:
 	var c = _tune_car
+	# guarda a rolagem: o painel é refeito a cada toque e voltava para o topo
+	var prev_scroll := 0
+	if overlay and _scrolls.size() > 0 and is_instance_valid(_scrolls[-1]):
+		prev_scroll = _scrolls[-1].scroll_vertical
 	var box := _open("OFICINA TUNING", true)
+	var sc_now: ScrollContainer = _scrolls[-1]
+	(func(): if is_instance_valid(sc_now): sc_now.scroll_vertical = prev_scroll).call_deferred()
+	var tip := _info(box, "Arraste o dedo fora do painel para girar a câmera (pinça = zoom)", Color(0.7, 0.7, 0.75))
+	tip.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tip.custom_minimum_size = Vector2(430, 0)
+	tip.add_theme_font_size_override("font_size", 16)
 	var cost: int = TN.cost(_tune_old, _tune_new)
 	_info(box, "Dinheiro: $%d   ·   Alterações: $%d" % [main.money, cost], Color(0.4, 1, 0.4) if main.money >= cost else Color(1, 0.4, 0.3))
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
 	box.add_child(row)
-	for d in [["◀ Girar", -0.6], ["Girar ▶", 0.6]]:
-		var b := Button.new()
-		b.text = d[0]
-		b.custom_minimum_size = Vector2(150, 54)
-		b.add_theme_font_size_override("font_size", 22)
-		var da: float = d[1]
-		b.pressed.connect(func(): main.tune_cam(da))
-		row.add_child(b)
 	var hpv: float = c.get("hp") if c.get("hp") != null else 100.0
 	var rb := Button.new()
 	rb.text = "Consertar $150 (%d%%)" % int(clampf(hpv, 0.0, 100.0))

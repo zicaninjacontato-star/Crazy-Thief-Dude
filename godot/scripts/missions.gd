@@ -366,7 +366,8 @@ func _far_sidewalk(from: Vector3, rmin: float, rmax: float) -> Vector3:
 	var c = main.city
 	for k in 40:
 		var loop: Array = c.walk_loops[rng.randi() % c.walk_loops.size()]
-		var pt: Vector3 = loop[rng.randi() % 4].lerp(loop[(rng.randi() % 3) + 1], rng.randf())
+		var k0 := rng.randi() % loop.size()
+		var pt: Vector3 = loop[k0].lerp(loop[(k0 + 1) % loop.size()], rng.randf())     # na calçada (antes cortava a quadra na diagonal = dentro dos prédios)
 		var d := pt.distance_to(from)
 		if d > rmin and d < rmax:
 			return pt
@@ -715,12 +716,56 @@ func _draft_tick(dt: float) -> void:
 				if o.linear_velocity.dot(fwd) < 6.0:
 					continue
 				best = maxf(best, 1.0 - (ahead - 3.0) / 19.0 * 0.6)
-		c.draft = move_toward(c.draft, best, dt * (2.5 if best > c.draft else 1.5))
+		# saiu do vácuo: o embalo dura ~2,5 s (dá para ultrapassar) e depois cai devagar
+		if best > 0.05:
+			c.set_meta("dr_hold", 2.5)
+			c.draft = move_toward(c.draft, best, dt * 2.5)
+		else:
+			var hold: float = c.get_meta("dr_hold", 0.0) - dt
+			c.set_meta("dr_hold", hold)
+			if hold <= 0.0:
+				c.draft = move_toward(c.draft, 0.0, dt * 0.35)
+		_draft_fx(c, best)
 		if c == job_car:
 			mine = c.draft
 	in_draft = mine > 0.2
 
 var in_draft := false
+
+## rastro branco do vácuo: 2 faixas translúcidas saindo da traseira enquanto pega o vácuo
+static var _trail_mat: StandardMaterial3D
+func _draft_fx(c, cur: float) -> void:
+	var tr: Node3D = c.get_meta("dr_fx", null)
+	if tr == null or not is_instance_valid(tr):
+		if _trail_mat == null:
+			_trail_mat = StandardMaterial3D.new()
+			_trail_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			_trail_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			_trail_mat.albedo_color = Color(1, 1, 1, 0.45)
+			_trail_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		tr = Node3D.new()
+		c.add_child(tr)
+		var hz: float = c.body_size.z * 0.5 if c.get("body_size") != null else 2.2
+		var hx: float = c.body_size.x * 0.35 if c.get("body_size") != null else 0.7
+		for sx in [-hx, hx]:
+			var m := MeshInstance3D.new()
+			var bm := BoxMesh.new()
+			bm.size = Vector3(0.12, 0.05, 1.0)
+			m.mesh = bm
+			m.material_override = _trail_mat
+			m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			m.position = Vector3(sx, 0.55, -hz - 0.5)
+			tr.add_child(m)
+		c.set_meta("dr_fx", tr)
+	var on: bool = cur > 0.05 or c.get_meta("dr_hold", 0.0) > 0.0
+	tr.visible = on and c.linear_velocity.length() > 8.0
+	if tr.visible:
+		var ln: float = clampf(c.linear_velocity.length() * 0.12, 1.0, 6.0) * clampf(c.draft + 0.2, 0.3, 1.0)
+		var hz2: float = c.body_size.z * 0.5 if c.get("body_size") != null else 2.2
+		for m in tr.get_children():
+			m.scale = Vector3(1, 1, ln)
+			m.position.z = -hz2 - ln * 0.5
+
 
 ## desvia de carros da rua à frente: desloca o alvo para o lado livre
 func _dodge(rc, tgt: Vector3) -> Vector3:
@@ -874,7 +919,7 @@ func _race_tick(dt: float, veh) -> void:
 	for r in racers:
 		if is_instance_valid(r.car) and not r.done and _race_progress(r.lap, r.cp, r.car.global_position) > mine:
 			place += 1
-	text = "Volta %d/%d · %dº lugar · ponto %d/%d" % [mini(laps + 1, RACE_LAPS), RACE_LAPS, place, cp_i % n + 1, n] + ("  · VÁCUO!" if in_draft else "")
+	text = "Volta %d/%d · %dº lugar · ponto %d/%d" % [mini(laps + 1, RACE_LAPS), RACE_LAPS, place, cp_i % n + 1, n] 
 
 func _race_finish() -> void:
 	var place: int = finish_order.find(job_car) + 1
@@ -955,6 +1000,22 @@ func fail(why: String) -> void:
 		_taxi_end()
 		return
 	main.hud.banner("MISSÃO FRACASSADA: " + why, Color(1, 0.25, 0.2))
+	# morreu/preso no racha: os carros ficam onde estão até o renascer (o reinício do mundo apaga tudo)
+	if active == "race" and main.combat.dead:
+		for r in racers:
+			if is_instance_valid(r.car):
+				r.car.throttle = 0.0
+				r.car.brake_in = 0.4
+				r.car.draft = 0.0
+		racers = []
+		job_car = null
+		_clear_obj()
+		checkpoints = []
+		active = ""
+		text = ""
+		timer = -1.0
+		_text()
+		return
 	_cleanup()
 
 func _cleanup() -> void:
@@ -976,6 +1037,10 @@ func _cleanup() -> void:
 		job_car.hold = false
 		job_car.draft = 0.0
 		job_car.nitro_t = 0.0
+		var fx = job_car.get_meta("dr_fx", null)
+		if fx and is_instance_valid(fx):
+			fx.queue_free()
+		job_car.remove_meta("dr_fx")
 	in_draft = false
 	# carro alugado/do trabalho e pilotos somem (o jogador desce antes)
 	if job_car and is_instance_valid(job_car) and job_car.has_meta("job"):
@@ -1004,6 +1069,9 @@ func start_fares(mode: String) -> void:
 	main.hud.banner("CORRIDAS DE TÁXI" if mode == "taxi" else "UBER: AGUARDANDO PASSAGEIROS", Color(1, 0.85, 0.1))
 
 func _taxi_tick(dt: float, veh) -> void:
+	if active == "uber":
+		_uber_tick(dt, veh)
+		return
 	var c = main.city
 	var vp: Vector3 = veh.global_position
 	if taxi_state == "":
@@ -1052,7 +1120,174 @@ func _taxi_tick(dt: float, veh) -> void:
 			main.peds.append(p2)
 			_end_fare()
 
+# ---------------------------------------------------------------- Uber (trabalhando)
+## pedidos aparecem na calçada; alguns passageiros já esperam lá, outros só descem quando você
+## manda mensagem pelo app. No fim: avaliação (estrela/sorriso/confuso/bravo) muda os pontos de
+## Uber, o valor das corridas e quantas aparecem.
+const U_NAMES := ["Carla", "Rafael", "Bianca", "Diego", "Juliana", "Thiago", "Fernanda", "Lucas", "Patrícia", "Bruno", "Camila", "Gustavo", "Larissa", "Felipe", "Renata", "Marcos", "Aline", "Vinícius", "Tatiane", "Eduardo"]
+const U_QUOTES := ["Gosto de música baixa.", "Pode ir pelo caminho mais rápido.", "Tenho pressa!", "Primeira vez no app.", "Sempre dou gorjeta.", "Prefiro motorista calado.", "Cuidado com as curvas, por favor.", "Vou com mala."]
+const MSG_WAITING := ["Já estou aqui.", "Ok, estou aguardando.", "blz mano, já tô aqui.", "pdp, tô aqui."]
+const MSG_COMING := ["certo, estou descendo!", "MDS, tô indo!", "blz, indo.", "blz, descendo.", "ok estou indo!", "indo."]
+var uber := {}          # pedido atual
+var uber_wait := 4.0    # tempo até o próximo pedido
+var uber_chat: Array = []
+
+func _uber_mult() -> float:
+	return clampf(1.0 + float(main.uber_pts) / 150.0, 0.6, 1.8)
+
+func _uber_new_request(vp: Vector3) -> void:
+	var pos := _far_sidewalk(vp, 60.0, 230.0)
+	var waiting := rng.randf() < 0.55
+	uber = {"name": U_NAMES[rng.randi() % U_NAMES.size()], "rating": snappedf(rng.randf_range(3.9, 5.0), 0.1), "rides": rng.randi_range(2, 340),
+		"quote": U_QUOTES[rng.randi() % U_QUOTES.size()], "pos": pos, "waiting": waiting, "ped": null, "state": "pickup",
+		"told": false, "come_t": -1.0, "msg_sent": false}
+	uber_chat = []
+	if waiting:
+		_uber_spawn_ped()
+	_set_obj(pos, Color(1, 0.9, 0.1), 3.0)
+	main.audio.play("click")
+	main.hud.banner("UBER: %s (★%.1f) · %d m" % [uber.name, uber.rating, int(vp.distance_to(pos))], Color(0.3, 1.0, 0.5), 3.0)
+	text = "Busque %s (amarelo) · abra o Uber no celular para mandar mensagem" % uber.name
+
+func _uber_spawn_ped() -> void:
+	var pos: Vector3 = uber.pos
+	var p := Ped.new()
+	main.add_child(p)
+	p.setup([pos, pos + Vector3(0.01, 0, 0), pos, pos], 0, rng)
+	p.speed = 0.0
+	p.mode = "clerk"
+	p.body.arm_pose = "wave"
+	uber.ped = p
+
+## mensagens do app
+func uber_msg(kind: String) -> void:
+	if uber.is_empty() or uber.state != "pickup":
+		return
+	var mine := "Estou a caminho, pode descer." if kind == "coming" else "Cheguei! Pode descer."
+	uber_chat.append(["eu", mine])
+	var reply := ""
+	if uber.waiting or (uber.ped != null and is_instance_valid(uber.ped)):
+		reply = MSG_WAITING[rng.randi() % MSG_WAITING.size()]
+	else:
+		reply = MSG_COMING[rng.randi() % MSG_COMING.size()]
+		if uber.come_t < 0.0:
+			uber.come_t = rng.randf_range(5.0, 10.0)      # demora um pouco para descer
+	uber_chat.append([uber.name, reply])
+	uber.msg_sent = true
+	main.get_tree().create_timer(1.2, true).timeout.connect(func():
+		main.audio.play("click")
+		main.hud.banner("%s: %s" % [uber.get("name", ""), reply], Color(0.85, 0.95, 1.0), 3.0))
+
+func uber_cancel() -> void:
+	if uber.is_empty():
+		return
+	if uber.ped != null and is_instance_valid(uber.ped):
+		uber.ped.queue_free()
+	_clear_obj()
+	uber = {}
+	uber_wait = rng.randf_range(2.0, 5.0)
+	main.uber_pts = maxi(-60, main.uber_pts - 1)
+	text = "Uber: procurando outra corrida..."
+
+func _uber_tick(dt: float, veh) -> void:
+	var vp: Vector3 = veh.global_position
+	if uber.is_empty():
+		uber_wait -= dt
+		text = "Uber: aguardando pedidos... (pontos %d)" % main.uber_pts
+		if uber_wait <= 0.0:
+			_uber_new_request(vp)
+		return
+	if uber.state == "pickup":
+		# passageiro que não estava esperando desce depois da mensagem
+		if uber.come_t >= 0.0:
+			uber.come_t -= dt
+			if uber.come_t < 0.0 and (uber.ped == null or not is_instance_valid(uber.ped)):
+				_uber_spawn_ped()
+				uber.come_t = -1.0
+		var p = uber.ped
+		var near: bool = Vector2(vp.x - uber.pos.x, vp.z - uber.pos.z).length() < 9.0
+		if near and (p == null or not is_instance_valid(p)) and uber.come_t < 0.0:
+			text = "Chegou! Mande mensagem pelo Uber (celular) para %s descer" % uber.name
+		if p != null and is_instance_valid(p) and p.down:
+			uber_cancel()
+			return
+		if p != null and is_instance_valid(p) and vp.distance_to(p.global_position) < 7.5 and veh.linear_velocity.length() < 2.0:
+			p.queue_free()
+			uber.ped = null
+			main.audio.play("door", vp)
+			var dest := _far_sidewalk(vp, 120.0, 360.0)
+			uber.dest = dest
+			uber.from = vp
+			uber.t = 0.0
+			uber.exp_t = vp.distance_to(dest) / 9.0 + 20.0
+			uber.hp0 = veh.get("hp") if veh.get("hp") != null else 100.0
+			uber.hits = 0
+			uber.crashes = 0
+			uber.last_hp = uber.hp0
+			uber.stars0 = main.wanted
+			uber.state = "ride"
+			_set_obj(dest, Color(0.2, 1.0, 0.3), 3.5)
+			text = "Leve %s ao destino (verde)" % uber.name
+		return
+	if uber.state == "ride":
+		uber.t += dt
+		var hpn: float = veh.get("hp") if veh.get("hp") != null else 100.0
+		if hpn < uber.last_hp - 1.5:
+			uber.crashes += 1
+		uber.last_hp = hpn
+		text = "Leve %s ao destino (verde) · %d s" % [uber.name, int(uber.t)]
+		if vp.distance_to(obj_pos) < 8.0 and veh.linear_velocity.length() < 2.0:
+			_uber_finish(veh)
+
+func _uber_finish(veh) -> void:
+	var score := 100.0
+	score -= uber.crashes * 12.0
+	score -= maxf(0.0, uber.hp0 - (veh.get("hp") if veh.get("hp") != null else 100.0)) * 0.6
+	score -= maxf(0.0, uber.t - uber.exp_t) * 1.2
+	if main.wanted > uber.stars0:
+		score -= 35.0
+	var icon := "angry"
+	var dpts := -10
+	if score >= 88.0:
+		icon = "star"
+		dpts = 8
+	elif score >= 65.0:
+		icon = "smile"
+		dpts = 5
+	elif score >= 40.0:
+		icon = "confused"
+		dpts = -4
+	main.uber_pts = clampi(main.uber_pts + dpts, -60, 300)
+	var pay := int((15.0 + uber.from.distance_to(uber.dest) * 0.22) * 0.85 * _uber_mult())
+	var tip := 0
+	if icon == "star":
+		tip = rng.randi_range(15, 110)
+	main.money += pay + tip
+	main.audio.play("cash")
+	main.hud.rating_icon = icon
+	main.hud.rating_t = 4.5
+	main.hud.banner("CORRIDA PAGA  +$%d%s" % [pay, ("  · gorjeta +$%d" % tip) if tip > 0 else ""], Color(1, 0.85, 0.1))
+	# passageiro desce na calçada
+	var p2 := Ped.new()
+	main.add_child(p2)
+	var loop: Array = main.city.walk_loops[0]
+	for l in main.city.walk_loops:
+		if l[0].distance_to(veh.global_position) < loop[0].distance_to(veh.global_position):
+			loop = l
+	p2.setup(loop, 0, rng)
+	p2.position = veh.global_position + veh.global_transform.basis.x * 2.2
+	main.peds.append(p2)
+	_clear_obj()
+	uber = {}
+	# avaliação ruim = menos pedidos (espera maior)
+	uber_wait = rng.randf_range(3.0, 7.0) if main.uber_pts >= 0 else rng.randf_range(10.0, 25.0)
+	main.ui.save_game()
+
 func _end_fare() -> void:
+	if not uber.is_empty():
+		if uber.get("ped") != null and is_instance_valid(uber.ped):
+			uber.ped.queue_free()
+		uber = {}
 	_clear_obj()
 	timer = -1.0
 	taxi_state = ""

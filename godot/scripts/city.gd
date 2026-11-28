@@ -656,6 +656,10 @@ func _props() -> void:
 					for gq in gang_hq.values():
 						if Vector2(p.x - gq.gate_out.x, p.z - gq.gate_out.z).length() < 11.0:
 							gate_blocked = true
+					# nem na frente da porta das lojas (o poste tapava a entrada da oficina)
+					for si in _store_info.values():
+						if Vector2(p.x - si.door.x, p.z - si.door.z).length() < 9.0:
+							gate_blocked = true
 					if gate_blocked:
 						continue
 					# otimização: 1 poste por lado (no meio) e 1 árvore a cada 2 lados (antes 3 postes + 2 árvores)

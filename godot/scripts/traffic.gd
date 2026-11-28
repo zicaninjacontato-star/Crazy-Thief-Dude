@@ -207,6 +207,13 @@ func eject_rider_agent(a: Dictionary, dead: bool) -> void:
 	var c = a.car
 	var h: Node3D = a.drv
 	var pos: Vector3 = h.global_position if is_instance_valid(h) else c.global_position
+	# moto da polícia: o policial cai, levanta e reage (só quando foi o jogador)
+	if c.get("police") == true and not dead and main.player.global_position.distance_to(c.global_position) < 12.0:
+		main.police.angry_cop(pos, c.linear_velocity + Vector3(0, 2.5, 0))
+		if is_instance_valid(h):
+			h.queue_free()
+		c.fall_over()
+		return
 	var Ped := preload("res://scripts/ped.gd")
 	var p = Ped.new()
 	main.add_child(p)
@@ -372,15 +379,18 @@ func _drive(a: Dictionary, dt: float) -> void:
 			lane_k = -1.0
 		var lane_pt: Vector3 = center + _off(d) * lane_k - dir * along
 		carrot = lane_pt + dir * minf(9.0, maxf(along - 4.0, 2.0))
+		var big: bool = c.body_size.z > 6.0
+		# semáforo: começa a frear com antecedência (distância de frenagem ~3,5 m/s²) e para na linha
+		var stop_d := along - 11.0
+		var red: bool = not green(axis) and stop_d > -0.5 and not (yellow(axis) and stop_d < 6.0)
+		if red and along < 40.0:
+			vt = minf(vt, sqrt(2.0 * 3.5 * maxf(0.0, stop_d - 0.5)))
+			if stop_d < 1.0:
+				vt = 0.0
 		if along < 13.0:
 			if a.nd == Vector2i.ZERO:
 				a.nd = _choose(a)
-			# semáforo: para na linha (antes da faixa de pedestres)
-			var stop_d := along - 11.0
-			if not green(axis) and stop_d > -0.5:
-				if not (yellow(axis) and stop_d < 4.0):
-					vt = minf(vt, maxf(0.0, stop_d) * 0.7)
-			elif along < 9.5:
+			if not red and along < (11.5 if big else 9.5):
 				_begin_turn(a)
 		elif along < -2.0:
 			_begin_turn(a)
@@ -400,8 +410,9 @@ func _drive(a: Dictionary, dt: float) -> void:
 			a.st = "road"
 			return
 		carrot = a.wps[0]
-		vt = 6.0 if a.d != a.pd else a.vlim
-		if Vector2(carrot.x - pos.x, carrot.z - pos.z).length() < 3.2:
+		var bigv: bool = c.body_size.z > 6.0
+		vt = (4.5 if bigv else 6.0) if a.d != a.pd else a.vlim
+		if Vector2(carrot.x - pos.x, carrot.z - pos.z).length() < (4.5 if bigv else 3.2):
 			a.wps.pop_front()
 			if a.wps.is_empty():
 				a.st = "road"
@@ -416,10 +427,10 @@ func _drive(a: Dictionary, dt: float) -> void:
 	if lim < 0.6 and blk != null:
 		a.blk_t = a.get("blk_t", 0.0) + dt
 		# carro parado/abandonado na faixa: ultrapassa pela faixa oposta
-		var blk_stuck: bool = not is_agent(blk) or _agent_of(blk).get("blk_t", 0.0) > 3.0 or _agent_of(blk).get("mode", "") == "stop"
+		var blk_stuck: bool = not is_agent(blk) or _agent_of(blk).get("blk_t", 0.0) > 1.5 or _agent_of(blk).get("mode", "") == "stop" or blk.get("dead") == true
 		if blk == main.player.vehicle and a.blk_t > 1.5 and fmod(a.blk_t, 2.5) < dt:
 			main.audio.play("horn", pos, -4.0)
-		if a.st == "road" and along > 7.0 and blk_stuck and a.blk_t > 2.5 and blk.linear_velocity.length() < 0.5:
+		if a.st == "road" and along > 7.0 and blk_stuck and a.blk_t > 1.2 and blk.linear_velocity.length() < 0.5:
 			a.blk_t = 0.0
 			a.ovt = 4.0
 			a.ign = blk
@@ -467,8 +478,10 @@ func _begin_turn(a: Dictionary) -> void:
 		wps.append(c + _off(d) + _d3(d) * 3.0)
 		wps.append(c + _off(nd) - _d3(nd) * 2.0)
 	else:
-		var a0 := c + _off(d) - _d3(d) * 7.0
-		var a2 := c + _off(nd) + _d3(nd) * 8.0
+		# ônibus/caminhão: curva mais aberta (antes cortavam a esquina e batiam nos prédios)
+		var big: bool = a.car.body_size.z > 6.0
+		var a0 := c + _off(d) - _d3(d) * (9.0 if big else 7.0)
+		var a2 := c + _off(nd) + _d3(nd) * (11.0 if big else 8.0)
 		var corner := c + _off(d) + _off(nd)
 		for t in [0.35, 0.7, 1.0]:
 			var p := a0.lerp(corner, t).lerp(corner.lerp(a2, t), t)
@@ -617,9 +630,12 @@ func chase(c, goal: Vector3, lead_goal: Vector3, st: Dictionary, dt: float, vmax
 		var pts: Array = st.pts
 		if pts.size() > 0:
 			target = pts[0]
-			if Vector2(target.x - pos.x, target.z - pos.z).length() < 9.0 and pts.size() > 1:
-				pts.pop_front()
-				target = pts[0]
+			if Vector2(target.x - pos.x, target.z - pos.z).length() < 9.0:
+				if pts.size() > 1:
+					pts.pop_front()
+					target = pts[0]
+				else:
+					target = lead_goal       # chegou no último cruzamento: vai direto (antes ficava rodando nele)
 	var local: Vector3 = c.global_transform.affine_inverse() * target
 	var ang := atan2(local.x, local.z)
 	var fs: float = c.forward_speed()

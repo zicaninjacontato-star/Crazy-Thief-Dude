@@ -292,8 +292,13 @@ func _physics_process(dt: float) -> void:
 	# piloto pulou com a aeronave no ar: ela perde o controle, cai girando e explode no que bater
 	if kind in ["plane", "heli"] and not dead:
 		if driver == null and _had_driver and ai_mode == "" and npc_drv == null and global_position.y > 3.0:
-			_fall = true
-			_abandoned = true
+			# pousado (telhado, heliponto, chão): só sair não estraga nada
+			var q := PhysicsRayQueryParameters3D.create(global_position + Vector3(0, 0.5, 0), global_position + Vector3(0, -2.5, 0), 1)
+			q.exclude = [get_rid()]
+			var landed: bool = not get_world_3d().direct_space_state.intersect_ray(q).is_empty() and absf(velocity.y) < 3.0 and absf(v) < 6.0
+			if not landed:
+				_fall = true
+				_abandoned = true
 		_had_driver = driver != null
 	match kind:
 		"boat": _boat_phys(dt)

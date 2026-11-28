@@ -603,8 +603,9 @@ func _swim(speed: float, dt: float, th: Array, sh: Array, up: Array, fo: Array) 
 		for k in 2:
 			var sg := 1.0 if k == 0 else -1.0
 			var a := fmod(phase + k * PI, TAU)
-			up[k].rotation = Vector3(-a, 0, sg * 0.15)
-			fo[k].rotation.x = -0.25 - maxf(0.0, sin(a)) * 0.6
+			# braçada para FRENTE: o braço passa por cima da cabeça e puxa a água para trás
+			up[k].rotation = Vector3(a, 0, sg * 0.15)
+			fo[k].rotation.x = -0.25 - maxf(0.0, -sin(a)) * 0.6
 			th[k].rotation.x = sin(phase * 3.0 + k * PI) * 0.3
 			sh[k].rotation.x = 0.2 + maxf(0.0, sin(phase * 3.0 + k * PI)) * 0.35
 	else:
@@ -812,6 +813,7 @@ func ragdoll(impulse: Vector3, ignore: PhysicsBody3D = null, gore := false) -> A
 		var b: Node3D = bones[n]
 		var sp: Dictionary = spec[n]
 		var rb := RigidBody3D.new()
+		rb.continuous_cd = true         # queda alta não atravessa o chão
 		rb.mass = sp.mass
 		rb.linear_damp = 0.1
 		rb.angular_damp = 1.5

@@ -97,6 +97,7 @@ func knock(vel: Vector3, dmg: float) -> void:
 		return
 	knocked = 3.2
 	flee = 0.0
+	_fall_y = global_position.y       # se cair de um prédio durante a derrubada, a queda conta
 	body.rag_alive = true
 	body.ragdoll(vel + Vector3(0, 1.5, 0), null, false)
 	_rag = body.parts
@@ -106,10 +107,10 @@ func _get_up() -> void:
 	if body.parts.size() > 0 and is_instance_valid(body.parts[0]):
 		hips = body.parts[0].global_position
 	# caiu de um prédio: queda alta mata (acima de ~7 m)
-	if _fall_y > 0.0:
+	if _fall_y > -99.0:
 		var drop := _fall_y - hips.y
-		_fall_y = -1.0
-		if drop > 7.0:
+		_fall_y = -100.0
+		if drop > 7.0 or hp <= 0.0:
 			hit(null, Vector3(0, -6.0, 0), false)
 			get_tree().current_scene.audio.play("bones", hips, 0.0)
 			return
@@ -226,13 +227,12 @@ func _ground_tick(dt: float) -> bool:
 			mode = ""
 			body.arm_pose = ""
 		knock(fall_v, 0.0)
-		_fall_y = global_position.y
 		return true
 	if gap > 0.04:
 		global_position.y = r.position.y + 0.02
 	return false
 
-var _fall_y := -1.0
+var _fall_y := -100.0
 
 # ---------------------------------------------------------------- festa no terraço
 var roof := Rect2()          # área do terraço (correr sem cair)
@@ -524,6 +524,10 @@ func _ped_tick(dt: float) -> void:
 		return
 	if _ground_tick(dt):
 		return
+	if mode in ["party", "clerk", "cower", "call", "handsup"]:
+		_bump(dt)           # quem está parado também é empurrado/derrubado (antes o jogador atravessava)
+		if knocked > 0.0:
+			return
 	if mode != "" and stagger <= 0.0:
 		_mode_tick(dt)
 		return
@@ -603,6 +607,8 @@ func _bump(dt: float) -> void:
 	if pl == null or pl.vehicle != null or not pl.visible:
 		return
 	var rel: Vector3 = global_position - pl.global_position
+	if absf(rel.y) > 1.4:
+		return
 	rel.y = 0
 	var d := rel.length()
 	if d > 0.75 or d < 0.001:

@@ -105,6 +105,8 @@ var aim := false
 var jump_held := false
 var breath := -1.0
 var swim_mode := false
+var enter_held := false      # botão do carro ainda pressionado (segurar = roubar o ônibus)
+var passenger := false       # passageiro (Uber/ônibus): sem acelerar/ré
 var can_enter := false       # há veículo perto (mostra o botão do carro)
 var weapon_kind := "fist"
 var action_kind := ""        # enter / exit / buy / carry / drop / trunk
@@ -154,6 +156,9 @@ var map_extra: Array = []      # ruas fora da grade [a, b, largura, cor]
 var beach := Rect2(236.0, -464.0, 64.0, 928.0)
 var map_roadw := 14.0
 const R := 70.0
+var _vig: TextureRect
+var rating_icon := ""        # avaliação do Uber no canto: star / smile / confused / angry
+var rating_t := 0.0
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS     # o mapa em tela cheia funciona com o jogo pausado
@@ -162,6 +167,23 @@ func _ready() -> void:
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(root)
 	root.draw.connect(_draw_controls)
+	# vinheta escura da tela de morte
+	_vig = TextureRect.new()
+	var gt := GradientTexture2D.new()
+	gt.fill = GradientTexture2D.FILL_RADIAL
+	gt.fill_from = Vector2(0.5, 0.5)
+	gt.fill_to = Vector2(1.05, 1.05)
+	var gr := Gradient.new()
+	gr.set_color(0, Color(0, 0, 0, 0.15))
+	gr.set_color(1, Color(0, 0, 0, 0.92))
+	gt.gradient = gr
+	_vig.texture = gt
+	_vig.stretch_mode = TextureRect.STRETCH_SCALE
+	_vig.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_vig.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_vig.visible = false
+	root.add_child(_vig)
+	root.move_child(_vig, 0)
 	# minimapa numa camada própria, redesenhada ~12×/s (recortes de polígonos custavam todo quadro)
 	mm_ctrl = Control.new()
 	mm_ctrl.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -219,7 +241,7 @@ func _layout() -> void:
 	var b := 92.0
 	if can_enter or driving:
 		buttons["enter"] = Rect2(s.x - b - 24, s.y * 0.38, b, b)
-	if driving:
+	if driving and not passenger:
 		buttons["gas"] = Rect2(s.x - b - 24, s.y - b - 30, b, b * 1.15)
 		buttons["brake"] = Rect2(s.x - b * 2 - 44, s.y - b - 30, b, b * 1.15)
 		if bike:
@@ -244,10 +266,14 @@ func _layout() -> void:
 	buttons["weapon"] = Rect2(s.x - 170, 122, 150, 78)
 	if reload_avail and not driving:
 		buttons["reload"] = Rect2(s.x - 240, 128, 64, 64)
-	if shop_label != "" and (not driving or action_kind in ["tune", "fare_on", "fare_off", "mission", "race_menu"]):
+	if shop_label != "" and (not driving or action_kind in ["tune", "fare_on", "fare_off", "mission", "race_menu", "bus_sit", "bus_stand"]):
 		buttons["shop"] = Rect2(s.x - b - 24, s.y * 0.38 - b - 16, b, b)
 	buttons["cam"] = Rect2(236, 30, 64, 64)
 	buttons["phone"] = Rect2(310, 30, 64, 64)
+	# passageiro (ônibus/Uber): só descer, sentar/levantar, câmera e celular
+	if passenger:
+		for k in ["gas", "brake", "fire", "jump", "sprint", "aim", "weapon", "reload", "missile", "siren", "rob", "hostage"]:
+			buttons.erase(k)
 	# na oficina: nada de sair do carro/acelerar (o painel da oficina controla tudo)
 	if tuning:
 		for k in ["enter", "gas", "brake", "fire", "missile", "siren", "shop", "weapon", "phone"]:
@@ -336,6 +362,7 @@ func _release_all() -> void:
 func _press(k: String, on: bool) -> void:
 	match k:
 		"enter":
+			enter_held = on
 			if on: enter_pressed.emit()
 		"jump":
 			jump_held = on
@@ -371,6 +398,10 @@ func _draw_controls() -> void:
 	if map_full:
 		_draw_full_map()
 		return
+	if wasted != "":
+		return
+	if rating_t > 0.0:
+		_draw_rating()
 	_layout()
 	var s := root.get_viewport_rect().size
 	var c := _joy_center if _joy_id >= 0 else joy_home(s)
@@ -534,6 +565,14 @@ func _icon(kind: String, c: Vector2, r: float, col: Color) -> void:
 			root.draw_rect(Rect2(c + Vector2(-0.9, 0.0) * r, Vector2(1.8, 0.45) * r), col)
 			root.draw_rect(Rect2(c + Vector2(-0.9, -0.3) * r, Vector2(0.45, 0.3) * r), col)
 			root.draw_string(ThemeDB.fallback_font, c + Vector2(0.1, -0.25) * r, "z", HORIZONTAL_ALIGNMENT_LEFT, -1, int(r * 0.8), Color(0.7, 0.85, 1.0))
+		"a_bus_sit":   # cadeira
+			root.draw_rect(Rect2(c + Vector2(-0.5, 0.0) * r, Vector2(1.0, 0.18) * r), col)
+			root.draw_rect(Rect2(c + Vector2(0.32, -0.75) * r, Vector2(0.18, 0.93) * r), col)
+			root.draw_line(c + Vector2(-0.45, 0.18) * r, c + Vector2(-0.45, 0.75) * r, col, w * 1.3)
+			root.draw_line(c + Vector2(0.42, 0.18) * r, c + Vector2(0.42, 0.75) * r, col, w * 1.3)
+		"a_bus_stand": # seta para cima
+			root.draw_line(c + Vector2(0, 0.7) * r, c + Vector2(0, -0.5) * r, col, w * 1.8)
+			root.draw_colored_polygon(PackedVector2Array([c + Vector2(-0.45, -0.15) * r, c + Vector2(0.45, -0.15) * r, c + Vector2(0, -0.8) * r]), col)
 		"a_mission":   # play
 			root.draw_colored_polygon(PackedVector2Array([c + Vector2(-0.45, -0.7) * r, c + Vector2(0.75, 0.0) * r, c + Vector2(-0.45, 0.7) * r]), Color(0.4, 1, 0.4))
 		"a_race_menu": # bandeira quadriculada
@@ -613,14 +652,56 @@ func _car_icon(c: Vector2, r: float, col: Color, open_trunk: bool) -> void:
 	if open_trunk:
 		root.draw_line(c + Vector2(-0.95, -0.05) * r, c + Vector2(-1.3, -0.6) * r, Color(1, 0.85, 0.3), maxf(2.0, r * 0.12))
 
+func _draw_rating() -> void:
+	var s := root.get_viewport_rect().size
+	var c := Vector2(s.x * 0.5 + 230, s.y * 0.3)
+	var a := clampf(rating_t, 0.0, 1.0)
+	var r := 42.0
+	var cols := {"star": Color(1, 0.82, 0.15), "smile": Color(0.35, 0.85, 0.35), "confused": Color(0.95, 0.65, 0.2), "angry": Color(0.9, 0.2, 0.15)}
+	var col: Color = cols.get(rating_icon, Color.WHITE)
+	col.a = a
+	var dark := Color(0.08, 0.08, 0.08, a)
+	root.draw_circle(c, r + 4, Color(0, 0, 0, 0.5 * a))
+	if rating_icon == "star":
+		var pts := PackedVector2Array()
+		for k in 10:
+			var ang := -PI * 0.5 + k * PI / 5.0
+			var rr := r if k % 2 == 0 else r * 0.45
+			pts.append(c + Vector2(cos(ang), sin(ang)) * rr)
+		root.draw_colored_polygon(pts, col)
+	else:
+		root.draw_circle(c, r, col)
+		for sx in [-1.0, 1.0]:
+			root.draw_circle(c + Vector2(sx * r * 0.35, -r * 0.2), r * 0.1, dark)
+		match rating_icon:
+			"smile":
+				root.draw_arc(c + Vector2(0, r * 0.05), r * 0.45, 0.25, PI - 0.25, 12, dark, 4.0)
+			"confused":
+				root.draw_line(c + Vector2(-r * 0.4, r * 0.4), c + Vector2(r * 0.4, r * 0.25), dark, 4.0)
+			"angry":
+				root.draw_arc(c + Vector2(0, r * 0.6), r * 0.4, PI + 0.4, TAU - 0.4, 12, dark, 4.0)
+				for sx in [-1.0, 1.0]:
+					root.draw_line(c + Vector2(sx * r * 0.55, -r * 0.45), c + Vector2(sx * r * 0.15, -r * 0.3), dark, 4.0)
+	root.draw_string(ThemeDB.fallback_font, c + Vector2(-60, r + 26), {"star": "Excelente!", "smile": "Boa corrida", "confused": "Corrida ruim", "angry": "Péssima!"}.get(rating_icon, ""), HORIZONTAL_ALIGNMENT_CENTER, 120, 20, Color(1, 1, 1, a))
+
 func _process(_dt: float) -> void:
+	rating_t = maxf(0.0, rating_t - _dt)
 	_mm_t -= _dt
 	if _mm_t <= 0.0 and mm_ctrl:
 		_mm_t = 0.05
 		mm_ctrl.queue_redraw()
 	var s := root.get_viewport_rect().size
+	# morte/prisão: some o HUD inteiro, fica só a vinheta, o texto e o botão de renascer
+	var dying := wasted != ""
+	_vig.visible = dying
 	for ch in root.get_children():
-		ch.visible = not map_full
+		ch.visible = not map_full and (not dying or ch == big or ch == _vig) and (ch != _vig or dying)
+	if dying:
+		big.text = wasted
+		big.position = Vector2(s.x * 0.5 - 500, s.y * 0.38)
+		buttons.clear()
+		root.queue_redraw()
+		return
 	if map_full:
 		root.queue_redraw()
 		return

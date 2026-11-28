@@ -387,10 +387,38 @@ func open_uber() -> void:
 	if main.player.vehicle != null and m.active == "" and main.player.vehicle.get("kind") not in ["bus", "plane", "heli", "boat", "moto"] and main.player.vehicle.get("police") != true:
 		_app_btn(v, "TRABALHAR DE UBER", Color(0.12, 0.5, 0.25), func(): m.start_fares("uber"); close(), 58.0)
 	elif m.active == "uber":
-		_app_btn(v, "PARAR DE TRABALHAR", Color(0.55, 0.15, 0.15), func(): m._taxi_end(); close(), 58.0)
+		_label(v, "Pontos de Uber: %d  ·  valor das corridas ×%.2f" % [main.uber_pts, m._uber_mult()], 15, Color(0.6, 1.0, 0.6))
+		var u: Dictionary = m.uber
+		if u.is_empty():
+			_label(v, "Aguardando pedidos...", 18, Color(1, 1, 1))
+		else:
+			var d := int(main.player.global_position.distance_to(u.pos))
+			_label(v, "%s  ★%.1f  ·  %s" % [u.name, u.rating, ("a %d m" % d) if u.state == "pickup" else "a bordo"], 20, Color(1, 1, 1))
+			for line in m.uber_chat.slice(-4):
+				_label(v, "%s: %s" % [line[0], line[1]], 15, Color(0.75, 0.9, 1.0) if line[0] != "eu" else Color(0.85, 0.85, 0.85))
+			if u.state == "pickup":
+				_app_btn(v, "VER PERFIL", Color(0.15, 0.25, 0.45), func(): _uber_profile(), 48.0)
+				_app_btn(v, "A CAMINHO: PODE DESCER", Color(0.12, 0.45, 0.25), func(): m.uber_msg("coming"); open_uber(), 48.0)
+				var here: bool = d < 15
+				var b := _app_btn(v, "CHEGUEI: PODE DESCER", Color(0.12, 0.45, 0.25), func(): m.uber_msg("here"); open_uber(), 48.0)
+				b.disabled = not here
+				_app_btn(v, "CANCELAR E PEGAR OUTRA", Color(0.55, 0.35, 0.1), func(): m.uber_cancel(); open_uber(), 48.0)
+		_app_btn(v, "PARAR DE TRABALHAR", Color(0.55, 0.15, 0.15), func(): m._taxi_end(); close(), 52.0)
 	elif main.player.vehicle == null:
 		_label(v, "Para trabalhar de Uber, entre num carro.", 15, Color(0.6, 0.6, 0.65))
 	_app_btn(v, "VOLTAR", Color(0.2, 0.2, 0.22), open_home, 48.0)
+
+func _uber_profile() -> void:
+	var v := _frame("Passageiro")
+	var u: Dictionary = main.missions.uber
+	if u.is_empty():
+		open_uber()
+		return
+	_label(v, u.name, 30, Color(1, 1, 1))
+	_label(v, "★ %.1f  ·  %d viagens" % [u.rating, u.rides], 20, Color(1, 0.85, 0.3))
+	_label(v, "\"%s\"" % u.quote, 17, Color(0.8, 0.8, 0.85))
+	_label(v, "Esperando na calçada" if u.waiting else "Ainda não desceu (mande mensagem)", 16, Color(0.6, 1.0, 0.6) if u.waiting else Color(1.0, 0.75, 0.4))
+	_app_btn(v, "VOLTAR", Color(0.2, 0.2, 0.22), open_uber, 48.0)
 
 func _destinations() -> Array:
 	var c = main.city
